@@ -1,0 +1,61 @@
+﻿docker :  Container mhc-ticketing-keycloak-1 Running 
+At line:3 char:1
++ docker compose run --rm --no-deps backend python manage.py makemigrat ...
++ ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+    + CategoryInfo          : NotSpecified: ( Container mhc-...loak-1 Running :String) [], RemoteException
+    + FullyQualifiedErrorId : NativeCommandError
+ 
+ Container mhc-ticketing-clamav-1 Running 
+ Container mhc-ticketing-frontend-1 Running 
+ Container mhc-ticketing-postgres-1 Running 
+ Container mhc-ticketing-redis-1 Running 
+ Container mhc-ticketing-rabbitmq-1 Running 
+ Container mhc-ticketing-minio-1 Running 
+ Container mhc-ticketing-backend-run-69aaf07e80bb Creating 
+ Container mhc-ticketing-backend-run-69aaf07e80bb Created 
+Migrations for 'administration':
+  apps/administration/migrations/0001_initial.py
+    + Create model ConfigItem
+Migrations for 'audit':
+  apps/audit/migrations/0001_initial.py
+    + Create model AuditEvent
+Migrations for 'catalogue':
+  apps/catalogue/migrations/0001_initial.py
+    + Create model Service
+Migrations for 'contacts':
+  apps/contacts/migrations/0001_initial.py
+    + Create model Contact
+Migrations for 'files':
+  apps/files/migrations/0001_initial.py
+    + Create model Attachment
+Migrations for 'integrations':
+  apps/integrations/migrations/0001_initial.py
+    + Create model IntegrationEvent
+Migrations for 'notifications':
+  apps/notifications/migrations/0001_initial.py
+    + Create model Notification
+Migrations for 'organisations':
+  apps/organisations/migrations/0001_initial.py
+    + Create model Region
+    + Create model Office
+    + Create model ServiceLocation
+Migrations for 'reporting':
+  apps/reporting/migrations/0001_initial.py
+    + Create model Dashboard
+Migrations for 'sla':
+  apps/sla/migrations/0001_initial.py
+    + Create model SlaPolicy
+Migrations for 'tickets':
+  apps/tickets/migrations/0001_initial.py
+    + Create model Ticket
+Migrations for 'workflow':
+  apps/workflow/migrations/0001_initial.py
+    + Create model WorkflowDefinition
+Migrations for 'identity_access':
+  apps/identity_access/migrations/0001_initial.py
+    + Create model Role
+    + Create model User
+    + Create model AuditLogin
+    + Create model UserRole
+    + Create index identity_us_keycloa_74a194_idx on field(s) keycloak_subject of model user
+    ~ Alter unique_together for userrole (1 constraint(s))

@@ -1,0 +1,189 @@
+﻿docker :  Image mhc-ticketing-frontend Building 
+At line:3 char:1
++ docker compose up -d --build 2>&1 | Out-File -FilePath "C:\Users\sour ...
++ ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+    + CategoryInfo          : NotSpecified: ( Image mhc-ticketing-frontend Building :String) [], RemoteException
+    + FullyQualifiedErrorId : NativeCommandError
+ 
+ Image mhc-ticketing-backend Building 
+ Image mhc-ticketing-worker Building 
+ Image mhc-ticketing-beat Building 
+#1 [internal] load local bake definitions
+#1 reading from stdin 1.96kB done
+#1 DONE 0.0s
+
+#2 [beat internal] load build definition from Dockerfile
+#2 DONE 0.0s
+
+#3 [frontend internal] load build definition from Dockerfile
+#3 transferring dockerfile: 480B 0.0s done
+#3 DONE 0.1s
+
+#2 [backend internal] load build definition from Dockerfile
+#2 transferring dockerfile: 1.35kB 0.0s done
+#2 DONE 0.1s
+
+#4 [backend] resolve image config for docker-image://docker.io/docker/dockerfile:1.7
+#4 DONE 1.8s
+
+#5 [worker] docker-image://docker.io/docker/dockerfile:1.7@sha256:a57df69d0ea827fb7266491f2813635de6f17269be881f696fbfdf2d83dda33e
+#5 resolve docker.io/docker/dockerfile:1.7@sha256:a57df69d0ea827fb7266491f2813635de6f17269be881f696fbfdf2d83dda33e 0.1s done
+#5 resolve docker.io/docker/dockerfile:1.7@sha256:a57df69d0ea827fb7266491f2813635de6f17269be881f696fbfdf2d83dda33e 0.1s done
+#5 CACHED
+
+#6 [beat internal] load build definition from Dockerfile
+#6 transferring dockerfile: 1.35kB 0.0s done
+#6 DONE 0.2s
+
+#7 [worker internal] load build definition from Dockerfile
+#7 transferring dockerfile: 1.35kB 0.1s done
+#7 DONE 0.1s
+
+#8 [worker internal] load metadata for docker.io/library/python:3.12-slim
+#8 ...
+
+#9 [backend internal] load build definition from Dockerfile
+#9 transferring dockerfile: 1.35kB 0.0s done
+#9 DONE 0.2s
+
+#8 [beat internal] load metadata for docker.io/library/python:3.12-slim
+#8 ...
+
+#10 [frontend internal] load metadata for docker.io/library/node:22-alpine
+#10 DONE 1.0s
+
+#11 [frontend internal] load .dockerignore
+#11 transferring context: 2B done
+#11 DONE 0.0s
+
+#8 [beat internal] load metadata for docker.io/library/python:3.12-slim
+#8 DONE 1.1s
+
+#12 [frontend internal] load build context
+#12 transferring context: 771B 0.0s done
+#12 ...
+
+#13 [backend internal] load .dockerignore
+#13 transferring context: 2B 0.0s done
+#13 DONE 0.2s
+
+#14 [frontend 1/5] FROM docker.io/library/node:22-alpine@sha256:16e22a550f3863206a3f701448c45f7912c6896a62de43add43bb9c86130c3e2
+#14 resolve docker.io/library/node:22-alpine@sha256:16e22a550f3863206a3f701448c45f7912c6896a62de43add43bb9c86130c3e2 0.2s done
+#14 DONE 0.2s
+
+#15 [beat internal] load .dockerignore
+#15 transferring context: 2B 0.0s done
+#15 DONE 0.2s
+
+#12 [frontend internal] load build context
+#12 DONE 0.2s
+
+#16 [worker internal] load .dockerignore
+#16 transferring context: 2B 0.0s done
+#16 DONE 0.4s
+
+#17 [frontend 2/5] WORKDIR /app
+#17 CACHED
+
+#18 [frontend 3/5] COPY package.json ./
+#18 CACHED
+
+#19 [frontend 4/5] RUN npm install --no-audit --no-fund
+#19 ...
+
+#20 [worker internal] load build context
+#20 DONE 0.0s
+
+#21 [beat internal] load build context
+#21 DONE 0.0s
+
+#22 [backend internal] load build context
+#22 DONE 0.0s
+
+#23 [backend 1/7] FROM docker.io/library/python:3.12-slim@sha256:57cd7c3a7a273101a6485ba99423ee568157882804b1124b4dd04266317710de
+#23 resolve docker.io/library/python:3.12-slim@sha256:57cd7c3a7a273101a6485ba99423ee568157882804b1124b4dd04266317710de 0.2s done
+#23 resolve docker.io/library/python:3.12-slim@sha256:57cd7c3a7a273101a6485ba99423ee568157882804b1124b4dd04266317710de 0.2s done
+#23 CACHED
+
+#24 [beat 2/7] RUN apt-get update && apt-get install -y --no-install-recommends         build-essential         libpq-dev         libmagic1         libclamav-dev         clamav-daemon         clamav-freshclam         curl         netcat-openbsd     && rm -rf /var/lib/apt/lists/*
+#24 ...
+
+#21 [beat internal] load build context
+#21 transferring context: 7.69kB 0.2s done
+#21 DONE 0.3s
+
+#22 [backend internal] load build context
+#22 transferring context: 7.69kB 0.2s done
+#22 DONE 0.4s
+
+#20 [worker internal] load build context
+#20 transferring context: 7.69kB 0.2s done
+#20 DONE 0.4s
+
+#19 [frontend 4/5] RUN npm install --no-audit --no-fund
+#19 ...
+
+#24 [beat 2/7] RUN apt-get update && apt-get install -y --no-install-recommends         build-essential         libpq-dev         libmagic1         libclamav-dev         clamav-daemon         clamav-freshclam         curl         netcat-openbsd     && rm -rf /var/lib/apt/lists/*
+#24 1.511 Hit:1 http://deb.debian.org/debian trixie InRelease
+#24 1.632 Get:2 http://deb.debian.org/debian trixie-updates InRelease [47.3 kB]
+#24 1.959 Get:3 http://deb.debian.org/debian-security trixie-security InRelease [43.4 kB]
+#24 2.183 Get:4 http://deb.debian.org/debian trixie/main amd64 Packages [9673 kB]
+#24 ...
+
+#19 [frontend 4/5] RUN npm install --no-audit --no-fund
+#19 41.79 npm error code ERESOLVE
+#19 41.79 npm error ERESOLVE unable to resolve dependency tree
+#19 41.79 npm error
+#19 41.79 npm error While resolving: mhc-ticketing-frontend@0.1.0
+#19 41.79 npm error Found: eslint@9.39.5
+#19 41.79 npm error node_modules/eslint
+#19 41.79 npm error   dev eslint@"^9.11.1" from the root project
+#19 41.79 npm error
+#19 41.79 npm error Could not resolve dependency:
+#19 41.79 npm error peer eslint@"^3.0.0 || ^4.0.0 || ^5.0.0 || ^6.0.0 || ^7.0.0 || ^8.0.0-0" from eslint-plugin-react-hooks@4.6.2
+#19 41.79 npm error node_modules/eslint-plugin-react-hooks
+#19 41.79 npm error   dev eslint-plugin-react-hooks@"^4.6.2" from the root project
+#19 41.79 npm error
+#19 41.79 npm error Fix the upstream dependency conflict, or retry
+#19 41.79 npm error this command with --force or --legacy-peer-deps
+#19 41.79 npm error to accept an incorrect (and potentially broken) dependency resolution.
+#19 41.79 npm error
+#19 41.79 npm error
+#19 41.79 npm error For a full report see:
+#19 41.79 npm error /root/.npm/_logs/2026-07-18T23_36_37_580Z-eresolve-report.txt
+#19 41.81 npm notice
+#19 41.81 npm notice New major version of npm available! 10.9.8 -> 12.0.1
+#19 41.81 npm notice Changelog: https://github.com/npm/cli/releases/tag/v12.0.1
+#19 41.81 npm notice To update run: npm install -g npm@12.0.1
+#19 41.81 npm notice
+#19 41.81 npm error A complete log of this run can be found in: /root/.npm/_logs/2026-07-18T23_36_37_580Z-debug-0.log
+#19 ERROR: process "/bin/sh -c npm install --no-audit --no-fund" did not complete successfully: exit code: 1
+
+#24 [beat 2/7] RUN apt-get update && apt-get install -y --no-install-recommends         build-essential         libpq-dev         libmagic1         libclamav-dev         clamav-daemon         clamav-freshclam         curl         netcat-openbsd     && rm -rf /var/lib/apt/lists/*
+#24 CANCELED
+
+#24 [backend 2/7] RUN apt-get update && apt-get install -y --no-install-recommends         build-essential         libpq-dev         libmagic1         libclamav-dev         clamav-daemon         clamav-freshclam         curl         netcat-openbsd     && rm -rf /var/lib/apt/lists/*
+#24 CANCELED
+
+#24 [beat 2/7] RUN apt-get update && apt-get install -y --no-install-recommends         build-essential         libpq-dev         libmagic1         libclamav-dev         clamav-daemon         clamav-freshclam         curl         netcat-openbsd     && rm -rf /var/lib/apt/lists/*
+#24 CANCELED
+------
+ > [frontend 4/5] RUN npm install --no-audit --no-fund:
+41.79 npm error
+41.79 npm error
+41.79 npm error For a full report see:
+41.79 npm error /root/.npm/_logs/2026-07-18T23_36_37_580Z-eresolve-report.txt
+41.81 npm notice
+41.81 npm notice New major version of npm available! 10.9.8 -> 12.0.1
+41.81 npm notice Changelog: https://github.com/npm/cli/releases/tag/v12.0.1
+41.81 npm notice To update run: npm install -g npm@12.0.1
+41.81 npm notice
+41.81 npm error A complete log of this run can be found in: /root/.npm/_logs/2026-07-18T23_36_37_580Z-debug-0.log
+------
+target frontend: failed to solve: process "/bin/sh -c npm install --no-audit --no-fund" did not complete successfully: 
+exit code: 1
+
+
+
+View build details: docker-desktop://dashboard/build/default/default/9qaiojajhmibteo117d7wvrg5
+

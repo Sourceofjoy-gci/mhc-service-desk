@@ -1,0 +1,82 @@
+﻿docker :  Image mhc-ticketing-backend Building 
+At line:2 char:1
++ docker compose build backend 2>&1 | Out-File -FilePath "C:\Users\sour ...
++ ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+    + CategoryInfo          : NotSpecified: ( Image mhc-ticketing-backend Building :String) [], RemoteException
+    + FullyQualifiedErrorId : NativeCommandError
+ 
+#1 [internal] load local bake definitions
+#1 reading from stdin 557B 0.0s done
+#1 DONE 0.0s
+
+#2 [internal] load build definition from Dockerfile
+#2 transferring dockerfile: 1.35kB 0.1s done
+#2 DONE 0.2s
+
+#3 resolve image config for docker-image://docker.io/docker/dockerfile:1.7
+#3 DONE 4.3s
+
+#4 docker-image://docker.io/docker/dockerfile:1.7@sha256:a57df69d0ea827fb7266491f2813635de6f17269be881f696fbfdf2d83dda33e
+#4 resolve docker.io/docker/dockerfile:1.7@sha256:a57df69d0ea827fb7266491f2813635de6f17269be881f696fbfdf2d83dda33e
+#4 resolve docker.io/docker/dockerfile:1.7@sha256:a57df69d0ea827fb7266491f2813635de6f17269be881f696fbfdf2d83dda33e 0.2s done
+#4 DONE 0.2s
+
+#4 docker-image://docker.io/docker/dockerfile:1.7@sha256:a57df69d0ea827fb7266491f2813635de6f17269be881f696fbfdf2d83dda33e
+#4 CACHED
+
+#5 [internal] load metadata for docker.io/library/python:3.12-slim
+#5 DONE 1.8s
+
+#6 [internal] load .dockerignore
+#6 transferring context: 2B 0.1s done
+#6 DONE 0.2s
+
+#7 [internal] load build context
+#7 DONE 0.0s
+
+#8 [1/7] FROM docker.io/library/python:3.12-slim@sha256:57cd7c3a7a273101a6485ba99423ee568157882804b1124b4dd04266317710de
+#8 resolve docker.io/library/python:3.12-slim@sha256:57cd7c3a7a273101a6485ba99423ee568157882804b1124b4dd04266317710de
+#8 resolve docker.io/library/python:3.12-slim@sha256:57cd7c3a7a273101a6485ba99423ee568157882804b1124b4dd04266317710de 0.3s done
+#8 DONE 0.4s
+
+#7 [internal] load build context
+#7 transferring context: 19.34kB 0.1s done
+#7 DONE 0.2s
+
+#9 [2/7] RUN apt-get update && apt-get install -y --no-install-recommends         build-essential         libpq-dev         libmagic1         libclamav-dev         clamav-daemon         clamav-freshclam         curl         netcat-openbsd     && rm -rf /var/lib/apt/lists/*
+#9 CACHED
+
+#10 [3/7] WORKDIR /app
+#10 CACHED
+
+#11 [4/7] COPY requirements/ ./requirements/
+#11 CACHED
+
+#12 [5/7] RUN pip install --upgrade pip &&     pip install -r requirements/base.txt
+#12 CACHED
+
+#13 [6/7] COPY . /app
+#13 DONE 0.5s
+
+#14 [7/7] RUN useradd --create-home --shell /bin/bash app && chown -R app:app /app
+#14 DONE 4.4s
+
+#15 exporting to image
+#15 exporting layers
+#15 exporting layers 0.9s done
+#15 exporting manifest sha256:ef569eb637295bfda914b395ffee083ba4d3cabc38baf009efb278d585424dc3
+#15 exporting manifest sha256:ef569eb637295bfda914b395ffee083ba4d3cabc38baf009efb278d585424dc3 0.1s done
+#15 exporting config sha256:0dfc0a9967073057d6fed3aa7b0f10a66c69188c5bd898580de434a04a74421d
+#15 exporting config sha256:0dfc0a9967073057d6fed3aa7b0f10a66c69188c5bd898580de434a04a74421d 0.1s done
+#15 exporting attestation manifest sha256:55bbe39c85a5f102e556c0f2afcebf167f67d8722890483a0b0b2155a545ffae
+#15 exporting attestation manifest sha256:55bbe39c85a5f102e556c0f2afcebf167f67d8722890483a0b0b2155a545ffae 0.2s done
+#15 exporting manifest list sha256:bedfa005e09b912e0672fad9ab9f83ce7326df1a8d787ccf67b4cdabdf578f5a
+#15 exporting manifest list sha256:bedfa005e09b912e0672fad9ab9f83ce7326df1a8d787ccf67b4cdabdf578f5a 0.1s done
+#15 naming to docker.io/library/mhc-ticketing-backend:latest 0.0s done
+#15 unpacking to docker.io/library/mhc-ticketing-backend:latest
+#15 unpacking to docker.io/library/mhc-ticketing-backend:latest 0.6s done
+#15 DONE 2.7s
+
+#16 resolving provenance for metadata file
+#16 DONE 0.2s
+ Image mhc-ticketing-backend Built 

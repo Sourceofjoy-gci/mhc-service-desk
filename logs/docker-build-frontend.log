@@ -1,0 +1,76 @@
+﻿docker :  Image mhc-ticketing-frontend Building 
+At line:1 char:143
++ ... rs\sourc\Downloads\ticket; docker compose build frontend 2>&1 | Out-F ...
++                                ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+    + CategoryInfo          : NotSpecified: ( Image mhc-ticketing-frontend Building :String) [], RemoteException
+    + FullyQualifiedErrorId : NativeCommandError
+ 
+#1 [internal] load local bake definitions
+#1 reading from stdin 1.01kB done
+#1 DONE 0.0s
+
+#2 [internal] load build definition from Dockerfile
+#2 transferring dockerfile: 499B 0.0s done
+#2 DONE 0.1s
+
+#3 resolve image config for docker-image://docker.io/docker/dockerfile:1.7
+#3 DONE 1.5s
+
+#4 docker-image://docker.io/docker/dockerfile:1.7@sha256:a57df69d0ea827fb7266491f2813635de6f17269be881f696fbfdf2d83dda33e
+#4 resolve docker.io/docker/dockerfile:1.7@sha256:a57df69d0ea827fb7266491f2813635de6f17269be881f696fbfdf2d83dda33e 0.1s done
+#4 CACHED
+
+#5 [internal] load metadata for docker.io/library/node:22-alpine
+#5 DONE 1.2s
+
+#6 [internal] load .dockerignore
+#6 transferring context: 2B 0.0s done
+#6 DONE 0.1s
+
+#7 [internal] load build context
+#7 transferring context: 1.24kB 0.1s done
+#7 DONE 0.2s
+
+#8 [1/5] FROM docker.io/library/node:22-alpine@sha256:16e22a550f3863206a3f701448c45f7912c6896a62de43add43bb9c86130c3e2
+#8 resolve docker.io/library/node:22-alpine@sha256:16e22a550f3863206a3f701448c45f7912c6896a62de43add43bb9c86130c3e2
+#8 resolve docker.io/library/node:22-alpine@sha256:16e22a550f3863206a3f701448c45f7912c6896a62de43add43bb9c86130c3e2 0.2s done
+#8 DONE 0.2s
+
+#9 [2/5] WORKDIR /app
+#9 CACHED
+
+#10 [3/5] COPY package.json ./
+#10 CACHED
+
+#11 [4/5] RUN npm install --no-audit --no-fund --legacy-peer-deps
+#11 114.5 
+#11 114.5 added 422 packages in 2m
+#11 114.5 npm notice
+#11 114.5 npm notice New major version of npm available! 10.9.8 -> 12.0.1
+#11 114.5 npm notice Changelog: https://github.com/npm/cli/releases/tag/v12.0.1
+#11 114.5 npm notice To update run: npm install -g npm@12.0.1
+#11 114.5 npm notice
+#11 DONE 115.7s
+
+#12 [5/5] COPY . .
+#12 DONE 0.5s
+
+#13 exporting to image
+#13 exporting layers
+#13 exporting layers 24.4s done
+#13 exporting manifest sha256:40de9db796b815494ba44d0b5f35676aab0759d3d1adf7c67d240f347fb7df29 0.2s done
+#13 exporting config sha256:9edc51d2d37d21a882a5fa5df870a5a7fecd4dd4af65a503455020b5a93e7ac3
+#13 exporting config sha256:9edc51d2d37d21a882a5fa5df870a5a7fecd4dd4af65a503455020b5a93e7ac3 0.1s done
+#13 exporting attestation manifest sha256:4b4bc8f3f24be23cee207cfe8da27fe86d8b0ca397de3597ea826a870e5dc631
+#13 exporting attestation manifest sha256:4b4bc8f3f24be23cee207cfe8da27fe86d8b0ca397de3597ea826a870e5dc631 0.3s done
+#13 exporting manifest list sha256:267ee19ec756e631e5c53e9f01dc0a2ac9552cf02b302d0bd7c28f4be0d20808
+#13 exporting manifest list sha256:267ee19ec756e631e5c53e9f01dc0a2ac9552cf02b302d0bd7c28f4be0d20808 0.2s done
+#13 naming to docker.io/library/mhc-ticketing-frontend:latest
+#13 naming to docker.io/library/mhc-ticketing-frontend:latest 0.0s done
+#13 unpacking to docker.io/library/mhc-ticketing-frontend:latest
+#13 unpacking to docker.io/library/mhc-ticketing-frontend:latest 18.4s done
+#13 DONE 43.9s
+
+#14 resolving provenance for metadata file
+#14 DONE 0.1s
+ Image mhc-ticketing-frontend Built 

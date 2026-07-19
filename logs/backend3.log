@@ -1,0 +1,20 @@
+﻿backend-1  |           ^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+backend-1  |   File "/usr/local/lib/python3.12/site-packages/django/core/management/commands/migrate.py", line 114, in handle
+backend-1  |     executor = MigrationExecutor(connection, self.migration_progress_callback)
+backend-1  |                ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+backend-1  |   File "/usr/local/lib/python3.12/site-packages/django/db/migrations/executor.py", line 18, in __init__
+backend-1  |     self.loader = MigrationLoader(self.connection)
+backend-1  |                   ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+backend-1  |   File "/usr/local/lib/python3.12/site-packages/django/db/migrations/loader.py", line 58, in __init__
+backend-1  |     self.build_graph()
+backend-1  |   File "/usr/local/lib/python3.12/site-packages/django/db/migrations/loader.py", line 250, in build_graph
+backend-1  |     self.add_external_dependencies(key, migration)
+backend-1  |   File "/usr/local/lib/python3.12/site-packages/django/db/migrations/loader.py", line 214, in add_external_dependencies
+backend-1  |     parent = self.check_key(parent, key[0])
+backend-1  |              ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+backend-1  |   File "/usr/local/lib/python3.12/site-packages/django/db/migrations/loader.py", line 194, in check_key
+backend-1  |     raise ValueError(
+backend-1  | ValueError: Dependency on app with no migrations: identity_access
+backend-1  | [backend] Waiting for database...
+backend-1  | [backend] database is ready
+backend-1  | [backend] Applying migrations...

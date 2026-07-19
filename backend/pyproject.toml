@@ -1,0 +1,32 @@
+[tool.pytest.ini_options]
+DJANGO_SETTINGS_MODULE = "config.settings"
+python_files = ["test_*.py", "*_test.py", "tests.py"]
+addopts = "-ra --strict-markers"
+testpaths = ["apps", "tests"]
+filterwarnings = [
+    "ignore::DeprecationWarning",
+]
+
+[tool.ruff]
+line-length = 100
+target-version = "py312"
+extend-exclude = ["migrations"]
+
+[tool.ruff.lint]
+select = ["E", "F", "I", "B", "UP", "N", "S", "ASYNC", "PT", "DJ"]
+ignore = [
+    "S101",  # use of assert detected — fine in tests
+    "S104",  # hard-coded bind — fine in dev compose
+]
+
+[tool.ruff.lint.per-file-ignores]
+"**/migrations/*.py" = ["E501", "F401"]
+"**/tests/*.py" = ["S105", "S106"]
+
+[tool.mypy]
+python_version = "3.12"
+plugins = ["mypy_django_plugin.main", "mypy_drf_plugin.main"]
+django_settings_module = "config.settings"
+strict = true
+ignore_missing_imports = true
+exclude = ["migrations", "tests"]

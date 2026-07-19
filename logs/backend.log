@@ -1,0 +1,50 @@
+﻿backend-1  | [backend] Applying migrations...
+backend-1  | Traceback (most recent call last):
+backend-1  |   File "/app/manage.py", line 20, in <module>
+backend-1  |     main()
+backend-1  |   File "/app/manage.py", line 16, in main
+backend-1  |     execute_from_command_line(sys.argv)
+backend-1  |   File "/usr/local/lib/python3.12/site-packages/django/core/management/__init__.py", line 442, in execute_from_command_line
+backend-1  |     utility.execute()
+backend-1  |   File "/usr/local/lib/python3.12/site-packages/django/core/management/__init__.py", line 416, in execute
+backend-1  |     django.setup()
+backend-1  |   File "/usr/local/lib/python3.12/site-packages/django/__init__.py", line 24, in setup
+backend-1  |     apps.populate(settings.INSTALLED_APPS)
+backend-1  |   File "/usr/local/lib/python3.12/site-packages/django/apps/registry.py", line 91, in populate
+backend-1  |     app_config = AppConfig.create(entry)
+backend-1  |                  ^^^^^^^^^^^^^^^^^^^^^^^
+backend-1  |   File "/usr/local/lib/python3.12/site-packages/django/apps/config.py", line 193, in create
+backend-1  |     import_module(entry)
+backend-1  |   File "/usr/local/lib/python3.12/importlib/__init__.py", line 90, in import_module
+backend-1  |     return _bootstrap._gcd_import(name[level:], package, level)
+backend-1  |            ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+backend-1  |   File "<frozen importlib._bootstrap>", line 1387, in _gcd_import
+backend-1  |   File "<frozen importlib._bootstrap>", line 1360, in _find_and_load
+backend-1  |   File "<frozen importlib._bootstrap>", line 1324, in _find_and_load_unlocked
+backend-1  | ModuleNotFoundError: No module named 'rest_framework_simplejwt'
+backend-1  | [backend] Waiting for database...
+backend-1  | [backend] database is ready
+backend-1  | [backend] Applying migrations...
+backend-1  | Traceback (most recent call last):
+backend-1  |   File "/app/manage.py", line 20, in <module>
+backend-1  |     main()
+backend-1  |   File "/app/manage.py", line 16, in main
+backend-1  |     execute_from_command_line(sys.argv)
+backend-1  |   File "/usr/local/lib/python3.12/site-packages/django/core/management/__init__.py", line 442, in execute_from_command_line
+backend-1  |     utility.execute()
+backend-1  |   File "/usr/local/lib/python3.12/site-packages/django/core/management/__init__.py", line 416, in execute
+backend-1  |     django.setup()
+backend-1  |   File "/usr/local/lib/python3.12/site-packages/django/__init__.py", line 24, in setup
+backend-1  |     apps.populate(settings.INSTALLED_APPS)
+backend-1  |   File "/usr/local/lib/python3.12/site-packages/django/apps/registry.py", line 91, in populate
+backend-1  |     app_config = AppConfig.create(entry)
+backend-1  |                  ^^^^^^^^^^^^^^^^^^^^^^^
+backend-1  |   File "/usr/local/lib/python3.12/site-packages/django/apps/config.py", line 193, in create
+backend-1  |     import_module(entry)
+backend-1  |   File "/usr/local/lib/python3.12/importlib/__init__.py", line 90, in import_module
+backend-1  |     return _bootstrap._gcd_import(name[level:], package, level)
+backend-1  |            ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+backend-1  |   File "<frozen importlib._bootstrap>", line 1387, in _gcd_import
+backend-1  |   File "<frozen importlib._bootstrap>", line 1360, in _find_and_load
+backend-1  |   File "<frozen importlib._bootstrap>", line 1324, in _find_and_load_unlocked
+backend-1  | ModuleNotFoundError: No module named 'rest_framework_simplejwt'

@@ -1,0 +1,7 @@
+﻿docker : python: can't open file '/app/scripts/seed_dev.py': [Errno 2] No such file or directory
+At line:3 char:1
++ docker compose exec -T backend python /app/scripts/seed_dev.py 2>&1 | ...
++ ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+    + CategoryInfo          : NotSpecified: (python: can't o...le or directory:String) [], RemoteException
+    + FullyQualifiedErrorId : NativeCommandError
+ 

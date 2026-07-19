@@ -1,0 +1,136 @@
+{
+  "realm": "mhc",
+  "enabled": true,
+  "displayName": "MHC e-Ticketing",
+  "displayNameHtml": "<div class=\"kc-logo-text\"><span>MHC e-Ticketing</span></div>",
+  "accessTokenLifespan": 900,
+  "accessTokenLifespanForImplicitFlow": 900,
+  "ssoSessionIdleTimeout": 1800,
+  "ssoSessionMaxLifespan": 36000,
+  "sslRequired": "external",
+  "registrationAllowed": false,
+  "rememberMe": false,
+  "verifyEmail": false,
+  "loginWithEmailAllowed": true,
+  "duplicateEmailsAllowed": false,
+  "resetPasswordAllowed": false,
+  "editUsernameAllowed": false,
+  "bruteForceProtected": true,
+  "permanentLockout": false,
+  "maxFailureWaitSeconds": 900,
+  "minimumQuickLoginWaitSeconds": 60,
+  "waitIncrementSeconds": 60,
+  "quickLoginCheckMilliSeconds": 1000,
+  "maxDeltaTimeSeconds": 43200,
+  "failureFactor": 30,
+  "roles": {
+    "realm": [
+      { "name": "staff", "description": "Default staff role" },
+      { "name": "agent-operational", "description": "Frontline operational agent" },
+      { "name": "supervisor-operational", "description": "Operational supervisor" },
+      { "name": "agent-it", "description": "IT service desk agent" },
+      { "name": "lead-it", "description": "IT service desk lead" },
+      { "name": "admin", "description": "System administrator" },
+      { "name": "auditor", "description": "Read-only auditor / privacy / records" }
+    ]
+  },
+  "groups": [
+    {
+      "name": "ops-agents",
+      "path": "/ops-agents",
+      "realmRoles": ["staff", "agent-operational"]
+    },
+    {
+      "name": "ops-supervisors",
+      "path": "/ops-supervisors",
+      "realmRoles": ["staff", "supervisor-operational"]
+    },
+    {
+      "name": "it-agents",
+      "path": "/it-agents",
+      "realmRoles": ["staff", "agent-it"]
+    },
+    {
+      "name": "it-leads",
+      "path": "/it-leads",
+      "realmRoles": ["staff", "lead-it"]
+    },
+    {
+      "name": "system-admins",
+      "path": "/system-admins",
+      "realmRoles": ["staff", "admin"]
+    },
+    {
+      "name": "auditors",
+      "path": "/auditors",
+      "realmRoles": ["staff", "auditor"]
+    }
+  ],
+  "clients": [
+    {
+      "clientId": "mhc-frontend",
+      "enabled": true,
+      "publicClient": true,
+      "bearerOnly": false,
+      "standardFlowEnabled": true,
+      "implicitFlowEnabled": false,
+      "directAccessGrantsEnabled": true,
+      "rootUrl": "http://localhost:5173",
+      "baseUrl": "http://localhost:5173",
+      "redirectUris": ["http://localhost:5173/*"],
+      "webOrigins": ["+"],
+      "attributes": {
+        "pkce.code.challenge.method": "S256"
+      },
+      "defaultClientScopes": ["openid", "profile", "email", "groups"]
+    },
+    {
+      "clientId": "mhc-backend",
+      "enabled": true,
+      "bearerOnly": true,
+      "publicClient": false
+    }
+  ],
+  "clientScopes": [
+    {
+      "name": "groups",
+      "protocol": "openid-connect",
+      "attributes": { "include.in.token.claim": "true" },
+      "mappers": [
+        {
+          "name": "groups",
+          "protocolMapper": "oidc-group-membership-mapper",
+          "config": {
+            "full.path": "false",
+            "id.token.claim": "true",
+            "access.token.claim": "true",
+            "claim.name": "groups"
+          }
+        }
+      ]
+    }
+  ],
+  "protocolMappers": [
+    {
+      "name": "realm-roles",
+      "protocol": "openid-connect",
+      "protocolMapper": "oidc-usermodel-realm-role-mapper",
+      "config": {
+        "id.token.claim": "true",
+        "access.token.claim": "true",
+        "userinfo.token.claim": "true"
+      }
+    }
+  ],
+  "eventsEnabled": true,
+  "eventsListeners": ["jboss-logging"],
+  "adminEventsEnabled": true,
+  "adminEventsDetailsEnabled": true,
+  "internationalizationEnabled": true,
+  "supportedLocales": ["en"],
+  "defaultLocale": "en",
+  "browserSecurityHeaders": {
+    "contentSecurityPolicy": "frame-src 'self'; frame-ancestors 'self'; object-src 'none';",
+    "strictTransportSecurity": "max-age=31536000; includeSubDomains"
+  }
+}

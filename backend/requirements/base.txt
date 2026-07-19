@@ -1,0 +1,54 @@
+# Pinned runtime dependencies for the MHC e-Ticketing platform.
+# Versions chosen to align with PRD §24.1 and the July 2026 security baseline.
+
+# Web framework + API
+Django==5.2.4
+djangorestframework==3.15.2
+djangorestframework-simplejwt==5.3.1
+django-cors-headers==4.6.0
+django-environ==0.11.2
+
+# Database
+psycopg[binary]==3.2.3
+
+# Auth (OIDC) + JWT verification
+PyJWT[crypto]==2.9.0
+cryptography==43.0.3
+python-jose[cryptography]==3.3.0
+requests==2.32.3
+
+# Background jobs
+celery==5.4.0
+kombu==5.4.2
+amqp==5.2.0
+
+# Cache / locks
+redis==5.1.1
+django-redis==5.4.0
+
+# Storage
+boto3==1.35.45
+django-storages==1.14.4
+minio==7.2.9
+
+# Utilities
+pydantic==2.9.2
+pydantic-settings==2.6.0
+python-slugify==8.0.4
+phonenumberslite==8.13.52
+email-validator==2.2.0
+bleach==6.1.0
+markdown==3.7
+python-magic==0.4.27
+
+# Observability
+structlog==24.4.0
+prometheus-client==0.21.0
+django-prometheus==2.3.1
+opentelemetry-api==1.27.0
+opentelemetry-sdk==1.27.0
+opentelemetry-instrumentation-django==0.48b0
+opentelemetry-instrumentation-psycopg==0.48b0
+opentelemetry-instrumentation-celery==0.48b0
+opentelemetry-instrumentation-redis==0.48b0
+opentelemetry-exporter-otlp==1.27.0

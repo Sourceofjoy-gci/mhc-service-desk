@@ -1,0 +1,8 @@
+﻿docker : ERROR: Could not find a version that satisfies the requirement ruff==0.7.1 (from versions: none)
+At line:6 char:1
++ docker compose exec -T backend pip install -r /app/requirements/dev.t ...
++ ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+    + CategoryInfo          : NotSpecified: (ERROR: Could no...versions: none):String) [], RemoteException
+    + FullyQualifiedErrorId : NativeCommandError
+ 
+ERROR: No matching distribution found for ruff==0.7.1

@@ -1,0 +1,11 @@
+﻿SERVICE    STATUS                   PORTS
+backend    Up 6 minutes (healthy)   0.0.0.0:8000->8000/tcp, [::]:8000->8000/tcp
+beat       Up 11 minutes            8000/tcp
+clamav     Up 7 hours (healthy)     0.0.0.0:3310->3310/tcp, [::]:3310->3310/tcp
+frontend   Up 7 hours               0.0.0.0:5173->5173/tcp, [::]:5173->5173/tcp
+keycloak   Up 7 hours (healthy)     0.0.0.0:8080->8080/tcp, [::]:8080->8080/tcp
+minio      Up 7 hours (healthy)     0.0.0.0:9000-9001->9000-9001/tcp, [::]:9000-9001->9000-9001/tcp
+postgres   Up 7 hours (healthy)     0.0.0.0:5432->5432/tcp, [::]:5432->5432/tcp
+rabbitmq   Up 7 hours (healthy)     0.0.0.0:5672->5672/tcp, [::]:5672->5672/tcp, 0.0.0.0:15672->15672/tcp, [::]:15672->15672/tcp
+redis      Up 7 hours (healthy)     0.0.0.0:6379->6379/tcp, [::]:6379->6379/tcp
+worker     Up 11 minutes            8000/tcp

@@ -1,0 +1,129 @@
+"""OIDC JWT authentication for the MHC e-Ticketing backend.
+
+Tokens issued by Keycloak are verified against the realm's JWKS. The
+``sub`` claim is the source of truth for identity; the ``groups`` and
+``realm_access.roles`` claims drive authorisation.
+"""
+from __future__ import annotations
+
+import logging
+from typing import Any
+
+import requests
+from django.conf import settings
+from django.core.cache import cache
+from rest_framework import authentication, exceptions
+from rest_framework_simplejwt.tokens import AccessToken
+
+from .models import User
+
+logger = logging.getLogger(__name__)
+
+_JWKS_CACHE_KEY = "keycloak_jwks"
+_JWKS_TTL = 3600
+
+
+def _get_jwks() -> dict[str, Any]:
+    cached = cache.get(_JWKS_CACHE_KEY)
+    if cached:
+        return cached
+    url = settings.KEYCLOAK["VERIFICATION_KEYS_URL"]
+    r = requests.get(url, timeout=3)
+    r.raise_for_status()
+    data = r.json()
+    cache.set(_JWKS_CACHE_KEY, data, timeout=_JWKS_TTL)
+    return data
+
+
+def _select_key(jwks: dict[str, Any], kid: str) -> dict[str, Any] | None:
+    for key in jwks.get("keys", []):
+        if key.get("kid") == kid:
+            return key
+    return None
+
+
+class KeycloakJWTAuthentication(authentication.BaseAuthentication):
+    """Validates a Bearer access token issued by the Keycloak realm."""
+
+    keyword = "Bearer"
+
+    def authenticate(self, request):
+        header = request.META.get("HTTP_AUTHORIZATION", "")
+        if not header.startswith(f"{self.keyword} "):
+            return None
+        token = header.split(" ", 1)[1].strip()
+        try:
+            unverified = AccessToken(token, verify=False)
+        except Exception as exc:
+            raise exceptions.AuthenticationFailed(f"Malformed token: {exc}") from exc
+
+        unverified_header = _decode_unverified_header(token)
+        kid = unverified_header.get("kid")
+        if not kid:
+            raise exceptions.AuthenticationFailed("Token missing kid header")
+
+        jwks = _get_jwks()
+        key = _select_key(jwks, kid)
+        if not key:
+            # JWKS rotation — drop cache and retry once
+            cache.delete(_JWKS_CACHE_KEY)
+            jwks = _get_jwks()
+            key = _select_key(jwks, kid)
+        if not key:
+            raise exceptions.AuthenticationFailed("Unknown signing key")
+
+        try:
+            public_key = _build_public_key(key)
+        except Exception as exc:  # pragma: no cover - defensive
+            raise exceptions.AuthenticationFailed(f"Invalid signing key: {exc}") from exc
+
+        try:
+            payload = _verify_jwt(token, public_key, audience=settings.KEYCLOAK["AUDIENCE"])
+        except Exception as exc:
+            raise exceptions.AuthenticationFailed(f"Token verification failed: {exc}") from exc
+
+        sub = payload.get("sub")
+        if not sub:
+            raise exceptions.AuthenticationFailed("Token missing sub")
+
+        user, _ = User.objects.get_or_create(
+            keycloak_subject=sub,
+            defaults={
+                "username": payload.get("preferred_username", sub)[:150],
+                "email": payload.get("email", ""),
+                "display_name": payload.get("name", ""),
+                "mfa_enabled": bool(payload.get("acr") in ("mfa", "urn:mace:incommon:iap:silver")),
+            },
+        )
+        # Refresh display name / email opportunistically
+        new_email = payload.get("email", "")
+        if new_email and new_email != user.email:
+            user.email = new_email
+            user.save(update_fields=["email"])
+        return user, payload
+
+    def authenticate_header(self, request):
+        return f'{self.keyword} realm="{settings.KEYCLOAK["REALM"]}"'
+
+
+# --- helpers ----------------------------------------------------------------
+
+def _decode_unverified_header(token: str) -> dict[str, Any]:
+    import jwt
+    return jwt.get_unverified_header(token)
+
+
+def _build_public_key(jwk: dict[str, Any]):
+    from jwt.algorithms import RSAAlgorithm
+    return RSAAlgorithm.from_jwk(jwk)
+
+
+def _verify_jwt(token: str, public_key, audience: str) -> dict[str, Any]:
+    import jwt
+    return jwt.decode(
+        token,
+        key=public_key,
+        algorithms=["RS256"],
+        audience=audience,
+        options={"verify_aud": True, "verify_iat": True, "verify_exp": True},
+    )

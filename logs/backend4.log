@@ -1,0 +1,10 @@
+﻿backend-1  | Performing system checks...
+backend-1  | 
+backend-1  | System check identified no issues (0 silenced).
+backend-1  | July 19, 2026 - 08:55:35
+backend-1  | Django version 5.2.4, using settings 'config.settings'
+backend-1  | Starting development server at http://0.0.0.0:8000/
+backend-1  | Quit the server with CONTROL-C.
+backend-1  | 
+backend-1  | WARNING: This is a development server. Do not use it in a production setting. Use a production WSGI or ASGI server instead.
+backend-1  | For more information on production servers see: https://docs.djangoproject.com/en/5.2/howto/deployment/

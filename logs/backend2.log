@@ -1,0 +1,30 @@
+﻿backend-1  |     main()
+backend-1  |   File "/app/manage.py", line 16, in main
+backend-1  |     execute_from_command_line(sys.argv)
+backend-1  |   File "/usr/local/lib/python3.12/site-packages/django/core/management/__init__.py", line 442, in execute_from_command_line
+backend-1  |     utility.execute()
+backend-1  |   File "/usr/local/lib/python3.12/site-packages/django/core/management/__init__.py", line 416, in execute
+backend-1  |     django.setup()
+backend-1  |   File "/usr/local/lib/python3.12/site-packages/django/__init__.py", line 24, in setup
+backend-1  |     apps.populate(settings.INSTALLED_APPS)
+backend-1  |   File "/usr/local/lib/python3.12/site-packages/django/apps/registry.py", line 124, in populate
+backend-1  |     app_config.ready()
+backend-1  |   File "/usr/local/lib/python3.12/site-packages/django_prometheus/apps.py", line 22, in ready
+backend-1  |     SetupPrometheusExportsFromConfig()
+backend-1  |   File "/usr/local/lib/python3.12/site-packages/django_prometheus/exports.py", line 108, in SetupPrometheusExportsFromConfig
+backend-1  |     SetupPrometheusEndpointOnPort(port, addr)
+backend-1  |   File "/usr/local/lib/python3.12/site-packages/django_prometheus/exports.py", line 45, in SetupPrometheusEndpointOnPort
+backend-1  |     prometheus_client.start_http_server(port, addr=addr)
+backend-1  |   File "/usr/local/lib/python3.12/site-packages/prometheus_client/exposition.py", line 231, in start_wsgi_server
+backend-1  |     TmpServer.address_family, addr = _get_best_family(addr, port)
+backend-1  |                                      ^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+backend-1  |   File "/usr/local/lib/python3.12/site-packages/prometheus_client/exposition.py", line 169, in _get_best_family
+backend-1  |     infos = socket.getaddrinfo(address, port, type=socket.SOCK_STREAM, flags=socket.AI_PASSIVE)
+backend-1  |             ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+backend-1  |   File "/usr/local/lib/python3.12/socket.py", line 978, in getaddrinfo
+backend-1  |     for res in _socket.getaddrinfo(host, port, family, type, proto, flags):
+backend-1  |                ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+backend-1  | socket.gaierror: [Errno -2] Name or service not known
+backend-1  | [backend] Waiting for database...
+backend-1  | [backend] database is ready
+backend-1  | [backend] Applying migrations...
