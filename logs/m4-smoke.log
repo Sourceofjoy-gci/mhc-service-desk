@@ -1,0 +1,11 @@
+﻿OK   create call-channel ticket: HTTP 201
+     call ticket=OP-202607-000012
+OK   create walk-in ticket: HTTP 201
+     walk-in ticket=OP-202607-000013
+FAIL upload attachment: HTTP 500 — <!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta http-equiv="content-type" content="text/html; charset=utf-8">
+  <meta name="robots" content="NONE,NOARCHIVE">
+  <title>DataError
+          at /api/v1/ti

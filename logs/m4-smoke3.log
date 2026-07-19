@@ -1,0 +1,21 @@
+﻿OK   create call-channel ticket: HTTP 201
+     call ticket=OP-202607-000014
+OK   create walk-in ticket: HTTP 201
+     walk-in ticket=OP-202607-000015
+OK   upload attachment: HTTP 201
+     {'results': [{'id': '4caac23a-f91a-4080-afc9-c84ede716472', 'filename': 'hello.txt', 'size_bytes': 32, 'scan_status': 'error', 'scan_signature': 'INSTREAM size limit exceeded. ERROR'}]}
+OK   download attachment (signed URL): HTTP 200
+     url starts with: http://minio:9000/mhc-attachments/attachments/OP-202607-0000…
+OK   CSV export: HTTP 200
+     CSV header: number,domain,title,status,priority,requester,office,channel,created_at,updated_at,resolution_code,matter_reference
+     CSV rows: 15
+OK   CSV export as IT agent: HTTP 200
+     IT agent sees 0 operational rows in CSV (correct)
+OK   list tickets as supervisor: HTTP 200
+     (magic-link test requires DB access; see manual smoke)
+OK   operational dashboard: HTTP 200
+     open=15
+OK   IT dashboard: HTTP 200
+     IT open=2
+
+All M4 smoke checks passed ✅

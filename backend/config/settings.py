@@ -206,6 +206,10 @@ AWS_S3_PUBLIC_URL = env("MINIO_PUBLIC_URL", default="http://localhost:9000")
 AWS_S3_ADDRESSING_STYLE = "path"
 AWS_S3_SIGNATURE_VERSION = "s3v4"
 AWS_S3_REGION_NAME = "eswatini-1"
+AWS_ACCESS_KEY_ID = env("MINIO_ROOT_USER", default="")
+AWS_SECRET_ACCESS_KEY = env("MINIO_ROOT_PASSWORD", default="")
+CLAMAV_HOST = env("CLAMAV_HOST", default="clamav")
+CLAMAV_PORT = env.int("CLAMAV_PORT", default=3310)
 AWS_QUERYSTRING_AUTH = True
 AWS_QUERYSTRING_EXPIRE = 60  # short-lived signed URLs (PRD FR-095)
 AWS_DEFAULT_ACL = None

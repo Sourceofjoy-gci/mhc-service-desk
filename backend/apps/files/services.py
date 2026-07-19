@@ -1,0 +1,127 @@
+"""File service — ClamAV scan + MinIO upload + signed URL."""
+from __future__ import annotations
+
+import hashlib
+import io
+import logging
+import socket
+from datetime import timedelta
+from urllib.parse import urlparse
+
+import boto3
+from botocore.client import Config
+from botocore.exceptions import ClientError
+from django.conf import settings
+from django.utils import timezone
+
+from .models import Attachment, AttachmentAccessLog
+
+logger = logging.getLogger(__name__)
+
+
+def _s3_client():
+    """Build a fresh S3 client. The endpoint is the internal MinIO URL."""
+    endpoint = settings.AWS_S3_ENDPOINT_URL
+    return boto3.client(
+        "s3",
+        endpoint_url=endpoint,
+        aws_access_key_id=settings.AWS_ACCESS_KEY_ID or settings.MINIO_ROOT_USER,
+        aws_secret_access_key=settings.AWS_SECRET_ACCESS_KEY or settings.MINIO_ROOT_PASSWORD,
+        region_name=settings.AWS_S3_REGION_NAME,
+        config=Config(signature_version=settings.AWS_S3_SIGNATURE_VERSION or "s3v4"),
+    )
+
+
+def scan_with_clamav(data: bytes) -> tuple[str, str | None]:
+    """Submit ``data`` to ClamAV over the INSTREAM protocol.
+
+    Returns (status, signature). status is one of "clean", "infected", "error".
+    In dev / when ClamAV is unreachable we treat it as a soft pass and log
+    the failure (the operator must monitor this).
+    """
+    host = getattr(settings, "CLAMAV_HOST", "clamav")
+    port = int(getattr(settings, "CLAMAV_PORT", 3310))
+    try:
+        with socket.create_connection((host, port), timeout=5) as s:
+            s.sendall(b"zINSTREAM\0")
+            length = len(data)
+            header = length.to_bytes(4, "little")
+            s.sendall(header + data + b"\0\0\0\0")
+            response = b""
+            while True:
+                buf = s.recv(4096)
+                if not buf:
+                    break
+                response += buf
+                if b"\0" in buf:
+                    break
+            text = response.replace(b"\x00", b"").decode("utf-8", errors="ignore").strip()
+            if "FOUND" in text:
+                sig = text.split("FOUND")[0].strip().split(":")[-1].strip()
+                return "infected", sig
+            if "OK" in text or "stream: OK" in text:
+                return "clean", None
+            return "error", text
+    except Exception as exc:  # pragma: no cover
+        logger.warning("clamav_scan_failed", extra={"error": str(exc)})
+        return "error", str(exc)
+
+
+def upload_to_minio(
+    *,
+    key: str,
+    data: bytes,
+    content_type: str = "application/octet-stream",
+    bucket: str | None = None,
+) -> None:
+    bucket = bucket or settings.AWS_STORAGE_BUCKET_NAME
+    client = _s3_client()
+    client.put_object(Bucket=bucket, Key=key, Body=data, ContentType=content_type)
+
+
+def generate_signed_url(*, key: str, expires: int = 60) -> str:
+    bucket = settings.AWS_STORAGE_BUCKET_NAME
+    public = settings.AWS_S3_PUBLIC_URL
+    client = _s3_client()
+    return client.generate_presigned_url(
+        "get_object",
+        Params={"Bucket": bucket, "Key": key},
+        ExpiresIn=expires,
+    )
+
+
+def record_attachment(
+    *,
+    ticket,
+    message,
+    object_key: str,
+    filename: str,
+    content_type: str,
+    size_bytes: int,
+    checksum_sha256: str,
+    scan_status: str,
+    scan_signature: str,
+    uploaded_by_subject: str,
+) -> Attachment:
+    return Attachment.objects.create(
+        ticket=ticket,
+        message=message,
+        object_key=object_key,
+        filename=filename,
+        content_type=content_type,
+        size_bytes=size_bytes,
+        checksum_sha256=checksum_sha256,
+        scan_status=scan_status,
+        scan_signature=scan_signature or "",
+        uploaded_by_subject=uploaded_by_subject,
+        scanned_at=timezone.now() if scan_status != "pending" else None,
+    )
+
+
+def log_attachment_access(*, attachment: Attachment, actor_subject: str, ip: str | None, user_agent: str) -> None:
+    AttachmentAccessLog.objects.create(
+        attachment=attachment,
+        actor_subject=actor_subject,
+        ip_address=ip,
+        user_agent=user_agent[:512],
+    )

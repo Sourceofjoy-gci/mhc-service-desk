@@ -144,6 +144,9 @@ class PublicIntakeSerializer(serializers.Serializer):
     """Public form intake (FR-002, FR-003, FR-005, FR-073).
 
     No authentication required. Rate-limited at the view layer.
+
+    ``channel`` lets the agent SPA pass the originating channel (call, walk_in,
+    web, email) when creating a ticket on behalf of a requester.
     """
 
     request_type_code = serializers.CharField()
@@ -156,6 +159,11 @@ class PublicIntakeSerializer(serializers.Serializer):
     requester_phone = serializers.CharField(required=False, allow_blank=True, max_length=32)
     matter_reference = serializers.CharField(required=False, allow_blank=True, max_length=128)
     consent = serializers.BooleanField()
+    channel = serializers.ChoiceField(
+        choices=["web", "call", "walk_in", "email"],
+        required=False,
+        default="web",
+    )
     attachments = serializers.ListField(
         child=serializers.FileField(), required=False, allow_empty=True, max_length=5
     )

@@ -6,6 +6,7 @@ import KanbanPage from "../features/tickets/KanbanPage";
 import TicketDetailPage from "../features/tickets/TicketDetailPage";
 import DashboardPage from "../features/reports/DashboardPage";
 import PublicFormPage from "../features/public/PublicFormPage";
+import ChannelIntakePage from "../features/tickets/ChannelIntakePage";
 import { clsx } from "clsx";
 
 const navItem = ({ isActive }: { isActive: boolean }) =>
@@ -32,6 +33,12 @@ export default function App() {
             <NavLink to="/dashboard" className={navItem}>
               Dashboard
             </NavLink>
+            <NavLink to="/intake/call" className={navItem}>
+              Call
+            </NavLink>
+            <NavLink to="/intake/walk-in" className={navItem}>
+              Walk-in
+            </NavLink>
             <NavLink to="/public" className={navItem}>
               Public form
             </NavLink>
@@ -53,6 +60,8 @@ export default function App() {
           <Route path="/tickets/:number" element={<TicketDetailPage />} />
           <Route path="/kanban" element={<KanbanPage />} />
           <Route path="/dashboard" element={<DashboardPage />} />
+          <Route path="/intake/call" element={<ChannelIntakePage channel="call" title="Call-centre capture" description="Capture a call-centre enquiry on behalf of a requester." />} />
+          <Route path="/intake/walk-in" element={<ChannelIntakePage channel="walk_in" title="Walk-in capture" description="Capture a walk-in visit and issue a ticket number." />} />
           <Route path="/public" element={<PublicFormPage />} />
           <Route path="/health" element={<HealthPage />} />
           <Route path="/login" element={<LoginPage />} />
@@ -78,6 +87,7 @@ function HomePage() {
       <ul className="ml-5 list-disc text-ink-700">
         <li>Open the <Link to="/tickets">queue</Link> to see and triage work</li>
         <li>Use the <Link to="/kanban">Kanban</Link> for a visual board with drag-and-drop</li>
+        <li>Capture a <Link to="/intake/call">call</Link> or <Link to="/intake/walk-in">walk-in</Link></li>
         <li>Try the <Link to="/public">public form</Link> as a requester would</li>
         <li>Inspect system <Link to="/health">health</Link> at any time</li>
       </ul>

@@ -288,7 +288,7 @@ def public_intake(request):
         service=service,
         request_type=request_type,
         office=office,
-        channel="web",
+        channel=data.get("channel") or "web",
         matter_reference=data.get("matter_reference", ""),
         actor_subject="public-form",
         ip_address=ip,

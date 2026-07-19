@@ -1,8 +1,8 @@
-"""URL configuration for the files app."""
 from django.urls import path
 
 from . import views
 
 urlpatterns = [
-    path("files/", views.list_view, name="files-list"),
+    path("tickets/<str:ticket_number>/attachments/", views.upload, name="ticket-attachments"),
+    path("attachments/<uuid:attachment_id>/download/", views.download, name="attachment-download"),
 ]

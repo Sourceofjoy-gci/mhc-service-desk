@@ -53,3 +53,80 @@ class ContactViewSet(viewsets.ModelViewSet):
         if name:
             qs = qs | Contact.objects.filter(full_name__icontains=name)
         return Response({"results": ContactSerializer(qs.distinct()[:10], many=True).data})
+
+
+# --- Requester-facing magic-link endpoints (FR-071/073/075) -----------------
+
+import hashlib
+
+from rest_framework import status
+from rest_framework.decorators import api_view, permission_classes
+from rest_framework.permissions import AllowAny
+
+from apps.tickets.api import TicketMessageSerializer
+from apps.tickets.models import Ticket
+from apps.tickets.services import add_message
+
+from .models import VerificationToken
+
+
+def _hash(raw: str) -> str:
+    return hashlib.sha256(raw.encode()).hexdigest()
+
+
+@api_view(["GET"])
+@permission_classes([AllowAny])
+def requester_status(request, token: str):
+    """Public ticket status / history. Requires a valid token."""
+    h = _hash(token)
+    vt = VerificationToken.objects.filter(token_hash=h).first()
+    if not vt or not vt.is_valid():
+        return Response({"detail": "Link is invalid or has expired."}, status=status.HTTP_404_NOT_FOUND)
+    ticket = (
+        Ticket.objects.filter(requester=vt.contact)
+        .order_by("-created_at")
+        .first()
+    )
+    if ticket is None:
+        return Response({"detail": "Link is invalid or has expired."}, status=status.HTTP_404_NOT_FOUND)
+    safe_messages = [
+        m for m in ticket.messages.all() if m.direction in ("outbound", "inbound")
+    ]
+    return Response({
+        "ticket_number": ticket.number,
+        "title": ticket.title,
+        "status": ticket.status.public_label or ticket.status.name,
+        "domain": ticket.domain,
+        "priority": ticket.priority,
+        "created_at": ticket.created_at,
+        "updated_at": ticket.updated_at,
+        "messages": TicketMessageSerializer(safe_messages, many=True).data,
+    })
+
+
+@api_view(["POST"])
+@permission_classes([AllowAny])
+def requester_reply(request, token: str):
+    """Public reply from a verified requester (FR-075)."""
+    h = _hash(token)
+    vt = VerificationToken.objects.filter(token_hash=h).first()
+    if not vt or not vt.is_valid():
+        return Response({"detail": "Link is invalid or has expired."}, status=status.HTTP_404_NOT_FOUND)
+    body = (request.data or {}).get("body_text", "").strip()
+    if not body:
+        return Response({"detail": "body_text is required"}, status=status.HTTP_400_BAD_REQUEST)
+    ticket = (
+        Ticket.objects.filter(requester=vt.contact)
+        .order_by("-created_at")
+        .first()
+    )
+    if ticket is None:
+        return Response({"detail": "Link is invalid or has expired."}, status=status.HTTP_404_NOT_FOUND)
+    msg = add_message(
+        ticket=ticket,
+        direction="inbound",
+        author_subject=vt.contact.email or "requester",
+        author_label=vt.contact.full_name,
+        body_text=body,
+    )
+    return Response({"id": str(msg.id)}, status=status.HTTP_201_CREATED)

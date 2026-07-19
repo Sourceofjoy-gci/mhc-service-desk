@@ -2,6 +2,7 @@ import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { useState } from "react";
 import { useParams, Link } from "react-router-dom";
 import { ticketsApi, type TicketDetail } from "../../lib/api";
+import AttachmentUploader from "./AttachmentUploader";
 
 export default function TicketDetailPage() {
   const { number } = useParams<{ number: string }>();
@@ -160,6 +161,8 @@ export default function TicketDetailPage() {
               </div>
             </div>
           </div>
+
+          <AttachmentUploader ticketNumber={t.number} />
         </div>
 
         <aside className="space-y-4">

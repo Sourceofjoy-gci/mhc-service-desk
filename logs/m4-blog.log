@@ -1,0 +1,15 @@
+﻿backend-1  |     urlconf_module = import_module(urlconf_module)
+backend-1  |                      ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+backend-1  |   File "/usr/local/lib/python3.12/importlib/__init__.py", line 90, in import_module
+backend-1  |     return _bootstrap._gcd_import(name[level:], package, level)
+backend-1  |            ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+backend-1  |   File "<frozen importlib._bootstrap>", line 1387, in _gcd_import
+backend-1  |   File "<frozen importlib._bootstrap>", line 1360, in _find_and_load
+backend-1  |   File "<frozen importlib._bootstrap>", line 1331, in _find_and_load_unlocked
+backend-1  |   File "<frozen importlib._bootstrap>", line 935, in _load_unlocked
+backend-1  |   File "<frozen importlib._bootstrap_external>", line 999, in exec_module
+backend-1  |   File "<frozen importlib._bootstrap>", line 488, in _call_with_frames_removed
+backend-1  |   File "/app/apps/contacts/urls.py", line 7, in <module>
+backend-1  |     router.register(r"contacts", views.ContactViewSet, basename="contacts")
+backend-1  |                                  ^^^^^^^^^^^^^^^^^^^^
+backend-1  | AttributeError: module 'apps.contacts.views' has no attribute 'ContactViewSet'
