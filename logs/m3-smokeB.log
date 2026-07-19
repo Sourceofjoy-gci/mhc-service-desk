@@ -1,0 +1,25 @@
+﻿OK   create operational ticket: HTTP 201
+     parent=OP-202607-000009
+OK   create IT child from operational parent: HTTP 201
+     child=IT-202607-000006
+OK   fetch parent: HTTP 200
+     parent.status=waiting_it (correct)
+OK   IT child hidden from operational agent: HTTP 404
+OK   IT agent can see child: HTTP 200
+OK   child new -> triage: HTTP 200
+OK   child triage -> diagnosing: HTTP 200
+OK   child diagnosing -> in_progress: HTTP 200
+OK   child in_progress -> validation: HTTP 200
+OK   child validation -> resolved: HTTP 200
+OK   fetch parent after child resolved: HTTP 200
+     parent.status=in_progress (synced correctly)
+OK   email intake creates new ticket: HTTP 201
+     {'status': 'created', 'ticket_number': 'OP-202607-000010', 'domain': 'operational'}
+OK   duplicate email is ignored: HTTP 200
+     duplicate detection works
+OK   threaded reply attaches to existing ticket: HTTP 200
+     {'status': 'updated', 'ticket_number': 'OP-202607-000010', 'domain': 'operational'}
+OK   subject-token reply attaches to parent: HTTP 200
+     {'status': 'updated', 'ticket_number': 'OP-202607-000009', 'domain': 'operational'}
+
+All M3 smoke checks passed ✅

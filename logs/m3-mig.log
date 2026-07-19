@@ -1,0 +1,22 @@
+﻿docker :  Container mhc-ticketing-postgres-1 Running 
+At line:2 char:1
++ docker compose run --rm --no-deps backend python manage.py makemigrat ...
++ ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+    + CategoryInfo          : NotSpecified: ( Container mhc-...gres-1 Running :String) [], RemoteException
+    + FullyQualifiedErrorId : NativeCommandError
+ 
+ Container mhc-ticketing-minio-1 Running 
+ Container mhc-ticketing-backend-1 Running 
+ Container mhc-ticketing-worker-1 Running 
+ Container mhc-ticketing-beat-1 Running 
+ Container mhc-ticketing-redis-1 Running 
+ Container mhc-ticketing-rabbitmq-1 Running 
+ Container mhc-ticketing-keycloak-1 Running 
+ Container mhc-ticketing-clamav-1 Running 
+ Container mhc-ticketing-frontend-1 Running 
+ Container mhc-ticketing-backend-run-4fdb4175c97d Creating 
+ Container mhc-ticketing-backend-run-4fdb4175c97d Created 
+Migrations for 'email_channel':
+  apps/email_channel/migrations/0001_initial.py
+    + Create model Mailbox
+    + Create model EmailDelivery

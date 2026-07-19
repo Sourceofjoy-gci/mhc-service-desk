@@ -1,0 +1,7 @@
+﻿docker : grep: /app/apps/tickets/*.py: No such file or directory
+At line:1 char:107
++ ... ing]::UTF8; docker compose exec -T backend grep -n "TransitionHistory ...
++                 ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+    + CategoryInfo          : NotSpecified: (grep: /app/apps...le or directory:String) [], RemoteException
+    + FullyQualifiedErrorId : NativeCommandError
+ 

@@ -1,0 +1,50 @@
+﻿                     List of tables
+ Schema |              Name              | Type  | Owner 
+--------+--------------------------------+-------+-------
+ public | auditevent                     | table | mhc
+ public | auth_group                     | table | mhc
+ public | auth_group_permissions         | table | mhc
+ public | auth_permission                | table | mhc
+ public | catalogue_custom_field         | table | mhc
+ public | catalogue_request_type         | table | mhc
+ public | catalogue_service              | table | mhc
+ public | configitem                     | table | mhc
+ public | contact                        | table | mhc
+ public | contact_method                 | table | mhc
+ public | contact_organisation           | table | mhc
+ public | contact_verification_token     | table | mhc
+ public | dashboard                      | table | mhc
+ public | django_admin_log               | table | mhc
+ public | django_content_type            | table | mhc
+ public | django_migrations              | table | mhc
+ public | django_session                 | table | mhc
+ public | email_delivery                 | table | mhc
+ public | email_mailbox                  | table | mhc
+ public | file_attachment                | table | mhc
+ public | file_attachment_access         | table | mhc
+ public | identity_login_audit           | table | mhc
+ public | identity_role                  | table | mhc
+ public | identity_user                  | table | mhc
+ public | identity_user_groups           | table | mhc
+ public | identity_user_role             | table | mhc
+ public | identity_user_user_permissions | table | mhc
+ public | integrationevent               | table | mhc
+ public | notification                   | table | mhc
+ public | org_office                     | table | mhc
+ public | org_region                     | table | mhc
+ public | org_service_location           | table | mhc
+ public | sla_calendar                   | table | mhc
+ public | sla_instance                   | table | mhc
+ public | sla_pause_history              | table | mhc
+ public | sla_policy                     | table | mhc
+ public | ticket                         | table | mhc
+ public | ticket_link                    | table | mhc
+ public | ticket_message                 | table | mhc
+ public | ticket_note                    | table | mhc
+ public | ticket_outbox                  | table | mhc
+ public | ticket_watcher                 | table | mhc
+ public | workflow_status                | table | mhc
+ public | workflow_transition            | table | mhc
+ public | workflow_transition_history    | table | mhc
+(45 rows)
+

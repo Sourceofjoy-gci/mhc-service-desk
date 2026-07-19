@@ -1,0 +1,10 @@
+﻿docker : {"ts": "2026-07-19T08:15:56.806913+00:00", "level": "INFO", "logger": "apps.tickets.services", "msg": 
+"ticket_created", "correlation_id": "OP-202607-000011"}
+At line:3 char:1
++ docker compose exec -T backend python /app/scripts/debug_email.py 2>& ...
++ ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+    + CategoryInfo          : NotSpecified: ({"ts": "2026-07...202607-000011"}:String) [], RemoteException
+    + FullyQualifiedErrorId : NativeCommandError
+ 
+result: {'status': 'created', 'ticket_number': 'OP-202607-000011', 'domain': 'operational'}
+msg.body_html_sanitized: '<p>Hi</p>alert(1)<a>link</a>'

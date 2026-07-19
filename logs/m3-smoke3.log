@@ -1,0 +1,9 @@
+﻿OK   create operational ticket: HTTP 201
+     parent=OP-202607-000004
+OK   create IT child from operational parent: HTTP 201
+     child=IT-202607-000001
+OK   fetch parent: HTTP 200
+     parent.status=waiting_it (correct)
+OK   IT child hidden from operational agent: HTTP 404
+OK   IT agent can see child: HTTP 200
+FAIL child triage -> diagnosing: HTTP 400 — {"detail":"No transition new -> diagnosing for it"}

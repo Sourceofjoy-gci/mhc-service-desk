@@ -1,0 +1,370 @@
+﻿...........EEE............                                               [100%]
+==================================== ERRORS ====================================
+____ ERROR at setup of test_create_it_child_records_link_and_parent_status _____
+
+self = <django.db.backends.utils.CursorWrapper object at 0x7f73440ae1e0>
+sql = 'INSERT INTO "workflow_status" ("id", "code", "name", "domain", "is_terminal", "is_initial", "order", "public_label") VALUES (%s, %s, %s, %s, %s, %s, %s, %s)'
+params = (UUID('f6a4bdda-31ab-4f5c-9984-c420274d011a'), 'new', 'New', 'operational', False, True, ...)
+ignored_wrapper_args = (False, {'connection': <DatabaseWrapper vendor='postgresql' alias='default'>, 'cursor': <django.db.backends.utils.CursorWrapper object at 0x7f73440ae1e0>})
+
+    def _execute(self, sql, params, *ignored_wrapper_args):
+        # Raise a warning during app initialization (stored_app_configs is only
+        # ever set during testing).
+        if not apps.ready and not apps.stored_app_configs:
+            warnings.warn(self.APPS_NOT_READY_WARNING_MSG, category=RuntimeWarning)
+        self.db.validate_no_broken_transaction()
+        with self.db.wrap_database_errors:
+            if params is None:
+                # params default might be backend specific.
+                return self.cursor.execute(sql)
+            else:
+>               return self.cursor.execute(sql, params)
+
+/usr/local/lib/python3.12/site-packages/django/db/backends/utils.py:105: 
+_ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ 
+
+self = <django.db.backends.postgresql.base.Cursor [closed] [INERROR] (host=postgres user=mhc database=test_mhc) at 0x7f734437be90>
+query = 'INSERT INTO "workflow_status" ("id", "code", "name", "domain", "is_terminal", "is_initial", "order", "public_label") VALUES (%s, %s, %s, %s, %s, %s, %s, %s)'
+params = (UUID('f6a4bdda-31ab-4f5c-9984-c420274d011a'), 'new', 'New', 'operational', False, True, ...)
+
+    def execute(
+        self,
+        query: Query,
+        params: Params | None = None,
+        *,
+        prepare: bool | None = None,
+        binary: bool | None = None,
+    ) -> Self:
+        """
+        Execute a query or command to the database.
+        """
+        try:
+            with self._conn.lock:
+                self._conn.wait(
+                    self._execute_gen(query, params, prepare=prepare, binary=binary)
+                )
+        except e._NO_TRACEBACK as ex:
+>           raise ex.with_traceback(None)
+E           psycopg.errors.UniqueViolation: duplicate key value violates unique constraint "uniq_status_domain_code"
+E           DETAIL:  Key (domain, code)=(operational, new) already exists.
+
+/usr/local/lib/python3.12/site-packages/psycopg/cursor.py:97: UniqueViolation
+
+The above exception was the direct cause of the following exception:
+
+basic_world = {'contact': <Contact: Tester>, 'gen_info': <Service: GEN-INFO — General info>, 'it_inc': <Service: IT-INC — IT incident>, 'office': <Office: TST-1 — Test Office>, ...}
+db = None
+
+    @pytest.fixture
+    def world(basic_world, db):
+        """basic_world already provides region/office/contact/ops/it services. Add
+        extra request types and the lightweight workflow needed by the IT child code."""
+>       seed_workflow_for_tests()
+
+apps/tickets/tests/test_it_child.py:21: 
+_ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ 
+apps/workflow/shortcuts.py:22: in seed_workflow_for_tests
+    sm[(domain, code)] = Status.objects.create(
+/usr/local/lib/python3.12/site-packages/django/db/models/manager.py:87: in manager_method
+    return getattr(self.get_queryset(), name)(*args, **kwargs)
+/usr/local/lib/python3.12/site-packages/django/db/models/query.py:663: in create
+    obj.save(force_insert=True, using=self.db)
+/usr/local/lib/python3.12/site-packages/django/db/models/base.py:902: in save
+    self.save_base(
+/usr/local/lib/python3.12/site-packages/django/db/models/base.py:1008: in save_base
+    updated = self._save_table(
+/usr/local/lib/python3.12/site-packages/django/db/models/base.py:1169: in _save_table
+    results = self._do_insert(
+/usr/local/lib/python3.12/site-packages/django/db/models/base.py:1210: in _do_insert
+    return manager._insert(
+/usr/local/lib/python3.12/site-packages/django/db/models/manager.py:87: in manager_method
+    return getattr(self.get_queryset(), name)(*args, **kwargs)
+/usr/local/lib/python3.12/site-packages/django/db/models/query.py:1868: in _insert
+    return query.get_compiler(using=using).execute_sql(returning_fields)
+/usr/local/lib/python3.12/site-packages/django/db/models/sql/compiler.py:1882: in execute_sql
+    cursor.execute(sql, params)
+/usr/local/lib/python3.12/site-packages/django/db/backends/utils.py:79: in execute
+    return self._execute_with_wrappers(
+/usr/local/lib/python3.12/site-packages/django/db/backends/utils.py:92: in _execute_with_wrappers
+    return executor(sql, params, many, context)
+/usr/local/lib/python3.12/site-packages/django/db/backends/utils.py:100: in _execute
+    with self.db.wrap_database_errors:
+/usr/local/lib/python3.12/site-packages/django/db/utils.py:91: in __exit__
+    raise dj_exc_value.with_traceback(traceback) from exc_value
+/usr/local/lib/python3.12/site-packages/django/db/backends/utils.py:105: in _execute
+    return self.cursor.execute(sql, params)
+_ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ 
+
+self = <django.db.backends.postgresql.base.Cursor [closed] [INERROR] (host=postgres user=mhc database=test_mhc) at 0x7f734437be90>
+query = 'INSERT INTO "workflow_status" ("id", "code", "name", "domain", "is_terminal", "is_initial", "order", "public_label") VALUES (%s, %s, %s, %s, %s, %s, %s, %s)'
+params = (UUID('f6a4bdda-31ab-4f5c-9984-c420274d011a'), 'new', 'New', 'operational', False, True, ...)
+
+    def execute(
+        self,
+        query: Query,
+        params: Params | None = None,
+        *,
+        prepare: bool | None = None,
+        binary: bool | None = None,
+    ) -> Self:
+        """
+        Execute a query or command to the database.
+        """
+        try:
+            with self._conn.lock:
+                self._conn.wait(
+                    self._execute_gen(query, params, prepare=prepare, binary=binary)
+                )
+        except e._NO_TRACEBACK as ex:
+>           raise ex.with_traceback(None)
+E           django.db.utils.IntegrityError: duplicate key value violates unique constraint "uniq_status_domain_code"
+E           DETAIL:  Key (domain, code)=(operational, new) already exists.
+
+/usr/local/lib/python3.12/site-packages/psycopg/cursor.py:97: IntegrityError
+___________ ERROR at setup of test_child_copies_only_approved_fields ___________
+
+self = <django.db.backends.utils.CursorWrapper object at 0x7f734409d610>
+sql = 'INSERT INTO "workflow_status" ("id", "code", "name", "domain", "is_terminal", "is_initial", "order", "public_label") VALUES (%s, %s, %s, %s, %s, %s, %s, %s)'
+params = (UUID('aa313dec-f250-4836-a5af-cce389ec936b'), 'new', 'New', 'operational', False, True, ...)
+ignored_wrapper_args = (False, {'connection': <DatabaseWrapper vendor='postgresql' alias='default'>, 'cursor': <django.db.backends.utils.CursorWrapper object at 0x7f734409d610>})
+
+    def _execute(self, sql, params, *ignored_wrapper_args):
+        # Raise a warning during app initialization (stored_app_configs is only
+        # ever set during testing).
+        if not apps.ready and not apps.stored_app_configs:
+            warnings.warn(self.APPS_NOT_READY_WARNING_MSG, category=RuntimeWarning)
+        self.db.validate_no_broken_transaction()
+        with self.db.wrap_database_errors:
+            if params is None:
+                # params default might be backend specific.
+                return self.cursor.execute(sql)
+            else:
+>               return self.cursor.execute(sql, params)
+
+/usr/local/lib/python3.12/site-packages/django/db/backends/utils.py:105: 
+_ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ 
+
+self = <django.db.backends.postgresql.base.Cursor [closed] [INERROR] (host=postgres user=mhc database=test_mhc) at 0x7f73442b3050>
+query = 'INSERT INTO "workflow_status" ("id", "code", "name", "domain", "is_terminal", "is_initial", "order", "public_label") VALUES (%s, %s, %s, %s, %s, %s, %s, %s)'
+params = (UUID('aa313dec-f250-4836-a5af-cce389ec936b'), 'new', 'New', 'operational', False, True, ...)
+
+    def execute(
+        self,
+        query: Query,
+        params: Params | None = None,
+        *,
+        prepare: bool | None = None,
+        binary: bool | None = None,
+    ) -> Self:
+        """
+        Execute a query or command to the database.
+        """
+        try:
+            with self._conn.lock:
+                self._conn.wait(
+                    self._execute_gen(query, params, prepare=prepare, binary=binary)
+                )
+        except e._NO_TRACEBACK as ex:
+>           raise ex.with_traceback(None)
+E           psycopg.errors.UniqueViolation: duplicate key value violates unique constraint "uniq_status_domain_code"
+E           DETAIL:  Key (domain, code)=(operational, new) already exists.
+
+/usr/local/lib/python3.12/site-packages/psycopg/cursor.py:97: UniqueViolation
+
+The above exception was the direct cause of the following exception:
+
+basic_world = {'contact': <Contact: Tester>, 'gen_info': <Service: GEN-INFO — General info>, 'it_inc': <Service: IT-INC — IT incident>, 'office': <Office: TST-1 — Test Office>, ...}
+db = None
+
+    @pytest.fixture
+    def world(basic_world, db):
+        """basic_world already provides region/office/contact/ops/it services. Add
+        extra request types and the lightweight workflow needed by the IT child code."""
+>       seed_workflow_for_tests()
+
+apps/tickets/tests/test_it_child.py:21: 
+_ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ 
+apps/workflow/shortcuts.py:22: in seed_workflow_for_tests
+    sm[(domain, code)] = Status.objects.create(
+/usr/local/lib/python3.12/site-packages/django/db/models/manager.py:87: in manager_method
+    return getattr(self.get_queryset(), name)(*args, **kwargs)
+/usr/local/lib/python3.12/site-packages/django/db/models/query.py:663: in create
+    obj.save(force_insert=True, using=self.db)
+/usr/local/lib/python3.12/site-packages/django/db/models/base.py:902: in save
+    self.save_base(
+/usr/local/lib/python3.12/site-packages/django/db/models/base.py:1008: in save_base
+    updated = self._save_table(
+/usr/local/lib/python3.12/site-packages/django/db/models/base.py:1169: in _save_table
+    results = self._do_insert(
+/usr/local/lib/python3.12/site-packages/django/db/models/base.py:1210: in _do_insert
+    return manager._insert(
+/usr/local/lib/python3.12/site-packages/django/db/models/manager.py:87: in manager_method
+    return getattr(self.get_queryset(), name)(*args, **kwargs)
+/usr/local/lib/python3.12/site-packages/django/db/models/query.py:1868: in _insert
+    return query.get_compiler(using=using).execute_sql(returning_fields)
+/usr/local/lib/python3.12/site-packages/django/db/models/sql/compiler.py:1882: in execute_sql
+    cursor.execute(sql, params)
+/usr/local/lib/python3.12/site-packages/django/db/backends/utils.py:79: in execute
+    return self._execute_with_wrappers(
+/usr/local/lib/python3.12/site-packages/django/db/backends/utils.py:92: in _execute_with_wrappers
+    return executor(sql, params, many, context)
+/usr/local/lib/python3.12/site-packages/django/db/backends/utils.py:100: in _execute
+    with self.db.wrap_database_errors:
+/usr/local/lib/python3.12/site-packages/django/db/utils.py:91: in __exit__
+    raise dj_exc_value.with_traceback(traceback) from exc_value
+/usr/local/lib/python3.12/site-packages/django/db/backends/utils.py:105: in _execute
+    return self.cursor.execute(sql, params)
+_ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ 
+
+self = <django.db.backends.postgresql.base.Cursor [closed] [INERROR] (host=postgres user=mhc database=test_mhc) at 0x7f73442b3050>
+query = 'INSERT INTO "workflow_status" ("id", "code", "name", "domain", "is_terminal", "is_initial", "order", "public_label") VALUES (%s, %s, %s, %s, %s, %s, %s, %s)'
+params = (UUID('aa313dec-f250-4836-a5af-cce389ec936b'), 'new', 'New', 'operational', False, True, ...)
+
+    def execute(
+        self,
+        query: Query,
+        params: Params | None = None,
+        *,
+        prepare: bool | None = None,
+        binary: bool | None = None,
+    ) -> Self:
+        """
+        Execute a query or command to the database.
+        """
+        try:
+            with self._conn.lock:
+                self._conn.wait(
+                    self._execute_gen(query, params, prepare=prepare, binary=binary)
+                )
+        except e._NO_TRACEBACK as ex:
+>           raise ex.with_traceback(None)
+E           django.db.utils.IntegrityError: duplicate key value violates unique constraint "uniq_status_domain_code"
+E           DETAIL:  Key (domain, code)=(operational, new) already exists.
+
+/usr/local/lib/python3.12/site-packages/psycopg/cursor.py:97: IntegrityError
+_____ ERROR at setup of test_child_resolution_syncs_parent_to_in_progress ______
+
+self = <django.db.backends.utils.CursorWrapper object at 0x7f734410dc40>
+sql = 'INSERT INTO "workflow_status" ("id", "code", "name", "domain", "is_terminal", "is_initial", "order", "public_label") VALUES (%s, %s, %s, %s, %s, %s, %s, %s)'
+params = (UUID('89baf41c-f5b9-459d-899c-5ea7fdd3100d'), 'new', 'New', 'operational', False, True, ...)
+ignored_wrapper_args = (False, {'connection': <DatabaseWrapper vendor='postgresql' alias='default'>, 'cursor': <django.db.backends.utils.CursorWrapper object at 0x7f734410dc40>})
+
+    def _execute(self, sql, params, *ignored_wrapper_args):
+        # Raise a warning during app initialization (stored_app_configs is only
+        # ever set during testing).
+        if not apps.ready and not apps.stored_app_configs:
+            warnings.warn(self.APPS_NOT_READY_WARNING_MSG, category=RuntimeWarning)
+        self.db.validate_no_broken_transaction()
+        with self.db.wrap_database_errors:
+            if params is None:
+                # params default might be backend specific.
+                return self.cursor.execute(sql)
+            else:
+>               return self.cursor.execute(sql, params)
+
+/usr/local/lib/python3.12/site-packages/django/db/backends/utils.py:105: 
+_ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ 
+
+self = <django.db.backends.postgresql.base.Cursor [closed] [INERROR] (host=postgres user=mhc database=test_mhc) at 0x7f734437be90>
+query = 'INSERT INTO "workflow_status" ("id", "code", "name", "domain", "is_terminal", "is_initial", "order", "public_label") VALUES (%s, %s, %s, %s, %s, %s, %s, %s)'
+params = (UUID('89baf41c-f5b9-459d-899c-5ea7fdd3100d'), 'new', 'New', 'operational', False, True, ...)
+
+    def execute(
+        self,
+        query: Query,
+        params: Params | None = None,
+        *,
+        prepare: bool | None = None,
+        binary: bool | None = None,
+    ) -> Self:
+        """
+        Execute a query or command to the database.
+        """
+        try:
+            with self._conn.lock:
+                self._conn.wait(
+                    self._execute_gen(query, params, prepare=prepare, binary=binary)
+                )
+        except e._NO_TRACEBACK as ex:
+>           raise ex.with_traceback(None)
+E           psycopg.errors.UniqueViolation: duplicate key value violates unique constraint "uniq_status_domain_code"
+E           DETAIL:  Key (domain, code)=(operational, new) already exists.
+
+/usr/local/lib/python3.12/site-packages/psycopg/cursor.py:97: UniqueViolation
+
+The above exception was the direct cause of the following exception:
+
+basic_world = {'contact': <Contact: Tester>, 'gen_info': <Service: GEN-INFO — General info>, 'it_inc': <Service: IT-INC — IT incident>, 'office': <Office: TST-1 — Test Office>, ...}
+db = None
+
+    @pytest.fixture
+    def world(basic_world, db):
+        """basic_world already provides region/office/contact/ops/it services. Add
+        extra request types and the lightweight workflow needed by the IT child code."""
+>       seed_workflow_for_tests()
+
+apps/tickets/tests/test_it_child.py:21: 
+_ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ 
+apps/workflow/shortcuts.py:22: in seed_workflow_for_tests
+    sm[(domain, code)] = Status.objects.create(
+/usr/local/lib/python3.12/site-packages/django/db/models/manager.py:87: in manager_method
+    return getattr(self.get_queryset(), name)(*args, **kwargs)
+/usr/local/lib/python3.12/site-packages/django/db/models/query.py:663: in create
+    obj.save(force_insert=True, using=self.db)
+/usr/local/lib/python3.12/site-packages/django/db/models/base.py:902: in save
+    self.save_base(
+/usr/local/lib/python3.12/site-packages/django/db/models/base.py:1008: in save_base
+    updated = self._save_table(
+/usr/local/lib/python3.12/site-packages/django/db/models/base.py:1169: in _save_table
+    results = self._do_insert(
+/usr/local/lib/python3.12/site-packages/django/db/models/base.py:1210: in _do_insert
+    return manager._insert(
+/usr/local/lib/python3.12/site-packages/django/db/models/manager.py:87: in manager_method
+    return getattr(self.get_queryset(), name)(*args, **kwargs)
+/usr/local/lib/python3.12/site-packages/django/db/models/query.py:1868: in _insert
+    return query.get_compiler(using=using).execute_sql(returning_fields)
+/usr/local/lib/python3.12/site-packages/django/db/models/sql/compiler.py:1882: in execute_sql
+    cursor.execute(sql, params)
+/usr/local/lib/python3.12/site-packages/django/db/backends/utils.py:79: in execute
+    return self._execute_with_wrappers(
+/usr/local/lib/python3.12/site-packages/django/db/backends/utils.py:92: in _execute_with_wrappers
+    return executor(sql, params, many, context)
+/usr/local/lib/python3.12/site-packages/django/db/backends/utils.py:100: in _execute
+    with self.db.wrap_database_errors:
+/usr/local/lib/python3.12/site-packages/django/db/utils.py:91: in __exit__
+    raise dj_exc_value.with_traceback(traceback) from exc_value
+/usr/local/lib/python3.12/site-packages/django/db/backends/utils.py:105: in _execute
+    return self.cursor.execute(sql, params)
+_ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ 
+
+self = <django.db.backends.postgresql.base.Cursor [closed] [INERROR] (host=postgres user=mhc database=test_mhc) at 0x7f734437be90>
+query = 'INSERT INTO "workflow_status" ("id", "code", "name", "domain", "is_terminal", "is_initial", "order", "public_label") VALUES (%s, %s, %s, %s, %s, %s, %s, %s)'
+params = (UUID('89baf41c-f5b9-459d-899c-5ea7fdd3100d'), 'new', 'New', 'operational', False, True, ...)
+
+    def execute(
+        self,
+        query: Query,
+        params: Params | None = None,
+        *,
+        prepare: bool | None = None,
+        binary: bool | None = None,
+    ) -> Self:
+        """
+        Execute a query or command to the database.
+        """
+        try:
+            with self._conn.lock:
+                self._conn.wait(
+                    self._execute_gen(query, params, prepare=prepare, binary=binary)
+                )
+        except e._NO_TRACEBACK as ex:
+>           raise ex.with_traceback(None)
+E           django.db.utils.IntegrityError: duplicate key value violates unique constraint "uniq_status_domain_code"
+E           DETAIL:  Key (domain, code)=(operational, new) already exists.
+
+/usr/local/lib/python3.12/site-packages/psycopg/cursor.py:97: IntegrityError
+=========================== short test summary info ============================
+ERROR apps/tickets/tests/test_it_child.py::test_create_it_child_records_link_and_parent_status
+ERROR apps/tickets/tests/test_it_child.py::test_child_copies_only_approved_fields
+ERROR apps/tickets/tests/test_it_child.py::test_child_resolution_syncs_parent_to_in_progress
+23 passed, 3 errors in 15.29s

@@ -51,6 +51,7 @@ def get_user_scopes(user) -> list[Scope]:
         ops-supervisors     -> operational
         it-agents           -> it
         it-leads            -> it
+        security-responders -> operational + it (restricted only)
         system-admins       -> admin
         auditors            -> audit (read-only across domains)
     """
@@ -70,6 +71,22 @@ def get_user_scopes(user) -> list[Scope]:
         scopes.append(Scope(domain="operational"))
         scopes.append(Scope(domain="it"))
     return scopes
+
+
+def can_view_restricted(user) -> bool:
+    """Restricted tickets (security, fraud, complaint) require a narrower
+    audience. Only supervisors, leads, security responders, admins and
+    auditors can see them (PRD §14.2, §23.1)."""
+    if not user or not user.is_authenticated:
+        return False
+    if user.is_superuser:
+        return True
+    groups = set(getattr(user, "_groups", []) or [])
+    privileged = {
+        "ops-supervisors", "lead-it", "security-responders",
+        "system-admins", "auditors",
+    }
+    return bool(groups & privileged)
 
 
 def attach_scopes(request):

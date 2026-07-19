@@ -1,0 +1,20 @@
+﻿backend-1  |     response = self.handle_exception(exc)
+backend-1  |                ^^^^^^^^^^^^^^^^^^^^^^^^^^
+backend-1  |   File "/usr/local/lib/python3.12/site-packages/rest_framework/views.py", line 469, in handle_exception
+backend-1  |     self.raise_uncaught_exception(exc)
+backend-1  |   File "/usr/local/lib/python3.12/site-packages/rest_framework/views.py", line 480, in raise_uncaught_exception
+backend-1  |     raise exc
+backend-1  |   File "/usr/local/lib/python3.12/site-packages/rest_framework/views.py", line 506, in dispatch
+backend-1  |     response = handler(request, *args, **kwargs)
+backend-1  |                ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+backend-1  |   File "/app/apps/tickets/views.py", line 185, in it_child
+backend-1  |     child = create_it_child_ticket(
+backend-1  |             ^^^^^^^^^^^^^^^^^^^^^^^
+backend-1  |   File "/usr/local/lib/python3.12/contextlib.py", line 81, in inner
+backend-1  |     return func(*args, **kwds)
+backend-1  |            ^^^^^^^^^^^^^^^^^^^
+backend-1  |   File "/app/apps/tickets/it_child.py", line 124, in create_it_child_ticket
+backend-1  |     from .models import TransitionHistory
+backend-1  | ImportError: cannot import name 'TransitionHistory' from 'apps.tickets.models' (/app/apps/tickets/models.py)
+backend-1  | {"ts": "2026-07-19T08:04:28.977189+00:00", "level": "ERROR", "logger": "django.request", "msg": "Internal Server Error: /api/v1/tickets/OP-202607-000003/it-child/", "exc": "Traceback (most recent call last):\n  File \"/usr/local/lib/python3.12/site-packages/django/core/handlers/exception.py\", line 55, in inner\n    response = get_response(request)\n               ^^^^^^^^^^^^^^^^^^^^^\n  File \"/usr/local/lib/python3.12/site-packages/django/core/handlers/base.py\", line 197, in _get_response\n    response = wrapped_callback(request, *callback_args, **callback_kwargs)\n               ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^\n  File \"/usr/local/lib/python3.12/site-packages/django/views/decorators/csrf.py\", line 65, in _view_wrapper\n    return view_func(request, *args, **kwargs)\n           ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^\n  File \"/usr/local/lib/python3.12/site-packages/rest_framework/viewsets.py\", line 124, in view\n    return self.dispatch(request, *args, **kwargs)\n           ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^\n  File \"/usr/local/lib/python3.12/site-packages/rest_framework/views.py\", line 509, in dispatch\n    response = self.handle_exception(exc)\n               ^^^^^^^^^^^^^^^^^^^^^^^^^^\n  File \"/usr/local/lib/python3.12/site-packages/rest_framework/views.py\", line 469, in handle_exception\n    self.raise_uncaught_exception(exc)\n  File \"/usr/local/lib/python3.12/site-packages/rest_framework/views.py\", line 480, in raise_uncaught_exception\n    raise exc\n  File \"/usr/local/lib/python3.12/site-packages/rest_framework/views.py\", line 506, in dispatch\n    response = handler(request, *args, **kwargs)\n               ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^\n  File \"/app/apps/tickets/views.py\", line 185, in it_child\n    child = create_it_child_ticket(\n            ^^^^^^^^^^^^^^^^^^^^^^^\n  File \"/usr/local/lib/python3.12/contextlib.py\", line 81, in inner\n    return func(*args, **kwds)\n           ^^^^^^^^^^^^^^^^^^^\n  File \"/app/apps/tickets/it_child.py\", line 124, in create_it_child_ticket\n    from .models import TransitionHistory\nImportError: cannot import name 'TransitionHistory' from 'apps.tickets.models' (/app/apps/tickets/models.py)"}
+backend-1  | [19/Jul/2026 10:04:28] "POST /api/v1/tickets/OP-202607-000003/it-child/ HTTP/1.1" 500 113102

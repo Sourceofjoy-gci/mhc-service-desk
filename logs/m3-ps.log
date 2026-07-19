@@ -1,0 +1,11 @@
+﻿SERVICE    STATUS
+backend    Up 26 seconds (healthy)
+beat       Up About an hour
+clamav     Up 8 hours (healthy)
+frontend   Up 28 minutes
+keycloak   Up 8 hours (healthy)
+minio      Up 8 hours (healthy)
+postgres   Up 8 hours (healthy)
+rabbitmq   Up 8 hours (healthy)
+redis      Up 8 hours (healthy)
+worker     Up About an hour

@@ -1,0 +1,9 @@
+﻿OK   create operational ticket: HTTP 201
+     parent=OP-202607-000003
+FAIL create IT child from operational parent: HTTP 500 — <!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta http-equiv="content-type" content="text/html; charset=utf-8">
+  <meta name="robots" content="NONE,NOARCHIVE">
+  <title>ImportError
+          at /api/v1/

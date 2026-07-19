@@ -1,0 +1,19 @@
+﻿OK   create operational ticket: HTTP 201
+     parent=OP-202607-000006
+OK   create IT child from operational parent: HTTP 201
+     child=IT-202607-000003
+OK   fetch parent: HTTP 200
+     parent.status=waiting_it (correct)
+OK   IT child hidden from operational agent: HTTP 404
+OK   IT agent can see child: HTTP 200
+OK   child new -> triage: HTTP 200
+OK   child triage -> diagnosing: HTTP 200
+OK   child diagnosing -> in_progress: HTTP 200
+OK   child in_progress -> validation: HTTP 200
+FAIL child validation -> resolved: HTTP 500 — <!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta http-equiv="content-type" content="text/html; charset=utf-8">
+  <meta name="robots" content="NONE,NOARCHIVE">
+  <title>ImportError
+          at /api/v1/

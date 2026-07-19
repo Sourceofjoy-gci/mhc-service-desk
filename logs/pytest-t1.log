@@ -1,0 +1,25 @@
+﻿F                                                                        [100%]
+=================================== FAILURES ===================================
+________________________ test_new_email_creates_ticket _________________________
+
+db = None
+
+    def test_new_email_creates_ticket(db):
+        Mailbox.objects.create(address="ops@mhc.local", domain="operational", is_active=True)
+        r = process_inbound_email(
+            from_header="Visitor <visitor@example.com>",
+            to_header="ops@mhc.local",
+            subject="Hello",
+            body_text="I need help.",
+            message_id="<m1@example.com>",
+        )
+>       assert r["status"] == "created"
+E       AssertionError: assert 'error' == 'created'
+E         
+E         - created
+E         + error
+
+apps/email_channel/tests/test_services.py:22: AssertionError
+=========================== short test summary info ============================
+FAILED apps/email_channel/tests/test_services.py::test_new_email_creates_ticket
+1 failed in 5.18s

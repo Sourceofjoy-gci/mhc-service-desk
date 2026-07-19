@@ -1,0 +1,155 @@
+﻿============================= test session starts ==============================
+platform linux -- Python 3.12.13, pytest-8.3.3, pluggy-1.6.0
+django: version: 5.2.4, settings: config.settings (from ini)
+rootdir: /app
+configfile: pyproject.toml
+plugins: anyio-4.14.2, django-4.9.0, cov-5.0.0, Faker-40.31.0
+collected 5 items
+
+apps/email_channel/tests/test_services.py FFFFF                          [100%]
+
+=================================== FAILURES ===================================
+________________________ test_new_email_creates_ticket _________________________
+
+db = None
+
+    def test_new_email_creates_ticket(db):
+        Mailbox.objects.create(address="ops@mhc.local", domain="operational", is_active=True)
+        r = process_inbound_email(
+            from_header="Visitor <visitor@example.com>",
+            to_header="ops@mhc.local",
+            subject="Hello",
+            body_text="I need help.",
+            message_id="<m1@example.com>",
+        )
+>       assert r["status"] == "created"
+E       AssertionError: assert 'error' == 'created'
+E         
+E         - created
+E         + error
+
+apps/email_channel/tests/test_services.py:22: AssertionError
+_________________ test_duplicate_message_id_returns_duplicate __________________
+
+db = None
+
+    def test_duplicate_message_id_returns_duplicate(db):
+        Mailbox.objects.create(address="ops@mhc.local", domain="operational", is_active=True)
+        r1 = process_inbound_email(
+            from_header="Visitor <visitor@example.com>",
+            to_header="ops@mhc.local",
+            subject="Hello",
+            body_text="I need help.",
+            message_id="<m-dup@example.com>",
+        )
+        r2 = process_inbound_email(
+            from_header="Visitor <visitor@example.com>",
+            to_header="ops@mhc.local",
+            subject="Hello",
+            body_text="I need help.",
+            message_id="<m-dup@example.com>",
+        )
+>       assert r1["status"] == "created"
+E       AssertionError: assert 'error' == 'created'
+E         
+E         - created
+E         + error
+
+apps/email_channel/tests/test_services.py:42: AssertionError
+_________________ test_in_reply_to_attaches_to_existing_ticket _________________
+
+db = None
+
+    def test_in_reply_to_attaches_to_existing_ticket(db):
+        Mailbox.objects.create(address="ops@mhc.local", domain="operational", is_active=True)
+        r1 = process_inbound_email(
+            from_header="Visitor <visitor@example.com>",
+            to_header="ops@mhc.local",
+            subject="Hello",
+            body_text="I need help.",
+            message_id="<thread-1@example.com>",
+        )
+>       ticket_number = r1["ticket_number"]
+E       KeyError: 'ticket_number'
+
+apps/email_channel/tests/test_services.py:55: KeyError
+__________________________ test_subject_token_attach ___________________________
+
+db = None
+
+    def test_subject_token_attach(db):
+        Mailbox.objects.create(address="ops@mhc.local", domain="operational", is_active=True)
+        r1 = process_inbound_email(
+            from_header="Visitor <visitor@example.com>",
+            to_header="ops@mhc.local",
+            subject="Hello",
+            body_text="First message.",
+            message_id="<tok-1@example.com>",
+        )
+>       token = r1["ticket_number"]
+E       KeyError: 'ticket_number'
+
+apps/email_channel/tests/test_services.py:77: KeyError
+____________________________ test_html_is_sanitised ____________________________
+
+db = None
+
+    def test_html_is_sanitised(db):
+        Mailbox.objects.create(address="ops@mhc.local", domain="operational", is_active=True)
+        process_inbound_email(
+            from_header="Visitor <visitor@example.com>",
+            to_header="ops@mhc.local",
+            subject="XSS test",
+            body_text="Click here",
+            body_html='<p>Hi</p><script>alert(1)</script><a href="javascript:doBad()">link</a>',
+            message_id="<xss@example.com>",
+        )
+>       msg = TicketMessage.objects.get(external_message_id="<xss@example.com>")
+
+apps/email_channel/tests/test_services.py:99: 
+_ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ 
+/usr/local/lib/python3.12/site-packages/django/db/models/manager.py:87: in manager_method
+    return getattr(self.get_queryset(), name)(*args, **kwargs)
+_ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ 
+
+self = <QuerySet []>, args = ()
+kwargs = {'external_message_id': '<xss@example.com>'}, clone = <QuerySet []>
+limit = 21, num = 0
+
+    def get(self, *args, **kwargs):
+        """
+        Perform the query and return a single object matching the given
+        keyword arguments.
+        """
+        if self.query.combinator and (args or kwargs):
+            raise NotSupportedError(
+                "Calling QuerySet.get(...) with filters after %s() is not "
+                "supported." % self.query.combinator
+            )
+        clone = self._chain() if self.query.combinator else self.filter(*args, **kwargs)
+        if self.query.can_filter() and not self.query.distinct_fields:
+            clone = clone.order_by()
+        limit = None
+        if (
+            not clone.query.select_for_update
+            or connections[clone.db].features.supports_select_for_update_with_limit
+        ):
+            limit = MAX_GET_RESULTS
+            clone.query.set_limits(high=limit)
+        num = len(clone)
+        if num == 1:
+            return clone._result_cache[0]
+        if not num:
+>           raise self.model.DoesNotExist(
+                "%s matching query does not exist." % self.model._meta.object_name
+            )
+E           apps.tickets.models.TicketMessage.DoesNotExist: TicketMessage matching query does not exist.
+
+/usr/local/lib/python3.12/site-packages/django/db/models/query.py:633: DoesNotExist
+=========================== short test summary info ============================
+FAILED apps/email_channel/tests/test_services.py::test_new_email_creates_ticket
+FAILED apps/email_channel/tests/test_services.py::test_duplicate_message_id_returns_duplicate
+FAILED apps/email_channel/tests/test_services.py::test_in_reply_to_attaches_to_existing_ticket
+FAILED apps/email_channel/tests/test_services.py::test_subject_token_attach
+FAILED apps/email_channel/tests/test_services.py::test_html_is_sanitised - ap...
+============================== 5 failed in 7.81s ===============================

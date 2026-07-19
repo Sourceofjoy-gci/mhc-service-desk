@@ -1,0 +1,7 @@
+﻿/app/apps/tickets/it_child.py:19:from apps.workflow.models import Status, TransitionHistory
+/app/apps/tickets/it_child.py:124:        TransitionHistory.objects.create(
+/app/apps/tickets/it_child.py:153:    from .models import TransitionHistory
+/app/apps/tickets/it_child.py:158:    TransitionHistory.objects.create(
+/app/apps/tickets/services.py:20:from apps.workflow.models import Status, Transition, TransitionHistory
+/app/apps/tickets/services.py:106:    TransitionHistory.objects.create(
+/app/apps/tickets/services.py:180:    TransitionHistory.objects.create(

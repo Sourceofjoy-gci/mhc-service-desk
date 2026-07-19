@@ -62,14 +62,20 @@ class TicketViewSet(viewsets.ModelViewSet):
         qs = super().get_queryset()
         scopes = self.request.user._scopes
         domain_filter = Q()
-        for s in scopes:
-            if s.domain == "admin" or s.domain == "audit":
-                # admin sees everything; auditor sees both domains
-                return qs.order_by("-created_at", "id")
-            domain_filter |= Q(domain=s.domain)
-        if not domain_filter:
-            return qs.none()
-        return qs.filter(domain_filter).order_by("-created_at", "id")
+        admin_or_audit = any(s.domain in ("admin", "audit") for s in scopes)
+        if admin_or_audit:
+            qs = qs.order_by("-created_at", "id")
+        else:
+            for s in scopes:
+                domain_filter |= Q(domain=s.domain)
+            if not domain_filter:
+                return qs.none()
+            qs = qs.filter(domain_filter)
+        # Restricted tickets: only supervisors / leads / security / auditors / admins
+        from apps.identity_access.scope import can_view_restricted
+        if not can_view_restricted(self.request.user):
+            qs = qs.exclude(confidentiality="restricted")
+        return qs.order_by("-created_at", "id")
 
     def filter_queryset(self, queryset):
         qs = super().filter_queryset(queryset)
@@ -108,6 +114,10 @@ class TicketViewSet(viewsets.ModelViewSet):
             )
         except services.TransitionError as exc:
             return Response({"detail": str(exc)}, status=status.HTTP_400_BAD_REQUEST)
+        # If an IT child reaches resolved, sync parent from waiting_it -> in_progress
+        if ticket.domain == "it" and ticket.status.code == "resolved":
+            from .it_child import sync_child_status_to_parent
+            sync_child_status_to_parent(child=ticket, actor_subject=request.user.keycloak_subject)
         return Response(TicketDetailSerializer(ticket).data)
 
     @action(detail=True, methods=["get", "post"], url_path="messages")
@@ -149,6 +159,51 @@ class TicketViewSet(viewsets.ModelViewSet):
             author_subject=request.user.keycloak_subject,
         )
         return Response({"id": str(note.id)}, status=status.HTTP_201_CREATED)
+
+    @action(detail=True, methods=["post"], url_path="it-child")
+    def it_child(self, request, number=None):
+        """Create a sanitised IT child ticket from this operational parent.
+
+        Body: {"summary": "...", "technical_priority": "P1|P2|P3|P4",
+               "carry_matter_reference": true|false}
+        """
+        from .it_child import create_it_child_ticket
+        from .services import transition_ticket
+        parent = self.get_object()
+        if parent.domain != "operational":
+            return Response(
+                {"detail": "IT children can only be created from operational parents."},
+                status=status.HTTP_400_BAD_REQUEST,
+            )
+        body = request.data or {}
+        summary = (body.get("summary") or "").strip()
+        if not summary:
+            return Response({"detail": "summary is required"}, status=status.HTTP_400_BAD_REQUEST)
+        priority = body.get("technical_priority") or "P3"
+        carry = bool(body.get("carry_matter_reference", True))
+        try:
+            child = create_it_child_ticket(
+                parent=parent,
+                summary=summary,
+                requester=parent.requester,
+                requester_office=parent.office,
+                technical_priority=priority,
+                carry_matter_reference=carry,
+                actor_subject=request.user.keycloak_subject,
+            )
+        except ValueError as exc:
+            return Response({"detail": str(exc)}, status=status.HTTP_400_BAD_REQUEST)
+        return Response(
+            {
+                "child_number": child.number,
+                "child_id": str(child.id),
+                "domain": child.domain,
+                "priority": child.priority,
+                "status": child.status.code,
+                "parent_number": parent.number,
+            },
+            status=status.HTTP_201_CREATED,
+        )
 
     @action(detail=False, methods=["get"], url_path="kanban")
     def kanban(self, request):
