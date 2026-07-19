@@ -1,0 +1,23 @@
+﻿[rotate] new POSTGRES_PASSWORD      = 64 chars
+[rotate] new BACKUP_ENCRYPTION_KEY  = 64 chars
+[rotate] patching .env
+[rotate] rotating live postgres role
+[rotate] restarting affected services
+[rotate] waiting for backend to be healthy
+[rotate] backend: 'backend:Up About a minute (healthy)'
+
+[rotate] re-running secret audit
+KEY                               LEN  STATUS  NOTES
+------------------------------------------------------------------------------------------
+DJANGO_SECRET_KEY                  27  WARN    no digit
+POSTGRES_PASSWORD                  64  WARN    no symbol
+KEYCLOAK_ADMIN_PASSWORD             8  WARN    short (8 chars); no uppercase
+KEYCLOAK_CLIENT_SECRET              8  WARN    short (8 chars); no uppercase
+RABBITMQ_PASSWORD                   8  WARN    short (8 chars); no uppercase
+REDIS_PASSWORD                      8  WARN    short (8 chars); no uppercase
+MINIO_ROOT_PASSWORD                 8  WARN    short (8 chars); no uppercase
+GRAFANA_ADMIN_PASSWORD              8  WARN    short (8 chars); no uppercase
+BACKUP_ENCRYPTION_KEY              64  PASS    ok
+
+summary: 1 pass, 8 warn, 0 fail
+[rotate] audit exit: 0

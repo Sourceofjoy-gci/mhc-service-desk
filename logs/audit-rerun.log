@@ -1,0 +1,13 @@
+﻿KEY                               LEN  STATUS  NOTES
+------------------------------------------------------------------------------------------
+DJANGO_SECRET_KEY                  27  WARN    no digit
+POSTGRES_PASSWORD                  18  FAIL    contains placeholder 'change-me'; short (18 chars); no uppercase; no digit
+KEYCLOAK_ADMIN_PASSWORD             8  WARN    short (8 chars); no uppercase
+KEYCLOAK_CLIENT_SECRET              8  WARN    short (8 chars); no uppercase
+RABBITMQ_PASSWORD                   8  WARN    short (8 chars); no uppercase
+REDIS_PASSWORD                      8  WARN    short (8 chars); no uppercase
+MINIO_ROOT_PASSWORD                 8  WARN    short (8 chars); no uppercase
+GRAFANA_ADMIN_PASSWORD              8  WARN    short (8 chars); no uppercase
+BACKUP_ENCRYPTION_KEY              28  FAIL    contains placeholder 'change-me'; no uppercase
+
+summary: 0 pass, 7 warn, 2 fail

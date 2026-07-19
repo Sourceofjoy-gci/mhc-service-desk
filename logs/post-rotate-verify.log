@@ -1,0 +1,9 @@
+﻿OK   list existing tickets: HTTP 200
+     26 tickets survived rotation
+OK   create ticket after rotation: HTTP 201
+     new=OP-202607-000027
+OK   kanban after rotation: HTTP 200
+     columns=['new', 'in_progress', 'waiting_it']
+OK   dashboard after rotation: HTTP 200
+
+Post-rotation smoke OK ✅
