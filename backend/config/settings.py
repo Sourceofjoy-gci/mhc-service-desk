@@ -161,6 +161,7 @@ REST_FRAMEWORK = {
     "DEFAULT_THROTTLE_RATES": {
         "user": "600/minute",
         "anon": "60/minute",
+        "public_intake": "5/minute",  # per-IP web form cap
     },
 }
 

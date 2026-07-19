@@ -209,7 +209,7 @@ services:
         condition: service_started
     ports:
       - "5173:5173"
-    command: ["npm", "run", "dev", "--", "--host", "0.0.0.0"]
+    command: ["sh", "-c", "if [ ! -d node_modules/@dnd-kit ]; then npm install --no-audit --no-fund --legacy-peer-deps; fi; npm run dev -- --host 0.0.0.0"]
     volumes:
       - ./frontend:/app
       - frontend-node-modules:/app/node_modules

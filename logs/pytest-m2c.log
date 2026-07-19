@@ -1,0 +1,23 @@
+﻿...F..............                                                       [100%]
+=================================== FAILURES ===================================
+_____________________________ test_skips_holidays ______________________________
+
+calendar = <BusinessCalendar: BusinessCalendar object (59a8d8c9-0366-4e74-b0b5-a010363d385c)>
+
+    def test_skips_holidays(calendar):
+        calendar.holidays = ["2026-07-23"]
+        calendar.save()
+        start = datetime(2026, 7, 22, 16, 0, tzinfo=timezone.utc)  # Wed 16:00
+        end = add_business_seconds(start, 60 * 60, calendar)  # +1h
+        # Wed 17:00 is end-of-day, holiday Thursday, Friday 09:00
+        assert end.weekday() == 4
+>       assert (end.hour, end.minute) == (9, 0)
+E       assert (10, 0) == (9, 0)
+E         
+E         At index 0 diff: 10 != 9
+E         Use -v to get more diff
+
+apps/sla/tests/test_services.py:55: AssertionError
+=========================== short test summary info ============================
+FAILED apps/sla/tests/test_services.py::test_skips_holidays - assert (10, 0) ...
+1 failed, 17 passed in 9.94s

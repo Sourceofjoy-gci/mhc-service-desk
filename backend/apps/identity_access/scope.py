@@ -43,6 +43,41 @@ def has_scope(user, required: Scope) -> bool:
     return any(s.matches(required) for s in scopes)
 
 
+def get_user_scopes(user) -> list[Scope]:
+    """Compute a user's scopes from their Keycloak group memberships.
+
+    Group-to-scope mapping (P0 baseline):
+        ops-agents          -> operational
+        ops-supervisors     -> operational
+        it-agents           -> it
+        it-leads            -> it
+        system-admins       -> admin
+        auditors            -> audit (read-only across domains)
+    """
+    if not user or not user.is_authenticated:
+        return []
+    if user.is_superuser:
+        return [Scope(domain="admin")]
+    groups = set(getattr(user, "_groups", []) or [])
+    scopes: list[Scope] = []
+    if groups & {"ops-agents", "ops-supervisors"}:
+        scopes.append(Scope(domain="operational"))
+    if groups & {"it-agents", "it-leads"}:
+        scopes.append(Scope(domain="it"))
+    if "system-admins" in groups:
+        scopes.append(Scope(domain="admin"))
+    if "auditors" in groups:
+        scopes.append(Scope(domain="operational"))
+        scopes.append(Scope(domain="it"))
+    return scopes
+
+
+def attach_scopes(request):
+    """DRF authenticator-friendly helper: set ``request.user._scopes``."""
+    request.user._scopes = get_user_scopes(request.user)
+    return request.user
+
+
 def public_endpoint(fn):  # pragma: no cover - marker decorator
     """Marker for endpoints that bypass authentication."""
     fn._public = True
@@ -60,4 +95,17 @@ class ScopePermission(permissions.BasePermission):
         scope = getattr(view, "required_scope", None) or self.required_scope
         if scope is None:
             return bool(request.user and request.user.is_authenticated)
+        attach_scopes(request)
         return has_scope(request.user, scope)
+
+
+def scope_required(domain: str, **kwargs):
+    """Class decorator that attaches a required scope to a DRF view."""
+    required = Scope(domain=domain, **kwargs)
+
+    def deco(cls):
+        cls.required_scope = required
+        cls.permission_classes = [ScopePermission]
+        return cls
+
+    return deco

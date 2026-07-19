@@ -1,0 +1,81 @@
+﻿docker :  Container mhc-ticketing-postgres-1 Running 
+At line:1 char:143
++ ... ads\ticket; docker compose run --rm --no-deps backend python manage.p ...
++                 ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+    + CategoryInfo          : NotSpecified: ( Container mhc-...gres-1 Running :String) [], RemoteException
+    + FullyQualifiedErrorId : NativeCommandError
+ 
+ Container mhc-ticketing-rabbitmq-1 Running 
+ Container mhc-ticketing-worker-1 Running 
+ Container mhc-ticketing-redis-1 Running 
+ Container mhc-ticketing-keycloak-1 Running 
+ Container mhc-ticketing-clamav-1 Running 
+ Container mhc-ticketing-minio-1 Running 
+ Container mhc-ticketing-backend-1 Running 
+ Container mhc-ticketing-beat-1 Running 
+ Container mhc-ticketing-frontend-1 Running 
+ Container mhc-ticketing-backend-run-f0b929ca6a3b Creating 
+ Container mhc-ticketing-backend-run-f0b929ca6a3b Created 
+Migrations for 'catalogue':
+  apps/catalogue/migrations/0001_initial.py
+    + Create model Service
+    + Create model RequestType
+    + Create model CustomFieldDefinition
+Migrations for 'contacts':
+  apps/contacts/migrations/0001_initial.py
+    + Create model Contact
+    + Create model Organisation
+    + Create model ContactMethod
+    + Create model VerificationToken
+Migrations for 'files':
+  apps/files/migrations/0001_initial.py
+    + Create model Attachment
+    + Create model AttachmentAccessLog
+  apps/files/migrations/0002_initial.py
+    + Add field message to attachment
+    + Add field ticket to attachment
+    + Add field attachment to attachmentaccesslog
+    + Create index file_attach_ticket__4ca543_idx on field(s) ticket, -uploaded_at of model attachment
+Migrations for 'sla':
+  apps/sla/migrations/0001_initial.py
+    + Create model BusinessCalendar
+    + Create model SlaInstance
+    + Create model SlaPauseHistory
+    + Create model SlaPolicy
+  apps/sla/migrations/0002_initial.py
+    + Add field ticket to slainstance
+    + Add field instance to slapausehistory
+    + Add field calendar to slapolicy
+    + Add field policy to slainstance
+    ~ Alter unique_together for slapolicy (1 constraint(s))
+    + Create index sla_instanc_state_13414e_idx on field(s) state, due_at of model slainstance
+    + Create index sla_instanc_ticket__b4bebd_idx on field(s) ticket, kind of model slainstance
+Migrations for 'tickets':
+  apps/tickets/migrations/0001_initial.py
+    + Create model OutboxEvent
+    + Create model TicketLink
+    + Create model TicketMessage
+    + Create model TicketNote
+    + Create model Watcher
+    + Create model Ticket
+  apps/tickets/migrations/0002_initial.py
+    + Add field status to ticket
+    + Add field from_ticket to ticketlink
+    + Add field to_ticket to ticketlink
+    + Add field ticket to ticketmessage
+    + Add field ticket to ticketnote
+    + Add field ticket to watcher
+    + Add field user to watcher
+    + Create index ticket_domain_bd5590_idx on field(s) domain, status of model ticket
+    + Create index ticket_domain_cf97fc_idx on field(s) domain, priority of model ticket
+    + Create index ticket_assigne_0dfca4_idx on field(s) assignee, status of model ticket
+    + Create index ticket_request_05f4b2_idx on field(s) requester, -created_at of model ticket
+    + Create index ticket_office__3a523d_idx on field(s) office, status of model ticket
+    + Create index ticket_created_807d9e_idx on field(s) created_at of model ticket
+    ~ Alter unique_together for ticketlink (1 constraint(s))
+    ~ Alter unique_together for watcher (1 constraint(s))
+Migrations for 'workflow':
+  apps/workflow/migrations/0001_initial.py
+    + Create model Status
+    + Create model TransitionHistory
+    + Create model Transition

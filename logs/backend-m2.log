@@ -1,0 +1,5 @@
+﻿backend-1  |     parent = self.check_key(parent, key[0])
+backend-1  |              ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+backend-1  |   File "/usr/local/lib/python3.12/site-packages/django/db/migrations/loader.py", line 194, in check_key
+backend-1  |     raise ValueError(
+backend-1  | ValueError: Dependency on app with no migrations: identity_access

@@ -1,0 +1,14 @@
+﻿OK   list operational (alice/ops-agents): HTTP 200
+docker : Traceback (most recent call last):
+At line:1 char:207
++ ... 2_smoke.py; docker compose exec -T backend python /tmp/m2_smoke.py 2> ...
++                 ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+    + CategoryInfo          : NotSpecified: (Traceback (most recent call last)::String) [], RemoteException
+    + FullyQualifiedErrorId : NativeCommandError
+ 
+  File "/tmp/m2_smoke.py", line 107, in <module>
+    main()
+  File "/tmp/m2_smoke.py", line 30, in main
+    print(f"     results={len(data.get('results', []))} next={data.get('next')!r}")
+                              ^^^^^^^^
+AttributeError: 'list' object has no attribute 'get'

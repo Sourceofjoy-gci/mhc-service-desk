@@ -1,0 +1,10 @@
+﻿frontend-1  | 
+frontend-1  | > mhc-ticketing-frontend@0.1.0 dev
+frontend-1  | > vite --host 0.0.0.0
+frontend-1  | 
+frontend-1  | Re-optimizing dependencies because lockfile has changed
+frontend-1  | 
+frontend-1  |   VITE v5.4.21  ready in 712 ms
+frontend-1  | 
+frontend-1  |   ➜  Local:   http://localhost:5173/
+frontend-1  |   ➜  Network: http://172.24.0.11:5173/

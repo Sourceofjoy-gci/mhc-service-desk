@@ -1,4 +1,9 @@
-"""Models for the Tickets app."""
+"""Ticket aggregate — the centre of the platform.
+
+This is the source of truth for the ticket lifecycle. Cross-module writes
+to this table go through `services.TicketService` so invariants are enforced
+inside a single DB transaction.
+"""
 from __future__ import annotations
 
 import uuid
@@ -7,14 +12,227 @@ from django.db import models
 
 
 class Ticket(models.Model):
+    """A unit of work tracked from intake to closure."""
+
+    class Priority(models.TextChoices):
+        P1 = "P1", "P1 Critical"
+        P2 = "P2", "P2 High"
+        P3 = "P3", "P3 Normal"
+        P4 = "P4", "P4 Low"
+
+    class Domain(models.TextChoices):
+        OPERATIONAL = "operational", "Operational"
+        IT = "it", "IT"
+
+    class Channel(models.TextChoices):
+        CALL = "call", "Call centre"
+        WALK_IN = "walk_in", "Walk-in"
+        WEB = "web", "Public web form"
+        EMAIL = "email", "Email"
+        INTERNAL = "internal", "Internal referral"
+        WHATSAPP = "whatsapp", "WhatsApp"  # P1
+        MONITORING = "monitoring", "Monitoring"  # P2
+
+    class Confidentiality(models.TextChoices):
+        NORMAL = "normal", "Normal"
+        SENSITIVE = "sensitive", "Sensitive"
+        RESTRICTED = "restricted", "Restricted"
+
     id = models.UUIDField(primary_key=True, default=uuid.uuid4, editable=False)
     number = models.CharField(max_length=32, unique=True, db_index=True)
-    domain = models.CharField(max_length=16)
+    domain = models.CharField(max_length=16, choices=Domain.choices)
     title = models.CharField(max_length=255)
-    status = models.CharField(max_length=32)
-    priority = models.CharField(max_length=8)
+    description = models.TextField(blank=True)
+    status = models.ForeignKey(
+        "workflow.Status", on_delete=models.PROTECT, related_name="tickets"
+    )
+    priority = models.CharField(max_length=8, choices=Priority.choices, default=Priority.P3)
+    channel = models.CharField(max_length=16, choices=Channel.choices)
+    source_account = models.CharField(max_length=255, blank=True)
+
+    requester = models.ForeignKey(
+        "contacts.Contact", on_delete=models.PROTECT, related_name="requested_tickets"
+    )
+    organisation = models.ForeignKey(
+        "contacts.Organisation",
+        on_delete=models.SET_NULL,
+        null=True,
+        blank=True,
+        related_name="tickets",
+    )
+    service = models.ForeignKey(
+        "catalogue.Service", on_delete=models.PROTECT, related_name="tickets"
+    )
+    request_type = models.ForeignKey(
+        "catalogue.RequestType", on_delete=models.PROTECT, related_name="tickets"
+    )
+    office = models.ForeignKey(
+        "organisations.Office", on_delete=models.PROTECT, related_name="tickets"
+    )
+    queue = models.ForeignKey(
+        "organisations.ServiceLocation",
+        on_delete=models.SET_NULL,
+        null=True,
+        blank=True,
+        related_name="tickets",
+    )
+
+    assignee = models.ForeignKey(
+        "identity_access.User",
+        on_delete=models.SET_NULL,
+        null=True,
+        blank=True,
+        related_name="assigned_tickets",
+    )
+    team = models.CharField(max_length=128, blank=True)
+
+    confidentiality = models.CharField(
+        max_length=16, choices=Confidentiality.choices, default=Confidentiality.NORMAL
+    )
+
+    matter_reference = models.CharField(max_length=128, blank=True, db_index=True)
+    external_message_id = models.CharField(max_length=255, blank=True, db_index=True)
+
+    waiting_reason = models.CharField(max_length=64, blank=True)
+    blocked_reason = models.TextField(blank=True)
+
+    resolution_code = models.CharField(max_length=64, blank=True)
+    resolution_summary = models.TextField(blank=True)
+
+    tags = models.JSONField(default=list, blank=True)
+    custom_fields = models.JSONField(default=dict, blank=True)
+
+    acknowledged_at = models.DateTimeField(null=True, blank=True)
+    first_responded_at = models.DateTimeField(null=True, blank=True)
+    resolved_at = models.DateTimeField(null=True, blank=True)
+    closed_at = models.DateTimeField(null=True, blank=True)
+    reopened_at = models.DateTimeField(null=True, blank=True)
+
     created_at = models.DateTimeField(auto_now_add=True)
+    updated_at = models.DateTimeField(auto_now=True)
 
     class Meta:
         db_table = "ticket"
+        indexes = [
+            models.Index(fields=["domain", "status"]),
+            models.Index(fields=["domain", "priority"]),
+            models.Index(fields=["assignee", "status"]),
+            models.Index(fields=["requester", "-created_at"]),
+            models.Index(fields=["office", "status"]),
+            models.Index(fields=["created_at"]),
+        ]
+        ordering = ("-created_at",)
 
+    def __str__(self) -> str:  # pragma: no cover
+        return self.number
+
+
+class TicketMessage(models.Model):
+    """A requester-visible message on the ticket timeline (FR-014, FR-061)."""
+
+    class Direction(models.TextChoices):
+        INBOUND = "inbound", "Inbound"
+        OUTBOUND = "outbound", "Outbound"
+
+    id = models.UUIDField(primary_key=True, default=uuid.uuid4, editable=False)
+    ticket = models.ForeignKey(Ticket, on_delete=models.CASCADE, related_name="messages")
+    direction = models.CharField(max_length=16, choices=Direction.choices)
+    author_subject = models.CharField(max_length=255, blank=True)
+    author_label = models.CharField(max_length=255, blank=True)
+    body_text = models.TextField()
+    body_html = models.TextField(blank=True)
+    body_html_sanitized = models.TextField(blank=True)
+    template_key = models.CharField(max_length=128, blank=True)
+    template_version = models.CharField(max_length=32, blank=True)
+    external_message_id = models.CharField(max_length=255, blank=True, db_index=True)
+    delivery_status = models.CharField(max_length=32, blank=True)
+    created_at = models.DateTimeField(auto_now_add=True, db_index=True)
+
+    class Meta:
+        db_table = "ticket_message"
+        ordering = ("created_at",)
+
+
+class TicketNote(models.Model):
+    """An internal note — never visible to the requester (FR-015, FR-016)."""
+
+    id = models.UUIDField(primary_key=True, default=uuid.uuid4, editable=False)
+    ticket = models.ForeignKey(Ticket, on_delete=models.CASCADE, related_name="notes")
+    author_subject = models.CharField(max_length=255)
+    body = models.TextField()
+    created_at = models.DateTimeField(auto_now_add=True, db_index=True)
+
+    class Meta:
+        db_table = "ticket_note"
+        ordering = ("created_at",)
+
+
+class TicketLink(models.Model):
+    """Relations between tickets: parent, child, related, duplicate, blocked-by (FR-019)."""
+
+    class Kind(models.TextChoices):
+        PARENT = "parent", "Parent of"
+        CHILD = "child", "Child of"
+        RELATED = "related", "Related to"
+        DUPLICATE_OF = "duplicate_of", "Duplicate of"
+        BLOCKED_BY = "blocked_by", "Blocked by"
+        BLOCKS = "blocks", "Blocks"
+        MERGED_FROM = "merged_from", "Merged from"
+        IT_CHILD = "it_child", "IT child of operational"
+
+    id = models.UUIDField(primary_key=True, default=uuid.uuid4, editable=False)
+    from_ticket = models.ForeignKey(
+        Ticket, on_delete=models.CASCADE, related_name="links_from"
+    )
+    to_ticket = models.ForeignKey(
+        Ticket, on_delete=models.CASCADE, related_name="links_to"
+    )
+    kind = models.CharField(max_length=16, choices=Kind.choices)
+    created_at = models.DateTimeField(auto_now_add=True)
+
+    class Meta:
+        db_table = "ticket_link"
+        unique_together = [("from_ticket", "to_ticket", "kind")]
+
+
+class Watcher(models.Model):
+    """A user who follows a ticket without being a participant (FR-018)."""
+
+    id = models.UUIDField(primary_key=True, default=uuid.uuid4, editable=False)
+    ticket = models.ForeignKey(Ticket, on_delete=models.CASCADE, related_name="watchers")
+    user = models.ForeignKey(
+        "identity_access.User", on_delete=models.CASCADE, related_name="watching"
+    )
+    created_at = models.DateTimeField(auto_now_add=True)
+
+    class Meta:
+        db_table = "ticket_watcher"
+        unique_together = [("ticket", "user")]
+
+
+class OutboxEvent(models.Model):
+    """Transactional outbox — events written in the same DB transaction as
+    a business change, then published by a worker (PRD §25.3)."""
+
+    class Status(models.TextChoices):
+        PENDING = "pending", "Pending"
+        PROCESSING = "processing", "Processing"
+        DONE = "done", "Done"
+        FAILED = "failed", "Failed"
+
+    id = models.UUIDField(primary_key=True, default=uuid.uuid4, editable=False)
+    aggregate = models.CharField(max_length=64, db_index=True)
+    aggregate_id = models.CharField(max_length=64, db_index=True)
+    event_type = models.CharField(max_length=128, db_index=True)
+    payload = models.JSONField()
+    status = models.CharField(
+        max_length=16, choices=Status.choices, default=Status.PENDING, db_index=True
+    )
+    attempts = models.PositiveIntegerField(default=0)
+    last_error = models.TextField(blank=True)
+    next_attempt_at = models.DateTimeField(null=True, blank=True, db_index=True)
+    created_at = models.DateTimeField(auto_now_add=True, db_index=True)
+    published_at = models.DateTimeField(null=True, blank=True)
+
+    class Meta:
+        db_table = "ticket_outbox"

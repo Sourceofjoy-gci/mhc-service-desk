@@ -1,0 +1,58 @@
+﻿FFFFF                                                                    [100%]
+=================================== FAILURES ===================================
+____________________ test_zero_seconds_returns_same_instant ____________________
+
+calendar = <BusinessCalendar: BusinessCalendar object (a577024a-2e47-464b-bbb2-5cb7142b8bbb)>
+
+    def test_zero_seconds_returns_same_instant(calendar):
+>       start = datetime(2026, 7, 20, 10, 0, tzinfo=timezone.utc)  # Monday 10:00
+E       AttributeError: module 'django.utils.timezone' has no attribute 'utc'
+
+apps/sla/tests/test_services.py:35: AttributeError
+____________________________ test_skips_closed_days ____________________________
+
+calendar = <BusinessCalendar: BusinessCalendar object (b73b4b1d-032c-4076-9481-097f6112587c)>
+
+    def test_skips_closed_days(calendar):
+        # Wednesday 2026-07-22 is closed
+>       start = datetime(2026, 7, 22, 10, 0, tzinfo=timezone.utc)
+E       AttributeError: module 'django.utils.timezone' has no attribute 'utc'
+
+apps/sla/tests/test_services.py:41: AttributeError
+_____________________________ test_skips_holidays ______________________________
+
+calendar = <BusinessCalendar: BusinessCalendar object (2679fd51-859c-42cc-a55e-44c30f0ae1b9)>
+
+    def test_skips_holidays(calendar):
+        calendar.holidays = ["2026-07-23"]
+        calendar.save()
+>       start = datetime(2026, 7, 22, 16, 0, tzinfo=timezone.utc)  # Wed 16:00
+E       AttributeError: module 'django.utils.timezone' has no attribute 'utc'
+
+apps/sla/tests/test_services.py:52: AttributeError
+___________________________ test_within_day_addition ___________________________
+
+calendar = <BusinessCalendar: BusinessCalendar object (398b1ed5-fc7c-4c17-902d-0af9016cdcde)>
+
+    def test_within_day_addition(calendar):
+>       start = datetime(2026, 7, 20, 9, 0, tzinfo=timezone.utc)  # Monday 09:00
+E       AttributeError: module 'django.utils.timezone' has no attribute 'utc'
+
+apps/sla/tests/test_services.py:60: AttributeError
+_______________________________ test_spans_lunch _______________________________
+
+calendar = <BusinessCalendar: BusinessCalendar object (da7766cd-59f8-4ddf-8644-cb397e0c0868)>
+
+    def test_spans_lunch(calendar):
+        # Thursday has 09:00-13:00 (4 hours). Start at 12:00, add 3h.
+>       start = datetime(2026, 7, 23, 12, 0, tzinfo=timezone.utc)  # Thursday
+E       AttributeError: module 'django.utils.timezone' has no attribute 'utc'
+
+apps/sla/tests/test_services.py:67: AttributeError
+=========================== short test summary info ============================
+FAILED apps/sla/tests/test_services.py::test_zero_seconds_returns_same_instant
+FAILED apps/sla/tests/test_services.py::test_skips_closed_days - AttributeErr...
+FAILED apps/sla/tests/test_services.py::test_skips_holidays - AttributeError:...
+FAILED apps/sla/tests/test_services.py::test_within_day_addition - AttributeE...
+FAILED apps/sla/tests/test_services.py::test_spans_lunch - AttributeError: mo...
+5 failed in 6.17s

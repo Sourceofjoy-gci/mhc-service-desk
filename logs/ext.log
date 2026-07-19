@@ -1,0 +1,21 @@
+﻿docker : psql: warning: extra command-line argument "CREATE" ignored
+At line:1 char:143
++ ... ads\ticket; docker compose exec -T postgres psql -U mhc -d mhc -c "CR ...
++                 ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+    + CategoryInfo          : NotSpecified: (psql: warning: ...CREATE" ignored:String) [], RemoteException
+    + FullyQualifiedErrorId : NativeCommandError
+ 
+psql: warning: extra command-line argument "EXTENSION" ignored
+psql: warning: extra command-line argument "IF" ignored
+psql: warning: extra command-line argument "NOT" ignored
+psql: warning: extra command-line argument "EXISTS" ignored
+psql: warning: extra command-line argument "pg_trgm;" ignored
+psql: warning: extra command-line argument "CREATE" ignored
+psql: warning: extra command-line argument "EXTENSION" ignored
+psql: warning: extra command-line argument "IF" ignored
+psql: warning: extra command-line argument "NOT" ignored
+psql: warning: extra command-line argument "EXISTS" ignored
+psql: warning: extra command-line argument "unaccent;" ignored
+ERROR:  unterminated quoted identifier at or near "" uuid-ossp\;"
+LINE 1: ...T EXISTS pgcrypto; CREATE EXTENSION IF NOT EXISTS " uuid-oss...
+                                                             ^

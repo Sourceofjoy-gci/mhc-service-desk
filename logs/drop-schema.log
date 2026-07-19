@@ -1,0 +1,40 @@
+﻿docker : NOTICE:  drop cascades to 31 other objects
+At line:4 char:1
++ docker compose exec -T postgres psql -U mhc -d mhc -c "DROP SCHEMA pu ...
++ ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+    + CategoryInfo          : NotSpecified: (NOTICE:  drop c...1 other objects:String) [], RemoteException
+    + FullyQualifiedErrorId : NativeCommandError
+ 
+DETAIL:  drop cascades to extension pg_trgm
+drop cascades to extension unaccent
+drop cascades to extension pgcrypto
+drop cascades to extension uuid-ossp
+drop cascades to table django_migrations
+drop cascades to table org_region
+drop cascades to table org_office
+drop cascades to table org_service_location
+drop cascades to table django_content_type
+drop cascades to table auth_permission
+drop cascades to table auth_group
+drop cascades to table auth_group_permissions
+drop cascades to table identity_role
+drop cascades to table identity_user
+drop cascades to table identity_user_groups
+drop cascades to table identity_user_user_permissions
+drop cascades to table identity_login_audit
+drop cascades to table identity_user_role
+drop cascades to table django_admin_log
+drop cascades to table configitem
+drop cascades to table auditevent
+drop cascades to table service
+drop cascades to table contact
+drop cascades to table attachment
+drop cascades to table integrationevent
+drop cascades to table notification
+drop cascades to table dashboard
+drop cascades to table django_session
+drop cascades to table slapolicy
+drop cascades to table ticket
+drop cascades to table workflowdefinition
+DROP SCHEMA
+CREATE SCHEMA

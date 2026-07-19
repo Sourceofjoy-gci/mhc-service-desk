@@ -1,0 +1,9 @@
+﻿docker : ERROR:  unterminated quoted identifier at or near "" uuid-ossp\"
+At line:1 char:143
++ ... ads\ticket; docker compose exec -T postgres psql -U mhc -d mhc -c "CR ...
++                 ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+    + CategoryInfo          : NotSpecified: (ERROR:  untermi... "" uuid-ossp\":String) [], RemoteException
+    + FullyQualifiedErrorId : NativeCommandError
+ 
+LINE 1: CREATE EXTENSION IF NOT EXISTS " uuid-ossp\
+                                       ^

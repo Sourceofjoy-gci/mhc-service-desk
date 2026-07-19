@@ -10,15 +10,12 @@ import logging
 
 from celery import shared_task
 
+from .services import evaluate_open_slas
+
 logger = logging.getLogger(__name__)
 
 
 @shared_task(name="apps.sla.tasks.evaluate_open_slas")
-def evaluate_open_slas() -> int:
-    """Sweep all open SLA instances once per minute.
-
-    Implementation deferred to Milestone 2 (Operational Vertical Slice).
-    This stub keeps the beat schedule valid from day one.
-    """
-    logger.debug("sla_evaluator_tick")
-    return 0
+def evaluate_open_slas_task() -> int:
+    """Sweep all open SLA instances once per minute."""
+    return evaluate_open_slas()

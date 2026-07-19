@@ -1,0 +1,22 @@
+﻿docker :  Container mhc-ticketing-clamav-1 Running 
+At line:1 char:143
++ ... ads\ticket; docker compose run --rm --no-deps backend python manage.p ...
++                 ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+    + CategoryInfo          : NotSpecified: ( Container mhc-...amav-1 Running :String) [], RemoteException
+    + FullyQualifiedErrorId : NativeCommandError
+ 
+ Container mhc-ticketing-minio-1 Running 
+ Container mhc-ticketing-backend-1 Running 
+ Container mhc-ticketing-worker-1 Running 
+ Container mhc-ticketing-beat-1 Running 
+ Container mhc-ticketing-frontend-1 Running 
+ Container mhc-ticketing-redis-1 Running 
+ Container mhc-ticketing-postgres-1 Running 
+ Container mhc-ticketing-rabbitmq-1 Running 
+ Container mhc-ticketing-keycloak-1 Running 
+ Container mhc-ticketing-backend-run-6fb618f66795 Creating 
+ Container mhc-ticketing-backend-run-6fb618f66795 Created 
+Operations to perform:
+  Apply all migrations: admin, administration, audit, auth, catalogue, contacts, contenttypes, files, identity_access, integrations, notifications, organisations, reporting, sessions, sla, tickets, workflow
+Running migrations:
+  No migrations to apply.

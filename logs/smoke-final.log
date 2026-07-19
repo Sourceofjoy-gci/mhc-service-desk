@@ -1,0 +1,8 @@
+﻿OK   list operational (alice/ops-agents): HTTP 200
+     results=1
+OK   kanban operational: HTTP 200
+     columns: ['in_progress']
+       in_progress: 1 ticket(s)
+OK   dashboard: HTTP 200
+     {"totals":{"open":1,"today":1,"this_week":1},"by_priority":[{"priority":"P4","count":1}],"by_status":[{"status__code":"in_progress","status__name":"In Progress","count":1}],"unassigned":1,"breached_sl
+FAIL transition new->triage: HTTP 400 — {"detail":"No transition in_progress -> triage for operational"}

@@ -43,7 +43,12 @@ def _select_key(jwks: dict[str, Any], kid: str) -> dict[str, Any] | None:
 
 
 class KeycloakJWTAuthentication(authentication.BaseAuthentication):
-    """Validates a Bearer access token issued by the Keycloak realm."""
+    """Validates a Bearer access token issued by the Keycloak realm.
+
+    In DEBUG mode, also accepts a dev token of the form ``dev:<username>:<groups>``
+    so local development does not require a full OIDC round-trip. This fallback
+    is automatically disabled when DEBUG is False.
+    """
 
     keyword = "Bearer"
 
@@ -52,6 +57,21 @@ class KeycloakJWTAuthentication(authentication.BaseAuthentication):
         if not header.startswith(f"{self.keyword} "):
             return None
         token = header.split(" ", 1)[1].strip()
+
+        # --- Dev fallback (DEBUG only) -------------------------------------
+        if settings.DEBUG and token.startswith("dev:"):
+            parts = token.split(":")
+            if len(parts) >= 2:
+                username = parts[1]
+                groups = parts[2].split(",") if len(parts) > 2 and parts[2] else []
+                user, _ = User.objects.get_or_create(
+                    username=username,
+                    defaults={"keycloak_subject": f"dev:{username}"},
+                )
+                user._groups = groups
+                return user, {"sub": f"dev:{username}", "groups": groups}
+        # --------------------------------------------------------------------
+
         try:
             unverified = AccessToken(token, verify=False)
         except Exception as exc:
@@ -95,11 +115,12 @@ class KeycloakJWTAuthentication(authentication.BaseAuthentication):
                 "mfa_enabled": bool(payload.get("acr") in ("mfa", "urn:mace:incommon:iap:silver")),
             },
         )
-        # Refresh display name / email opportunistically
         new_email = payload.get("email", "")
         if new_email and new_email != user.email:
             user.email = new_email
             user.save(update_fields=["email"])
+        # Capture groups for scope calculation
+        user._groups = payload.get("groups", []) or []
         return user, payload
 
     def authenticate_header(self, request):

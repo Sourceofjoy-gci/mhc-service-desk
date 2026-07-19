@@ -1,0 +1,64 @@
+﻿docker :  Container mhc-ticketing-worker-1 Running 
+At line:5 char:1
++ docker compose run --rm --no-deps backend python manage.py makemigrat ...
++ ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+    + CategoryInfo          : NotSpecified: ( Container mhc-...rker-1 Running :String) [], RemoteException
+    + FullyQualifiedErrorId : NativeCommandError
+ 
+ Container mhc-ticketing-frontend-1 Running 
+ Container mhc-ticketing-postgres-1 Running 
+ Container mhc-ticketing-redis-1 Running 
+ Container mhc-ticketing-rabbitmq-1 Running 
+ Container mhc-ticketing-clamav-1 Running 
+ Container mhc-ticketing-backend-1 Running 
+ Container mhc-ticketing-beat-1 Running 
+ Container mhc-ticketing-keycloak-1 Running 
+ Container mhc-ticketing-minio-1 Running 
+ Container mhc-ticketing-backend-run-7fc84add8cd8 Creating 
+ Container mhc-ticketing-backend-run-7fc84add8cd8 Created 
+It is impossible to add the field 'created_at' with 'auto_now_add=True' to service without providing a default. This is because the database needs something to populate existing rows.
+ 1) Provide a one-off default now which will be set on all existing rows
+ 2) Quit and manually define a default value in models.py.
+Traceback (most recent call last):
+  File "/app/manage.py", line 20, in <module>
+    main()
+  File "/app/manage.py", line 16, in main
+    execute_from_command_line(sys.argv)
+  File "/usr/local/lib/python3.12/site-packages/django/core/management/__init__.py", line 442, in 
+execute_from_command_line
+    utility.execute()
+  File "/usr/local/lib/python3.12/site-packages/django/core/management/__init__.py", line 436, in execute
+    self.fetch_command(subcommand).run_from_argv(self.argv)
+  File "/usr/local/lib/python3.12/site-packages/django/core/management/base.py", line 416, in run_from_argv
+    self.execute(*args, **cmd_options)
+  File "/usr/local/lib/python3.12/site-packages/django/core/management/base.py", line 460, in execute
+    output = self.handle(*args, **options)
+             ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/usr/local/lib/python3.12/site-packages/django/core/management/base.py", line 107, in wrapper
+    res = handle_func(*args, **kwargs)
+          ^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/usr/local/lib/python3.12/site-packages/django/core/management/commands/makemigrations.py", line 236, in handle
+    changes = autodetector.changes(
+              ^^^^^^^^^^^^^^^^^^^^^
+  File "/usr/local/lib/python3.12/site-packages/django/db/migrations/autodetector.py", line 67, in changes
+    changes = self._detect_changes(convert_apps, graph)
+              ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/usr/local/lib/python3.12/site-packages/django/db/migrations/autodetector.py", line 216, in _detect_changes
+    self.generate_added_fields()
+  File "/usr/local/lib/python3.12/site-packages/django/db/migrations/autodetector.py", line 1110, in 
+generate_added_fields
+    self._generate_added_field(app_label, model_name, field_name)
+  File "/usr/local/lib/python3.12/site-packages/django/db/migrations/autodetector.py", line 1148, in 
+_generate_added_field
+    field.default = self.questioner.ask_auto_now_add_addition(
+                    ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/usr/local/lib/python3.12/site-packages/django/db/migrations/questioner.py", line 258, in 
+ask_auto_now_add_addition
+    choice = self._choice_input(
+             ^^^^^^^^^^^^^^^^^^^
+  File "/usr/local/lib/python3.12/site-packages/django/db/migrations/questioner.py", line 116, in _choice_input
+    result = input()
+             ^^^^^^^
+EOFError: EOF when reading a line
+
+Select an option: 

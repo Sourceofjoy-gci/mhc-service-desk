@@ -1,0 +1,10 @@
+﻿DELETE 28
+docker : ERROR:  relation "workflow_transitionhistory" does not exist
+At line:1 char:143
++ ... ads\ticket; docker compose exec -T postgres psql -U mhc -d mhc -c "DE ...
++                 ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+    + CategoryInfo          : NotSpecified: (ERROR:  relatio... does not exist:String) [], RemoteException
+    + FullyQualifiedErrorId : NativeCommandError
+ 
+LINE 1: DELETE FROM workflow_transition; DELETE FROM workflow_transi...
+                                                     ^

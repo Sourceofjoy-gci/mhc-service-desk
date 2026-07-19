@@ -1,0 +1,71 @@
+﻿docker :  Image mhc-ticketing-backend Building 
+At line:2 char:1
++ docker compose build backend 2>&1 | Out-File -FilePath "C:\Users\sour ...
++ ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+    + CategoryInfo          : NotSpecified: ( Image mhc-ticketing-backend Building :String) [], RemoteException
+    + FullyQualifiedErrorId : NativeCommandError
+ 
+#1 [internal] load local bake definitions
+#1 reading from stdin 557B done
+#1 DONE 0.0s
+
+#2 [internal] load build definition from Dockerfile
+#2 transferring dockerfile: 1.35kB 0.0s done
+#2 DONE 0.1s
+
+#3 resolve image config for docker-image://docker.io/docker/dockerfile:1.7
+#3 DONE 2.2s
+
+#4 docker-image://docker.io/docker/dockerfile:1.7@sha256:a57df69d0ea827fb7266491f2813635de6f17269be881f696fbfdf2d83dda33e
+#4 resolve docker.io/docker/dockerfile:1.7@sha256:a57df69d0ea827fb7266491f2813635de6f17269be881f696fbfdf2d83dda33e 0.1s done
+#4 CACHED
+
+#5 [internal] load metadata for docker.io/library/python:3.12-slim
+#5 DONE 1.5s
+
+#6 [internal] load .dockerignore
+#6 transferring context: 2B done
+#6 DONE 0.0s
+
+#7 [1/7] FROM docker.io/library/python:3.12-slim@sha256:57cd7c3a7a273101a6485ba99423ee568157882804b1124b4dd04266317710de
+#7 resolve docker.io/library/python:3.12-slim@sha256:57cd7c3a7a273101a6485ba99423ee568157882804b1124b4dd04266317710de 0.1s done
+#7 DONE 0.1s
+
+#8 [internal] load build context
+#8 transferring context: 140.01kB 0.0s done
+#8 DONE 0.1s
+
+#9 [4/7] COPY requirements/ ./requirements/
+#9 CACHED
+
+#10 [2/7] RUN apt-get update && apt-get install -y --no-install-recommends         build-essential         libpq-dev         libmagic1         libclamav-dev         clamav-daemon         clamav-freshclam         curl         netcat-openbsd     && rm -rf /var/lib/apt/lists/*
+#10 CACHED
+
+#11 [3/7] WORKDIR /app
+#11 CACHED
+
+#12 [5/7] RUN pip install --upgrade pip &&     pip install -r requirements/base.txt
+#12 CACHED
+
+#13 [6/7] COPY . /app
+#13 DONE 0.2s
+
+#14 [7/7] RUN useradd --create-home --shell /bin/bash app && chown -R app:app /app
+#14 DONE 3.6s
+
+#15 exporting to image
+#15 exporting layers
+#15 exporting layers 0.8s done
+#15 exporting manifest sha256:810b8ba554e52ff7a607adeb522989efa8947b28d31d713607f4bedd894a5341 0.1s done
+#15 exporting config sha256:a9748f562c6c340cb9763cd41d1c083b39f15d462d57aacea0a273c960d607e0 0.1s done
+#15 exporting attestation manifest sha256:4891495b668c0b846f64827d3a1bdeb6e15f5932927c5e5d0acc47483266cb52 0.1s done
+#15 exporting manifest list sha256:86b2c87b8bb52573ba6bca821eb4bea3bbd91ec779b7b1f848faccbeb50a3698
+#15 exporting manifest list sha256:86b2c87b8bb52573ba6bca821eb4bea3bbd91ec779b7b1f848faccbeb50a3698 0.1s done
+#15 naming to docker.io/library/mhc-ticketing-backend:latest done
+#15 unpacking to docker.io/library/mhc-ticketing-backend:latest
+#15 unpacking to docker.io/library/mhc-ticketing-backend:latest 0.2s done
+#15 DONE 1.5s
+
+#16 resolving provenance for metadata file
+#16 DONE 0.0s
+ Image mhc-ticketing-backend Built 

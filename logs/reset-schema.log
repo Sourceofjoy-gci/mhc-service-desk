@@ -1,0 +1,58 @@
+﻿docker : NOTICE:  drop cascades to 47 other objects
+At line:1 char:143
++ ... ads\ticket; docker compose exec -T postgres psql -U mhc -d mhc -c "DR ...
++                 ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+    + CategoryInfo          : NotSpecified: (NOTICE:  drop c...7 other objects:String) [], RemoteException
+    + FullyQualifiedErrorId : NativeCommandError
+ 
+DETAIL:  drop cascades to extension pg_trgm
+drop cascades to extension unaccent
+drop cascades to extension pgcrypto
+drop cascades to extension uuid-ossp
+drop cascades to table django_migrations
+drop cascades to table org_region
+drop cascades to table org_office
+drop cascades to table org_service_location
+drop cascades to table django_content_type
+drop cascades to table auth_permission
+drop cascades to table auth_group
+drop cascades to table auth_group_permissions
+drop cascades to table identity_role
+drop cascades to table identity_user
+drop cascades to table identity_user_groups
+drop cascades to table identity_user_user_permissions
+drop cascades to table identity_login_audit
+drop cascades to table identity_user_role
+drop cascades to table django_admin_log
+drop cascades to table configitem
+drop cascades to table auditevent
+drop cascades to table catalogue_service
+drop cascades to table catalogue_request_type
+drop cascades to table catalogue_custom_field
+drop cascades to table contact
+drop cascades to table contact_organisation
+drop cascades to table contact_method
+drop cascades to table contact_verification_token
+drop cascades to table ticket_outbox
+drop cascades to table ticket_link
+drop cascades to table ticket_message
+drop cascades to table ticket_note
+drop cascades to table ticket_watcher
+drop cascades to table ticket
+drop cascades to table file_attachment
+drop cascades to table file_attachment_access
+drop cascades to table integrationevent
+drop cascades to table notification
+drop cascades to table dashboard
+drop cascades to table django_session
+drop cascades to table sla_calendar
+drop cascades to table sla_instance
+drop cascades to table sla_pause_history
+drop cascades to table sla_policy
+drop cascades to table workflow_status
+drop cascades to table workflow_transition_history
+drop cascades to table workflow_transition
+DROP SCHEMA
+CREATE SCHEMA
+GRANT
+GRANT

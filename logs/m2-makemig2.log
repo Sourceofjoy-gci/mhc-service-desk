@@ -1,0 +1,20 @@
+﻿docker :  Container mhc-ticketing-minio-1 Running 
+At line:2 char:1
++ docker compose run --rm --no-deps backend python manage.py makemigrat ...
++ ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+    + CategoryInfo          : NotSpecified: ( Container mhc-...inio-1 Running :String) [], RemoteException
+    + FullyQualifiedErrorId : NativeCommandError
+ 
+ Container mhc-ticketing-backend-1 Running 
+ Container mhc-ticketing-beat-1 Running 
+ Container mhc-ticketing-keycloak-1 Running 
+ Container mhc-ticketing-clamav-1 Running 
+ Container mhc-ticketing-worker-1 Running 
+ Container mhc-ticketing-frontend-1 Running 
+ Container mhc-ticketing-postgres-1 Running 
+ Container mhc-ticketing-redis-1 Running 
+ Container mhc-ticketing-rabbitmq-1 Running 
+ Container mhc-ticketing-backend-run-91e8563ba72a Creating 
+ Container mhc-ticketing-backend-run-91e8563ba72a Created 
+Field 'created_at' on model 'service' not migrated: it is impossible to add a field with 'auto_now_add=True' without specifying a default.
+

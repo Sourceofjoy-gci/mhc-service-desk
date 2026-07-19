@@ -1,0 +1,8 @@
+﻿docker : Warning: Using a password with '-a' or '-u' option on the command line interface may not be safe.
+At line:6 char:1
++ docker compose exec -T redis redis-cli -a change-me-redis -n 0 KEYS " ...
++ ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+    + CategoryInfo          : NotSpecified: (Warning: Using ...ay not be safe.:String) [], RemoteException
+    + FullyQualifiedErrorId : NativeCommandError
+ 
+

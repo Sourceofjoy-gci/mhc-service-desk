@@ -1,0 +1,10 @@
+{
+  "request_type_code": "HOURS",
+  "service_code": "GEN-INFO",
+  "office_code": "MHC-MBA",
+  "title": "Office hours enquiry",
+  "description": "What are the office hours during the long weekend?",
+  "requester_name": "Smoke Test",
+  "requester_email": "smoke@example.com",
+  "consent": true
+}

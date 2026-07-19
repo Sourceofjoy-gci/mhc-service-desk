@@ -8,6 +8,7 @@ WORKDIR /app
 
 COPY package.json ./
 RUN npm install --no-audit --no-fund --legacy-peer-deps
+ENV VITE_DEV_AUTH=1
 
 COPY . .
 

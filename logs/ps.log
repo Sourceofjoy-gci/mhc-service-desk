@@ -1,0 +1,11 @@
+﻿SERVICE    STATE
+backend    running
+beat       running
+clamav     running
+frontend   running
+keycloak   running
+minio      running
+postgres   running
+rabbitmq   running
+redis      running
+worker     running

@@ -19,3 +19,11 @@ body {
 a {
   @apply text-brand-600 hover:underline;
 }
+
+.input {
+  @apply block w-full rounded-md border border-ink-100 bg-white px-3 py-1.5 text-sm;
+}
+
+.input:focus {
+  @apply border-brand-500 outline-none ring-2 ring-brand-100;
+}

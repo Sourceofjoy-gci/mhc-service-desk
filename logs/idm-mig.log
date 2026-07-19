@@ -1,0 +1,31 @@
+﻿docker :  Container mhc-ticketing-minio-1 Running 
+At line:1 char:143
++ ... ads\ticket; docker compose run --rm --no-deps backend python manage.p ...
++                 ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+    + CategoryInfo          : NotSpecified: ( Container mhc-...inio-1 Running :String) [], RemoteException
+    + FullyQualifiedErrorId : NativeCommandError
+ 
+ Container mhc-ticketing-beat-1 Running 
+ Container mhc-ticketing-frontend-1 Running 
+ Container mhc-ticketing-postgres-1 Running 
+ Container mhc-ticketing-rabbitmq-1 Running 
+ Container mhc-ticketing-clamav-1 Running 
+ Container mhc-ticketing-backend-1 Running 
+ Container mhc-ticketing-worker-1 Running 
+ Container mhc-ticketing-redis-1 Running 
+ Container mhc-ticketing-keycloak-1 Running 
+ Container mhc-ticketing-backend-run-2227724c02b2 Creating 
+ Container mhc-ticketing-backend-run-2227724c02b2 Created 
+Migrations for 'organisations':
+  apps/organisations/migrations/0001_initial.py
+    + Create model Region
+    + Create model Office
+    + Create model ServiceLocation
+Migrations for 'identity_access':
+  apps/identity_access/migrations/0001_initial.py
+    + Create model Role
+    + Create model User
+    + Create model AuditLogin
+    + Create model UserRole
+    + Create index identity_us_keycloa_74a194_idx on field(s) keycloak_subject of model user
+    ~ Alter unique_together for userrole (1 constraint(s))

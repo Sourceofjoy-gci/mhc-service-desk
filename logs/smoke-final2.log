@@ -1,0 +1,21 @@
+﻿OK   list operational (alice/ops-agents): HTTP 200
+     results=1
+OK   kanban operational: HTTP 200
+     columns: ['in_progress']
+       in_progress: 1 ticket(s)
+OK   dashboard: HTTP 200
+     {"totals":{"open":1,"today":1,"this_week":1},"by_priority":[{"priority":"P4","count":1}],"by_status":[{"status__code":"in_progress","status__name":"In Progress","count":1}],"unassigned":1,"breached_sl
+OK   create ticket for transition: HTTP 201
+     ticket=OP-202607-000002
+OK   transition new->triage: HTTP 200
+     status=triage number=OP-202607-000002
+OK   transition triage->in_progress: HTTP 200
+OK   reject invalid transition (in_progress->new): HTTP 400
+OK   list as IT agent (bob/it-agents): HTTP 200
+OK   scope: IT agent sees 0 operational tickets (correct)
+OK   add reply message: HTTP 201
+OK   add internal note: HTTP 201
+OK   detail: HTTP 200
+     messages=1 notes=1
+
+All M2 smoke checks passed ✅

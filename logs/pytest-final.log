@@ -1,0 +1,7 @@
+﻿docker : /usr/local/bin/python: No module named pytest
+At line:8 char:1
++ docker compose exec -T backend python -m pytest -q 2>&1 | Out-File -F ...
++ ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+    + CategoryInfo          : NotSpecified: (/usr/local/bin/...le named pytest:String) [], RemoteException
+    + FullyQualifiedErrorId : NativeCommandError
+ 

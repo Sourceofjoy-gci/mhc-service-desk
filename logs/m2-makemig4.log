@@ -1,0 +1,20 @@
+﻿docker :  Container mhc-ticketing-beat-1 Running 
+At line:1 char:143
++ ... ads\ticket; docker compose run --rm --no-deps backend python manage.p ...
++                 ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+    + CategoryInfo          : NotSpecified: ( Container mhc-ticketing-beat-1 Running :String) [], RemoteException
+    + FullyQualifiedErrorId : NativeCommandError
+ 
+ Container mhc-ticketing-redis-1 Running 
+ Container mhc-ticketing-rabbitmq-1 Running 
+ Container mhc-ticketing-keycloak-1 Running 
+ Container mhc-ticketing-minio-1 Running 
+ Container mhc-ticketing-backend-1 Running 
+ Container mhc-ticketing-frontend-1 Running 
+ Container mhc-ticketing-postgres-1 Running 
+ Container mhc-ticketing-clamav-1 Running 
+ Container mhc-ticketing-worker-1 Running 
+ Container mhc-ticketing-backend-run-366c1389cccd Creating 
+ Container mhc-ticketing-backend-run-366c1389cccd Created 
+Field 'status' on model 'ticket' not migrated: it is impossible to add a non-nullable field without specifying a default.
+

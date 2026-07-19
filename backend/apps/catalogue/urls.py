@@ -1,8 +1,9 @@
-"""URL configuration for the catalogue app."""
-from django.urls import path
+from django.urls import include, path
+from rest_framework.routers import DefaultRouter
 
 from . import views
 
-urlpatterns = [
-    path("catalogue/", views.list_view, name="catalogue-list"),
-]
+router = DefaultRouter()
+router.register(r"catalogue/services", views.ServiceViewSet, basename="services")
+
+urlpatterns = [path("", include(router.urls))]

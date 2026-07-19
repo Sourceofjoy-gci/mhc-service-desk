@@ -1,0 +1,13 @@
+﻿CREATE EXTENSION
+docker : NOTICE:  extension "pgcrypto" already exists, skipping
+At line:1 char:204
++ ... \ext.sql" | docker compose exec -T postgres psql -U mhc -d mhc 2>&1 | ...
++                 ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+    + CategoryInfo          : NotSpecified: (NOTICE:  extens...xists, skipping:String) [], RemoteException
+    + FullyQualifiedErrorId : NativeCommandError
+ 
+CREATE EXTENSION
+CREATE EXTENSION
+CREATE EXTENSION
+NOTICE:  extension "pg_trgm" already exists, skipping
+NOTICE:  extension "unaccent" already exists, skipping
