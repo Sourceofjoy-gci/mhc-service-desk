@@ -1,0 +1,24 @@
+﻿[verify] collecting live row counts
+[verify] creating fresh backup
+[verify] snapshotting MinIO objects
+powershell :  Container mhc-ticketing-minio-1 Stopping 
+At line:2 char:1
++ powershell -ExecutionPolicy Bypass -File scripts/verify_backup.ps1 2> ...
++ ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+    + CategoryInfo          : NotSpecified: ( Container mhc-...nio-1 Stopping :String) [], RemoteException
+    + FullyQualifiedErrorId : NativeCommandError
+ 
+ Container mhc-ticketing-minio-1 Stopped 
+ Container mhc-ticketing-minio-1 Starting 
+ Container mhc-ticketing-minio-1 Started 
+[verify] provisioning side database mhc_verify_20260719t124008z
+NOTICE:  database "mhc_verify_20260719t124008z" does not exist, skipping
+pg_restore: error: input file does not appear to be a valid tar archive
+[verify] collecting restored row counts
+docker : ERROR:  relation "ticket" does not exist
+At C:\Users\sourc\Downloads\ticket\scripts\verify_backup.ps1:37 char:18
++ ...    $count = docker compose exec -T postgres psql -U $postgresUser -d  ...
++                 ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+    + CategoryInfo          : NotSpecified: (ERROR:  relation "ticket" does not exist:String) [], RemoteException
+    + FullyQualifiedErrorId : NativeCommandError
+ 

@@ -1,0 +1,46 @@
+{
+  "title": "MHC e-Ticketing — IT Service Desk",
+  "uid": "mhc-it",
+  "schemaVersion": 38,
+  "version": 1,
+  "timezone": "browser",
+  "refresh": "30s",
+  "time": {"from": "now-6h", "to": "now"},
+  "panels": [
+    {
+      "id": 1,
+      "type": "stat",
+      "title": "Open IT tickets",
+      "targets": [{"expr": "django_app_tickets_open_total{domain='it'}", "refId": "A"}],
+      "gridPos": {"x": 0, "y": 0, "w": 6, "h": 4}
+    },
+    {
+      "id": 2,
+      "type": "stat",
+      "title": "P1 / P2 open",
+      "targets": [{"expr": "django_app_tickets_p1p2_open_total{domain='it'}", "refId": "A"}],
+      "gridPos": {"x": 6, "y": 0, "w": 6, "h": 4}
+    },
+    {
+      "id": 3,
+      "type": "stat",
+      "title": "Unassigned IT",
+      "targets": [{"expr": "django_app_tickets_unassigned_total{domain='it'}", "refId": "A"}],
+      "gridPos": {"x": 12, "y": 0, "w": 6, "h": 4}
+    },
+    {
+      "id": 4,
+      "type": "stat",
+      "title": "Restored MTTR (P1, h)",
+      "targets": [{"expr": "django_app_it_p1_mttr_hours", "refId": "A"}],
+      "gridPos": {"x": 18, "y": 0, "w": 6, "h": 4}
+    },
+    {
+      "id": 5,
+      "type": "timeseries",
+      "title": "IT incident volume by hour",
+      "targets": [{"expr": "sum by (status_code) (increase(django_app_tickets_by_status_total{domain='it'}[1h]))", "legendFormat": "{{status_code}}", "refId": "A"}],
+      "gridPos": {"x": 0, "y": 4, "w": 24, "h": 8}
+    }
+  ]
+}

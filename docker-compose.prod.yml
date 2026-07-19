@@ -1,0 +1,170 @@
+# =============================================================================
+# MHC e-Ticketing — production compose overrides
+# Bring this up alongside the base compose:
+#   docker compose -f docker-compose.yml -f docker-compose.prod.yml up -d
+#
+# What this changes vs the dev profile:
+#   * backend uses the prod settings module (HTTPS, hardened cookies, fail-fast secrets)
+#   * frontend is built once and served by Nginx (no Vite dev server)
+#   * Nginx terminates TLS and adds security headers
+#   * RabbitMQ uses a non-guest user
+#   * Redis is configured with a maxmemory policy and a slow log
+#   * ClamAV does not download signatures (operators provide a pre-warmed image)
+#   * MinIO versioning and object-lock-ready (off by default; toggle per bucket)
+#   * Prometheus + Alertmanager + Grafana for the production observability stack
+# =============================================================================
+
+name: mhc-ticketing-prod
+
+services:
+
+  backend:
+    image: mhc-ticketing-backend:prod
+    build:
+      context: ./backend
+      dockerfile: Dockerfile
+    env_file:
+      - .env
+    environment:
+      DJANGO_SETTINGS_MODULE: config.settings.prod
+      GUNICORN_WORKERS: "4"
+      GUNICORN_THREADS: "4"
+      GUNICORN_TIMEOUT: "60"
+      OTEL_EXPORTER_OTLP_ENDPOINT: ${OTEL_EXPORTER_OTLP_ENDPOINT:-http://otel-collector:4317}
+    ports:
+      - "127.0.0.1:8000:8000"   # bound to loopback; Nginx proxies in
+    healthcheck:
+      test: ["CMD", "curl", "-fsS", "http://localhost:8000/api/v1/health/live"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+    restart: unless-stopped
+    command: ["gunicorn", "-c", "gunicorn.conf.py", "config.wsgi:application"]
+
+  worker:
+    image: mhc-ticketing-backend:prod
+    build:
+      context: ./backend
+      dockerfile: Dockerfile
+    env_file:
+      - .env
+    environment:
+      DJANGO_SETTINGS_MODULE: config.settings.prod
+    command: ["celery", "-A", "config.celery", "worker", "--loglevel=INFO", "--concurrency=4"]
+    healthcheck:
+      test: ["CMD-SHELL", "celery -A config.celery inspect ping -t 5 || exit 1"]
+      interval: 30s
+      timeout: 10s
+      retries: 5
+    restart: unless-stopped
+
+  beat:
+    image: mhc-ticketing-backend:prod
+    build:
+      context: ./backend
+      dockerfile: Dockerfile
+    env_file:
+      - .env
+    environment:
+      DJANGO_SETTINGS_MODULE: config.settings.prod
+    command: ["celery", "-A", "config.celery", "beat", "--loglevel=INFO"]
+    restart: unless-stopped
+
+  frontend:
+    image: mhc-ticketing-frontend:prod
+    build:
+      context: ./frontend
+      dockerfile: Dockerfile
+      target: production   # multi-stage build (see frontend/Dockerfile)
+    profiles: ["never"]   # production frontend is served by Nginx from the image's static dir
+    restart: "no"
+
+  nginx:
+    image: nginx:1.27-alpine
+    restart: unless-stopped
+    depends_on:
+      backend:
+        condition: service_healthy
+    ports:
+      - "443:443"
+      - "80:80"     # redirect-only; see infrastructure/nginx/
+    volumes:
+      - ./infrastructure/nginx/nginx.conf:/etc/nginx/nginx.conf:ro
+      - ./infrastructure/nginx/conf.d:/etc/nginx/conf.d:ro
+      - ./infrastructure/nginx/ssl:/etc/nginx/ssl:ro
+      - frontend-static:/usr/share/nginx/html:ro
+    healthcheck:
+      test: ["CMD-SHELL", "wget -q --spider http://localhost/health || exit 1"]
+      interval: 30s
+      timeout: 5s
+      retries: 3
+
+  rabbitmq:
+    environment:
+      RABBITMQ_DEFAULT_USER: ${RABBITMQ_USER}
+      RABBITMQ_DEFAULT_PASS: ${RABBITMQ_PASSWORD}
+      RABBITMQ_DEFAULT_VHOST: ${RABBITMQ_VHOST:-/}
+    # Operators should also add: RABBITMQ_LOGS=-, RABBITMQ_USE_LONGNAME=true
+    healthcheck:
+      test: ["CMD", "rabbitmq-diagnostics", "-q", "ping"]
+      interval: 15s
+      timeout: 10s
+      retries: 10
+
+  redis:
+    command:
+      - "redis-server"
+      - "--appendonly"
+      - "yes"
+      - "--requirepass"
+      - "${REDIS_PASSWORD}"
+      - "--maxmemory"
+      - "256mb"
+      - "--maxmemory-policy"
+      - "allkeys-lru"
+      - "--slowlog-log-slower-than"
+      - "10000"
+      - "--slowlog-max-len"
+      - "128"
+
+  prometheus:
+    image: prom/prometheus:latest
+    restart: unless-stopped
+    volumes:
+      - ./infrastructure/prometheus/prometheus.yml:/etc/prometheus/prometheus.yml:ro
+      - ./infrastructure/prometheus/alerts:/etc/prometheus/alerts:ro
+      - prometheus-data:/prometheus
+    command:
+      - "--config.file=/etc/prometheus/prometheus.yml"
+      - "--storage.tsdb.retention.time=30d"
+      - "--web.enable-lifecycle"
+    ports:
+      - "127.0.0.1:9090:9090"
+
+  alertmanager:
+    image: prom/alertmanager:latest
+    restart: unless-stopped
+    volumes:
+      - ./infrastructure/prometheus/alertmanager.yml:/etc/alertmanager/alertmanager.yml:ro
+    ports:
+      - "127.0.0.1:9093:9093"
+
+  grafana:
+    image: grafana/grafana:latest
+    restart: unless-stopped
+    environment:
+      GF_SECURITY_ADMIN_PASSWORD: ${GRAFANA_ADMIN_PASSWORD}
+      GF_USERS_ALLOW_SIGN_UP: "false"
+      GF_AUTH_ANONYMOUS_ENABLED: "false"
+    volumes:
+      - ./infrastructure/grafana/dashboards:/etc/grafana/provisioning/dashboards:ro
+      - ./infrastructure/grafana/datasources:/etc/grafana/provisioning/datasources:ro
+      - grafana-data:/var/lib/grafana
+    ports:
+      - "127.0.0.1:3000:3000"
+
+volumes:
+  prometheus-data:
+  grafana-data:
+  frontend-static:
+    # Populated by `frontend/Dockerfile` (production target)

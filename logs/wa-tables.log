@@ -1,0 +1,7 @@
+﻿              List of tables
+ Schema |       Name       | Type  | Owner 
+--------+------------------+-------+-------
+ public | whatsapp_account | table | mhc
+ public | whatsapp_message | table | mhc
+(2 rows)
+

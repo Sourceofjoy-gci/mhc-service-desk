@@ -1,0 +1,18 @@
+﻿docker :  Container mhc-ticketing-worker-1 Running 
+At line:3 char:1
++ docker compose run --rm --no-deps backend python manage.py makemigrat ...
++ ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+    + CategoryInfo          : NotSpecified: ( Container mhc-...rker-1 Running :String) [], RemoteException
+    + FullyQualifiedErrorId : NativeCommandError
+ 
+ Container mhc-ticketing-postgres-1 Running 
+ Container mhc-ticketing-redis-1 Running 
+ Container mhc-ticketing-clamav-1 Running 
+ Container mhc-ticketing-minio-1 Running 
+ Container mhc-ticketing-frontend-1 Running 
+ Container mhc-ticketing-beat-1 Running 
+ Container mhc-ticketing-rabbitmq-1 Running 
+ Container mhc-ticketing-keycloak-1 Running 
+ Container mhc-ticketing-backend-run-ea2cac00fcf6 Creating 
+ Container mhc-ticketing-backend-run-ea2cac00fcf6 Created 
+No changes detected

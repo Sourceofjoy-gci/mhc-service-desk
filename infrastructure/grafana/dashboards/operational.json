@@ -1,0 +1,53 @@
+{
+  "title": "MHC e-Ticketing — Operational Service Desk",
+  "uid": "mhc-operational",
+  "schemaVersion": 38,
+  "version": 1,
+  "timezone": "browser",
+  "refresh": "30s",
+  "time": {"from": "now-6h", "to": "now"},
+  "panels": [
+    {
+      "id": 1,
+      "type": "stat",
+      "title": "Open tickets",
+      "targets": [{"expr": "django_app_tickets_open_total{domain='operational'}", "refId": "A"}],
+      "gridPos": {"x": 0, "y": 0, "w": 6, "h": 4}
+    },
+    {
+      "id": 2,
+      "type": "stat",
+      "title": "New today",
+      "targets": [{"expr": "increase(django_app_tickets_created_total{domain='operational'}[24h])", "refId": "A"}],
+      "gridPos": {"x": 6, "y": 0, "w": 6, "h": 4}
+    },
+    {
+      "id": 3,
+      "type": "stat",
+      "title": "SLA breaches (1h)",
+      "targets": [{"expr": "increase(apps_sla_evaluator_breached_total[1h])", "refId": "A"}],
+      "gridPos": {"x": 12, "y": 0, "w": 6, "h": 4}
+    },
+    {
+      "id": 4,
+      "type": "stat",
+      "title": "p95 request latency",
+      "targets": [{"expr": "histogram_quantile(0.95, sum by (le) (rate(django_http_request_duration_seconds_view_bucket[5m]))", "refId": "A"}],
+      "gridPos": {"x": 18, "y": 0, "w": 6, "h": 4}
+    },
+    {
+      "id": 5,
+      "type": "timeseries",
+      "title": "Tickets by status",
+      "targets": [{"expr": "django_app_tickets_by_status_total{domain='operational'}", "legendFormat": "{{status_code}}", "refId": "A"}],
+      "gridPos": {"x": 0, "y": 4, "w": 12, "h": 8}
+    },
+    {
+      "id": 6,
+      "type": "timeseries",
+      "title": "Tickets by priority",
+      "targets": [{"expr": "django_app_tickets_by_priority_total{domain='operational'}", "legendFormat": "{{priority}}", "refId": "A"}],
+      "gridPos": {"x": 12, "y": 4, "w": 12, "h": 8}
+    }
+  ]
+}

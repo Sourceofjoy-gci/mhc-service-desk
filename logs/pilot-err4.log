@@ -1,0 +1,20 @@
+﻿backend-1  |   File "<frozen importlib._bootstrap>", line 488, in _call_with_frames_removed
+backend-1  |   File "/app/config/settings/dev.py", line 22, in <module>
+backend-1  |     from apps.identity_access.authentication import KeycloakJWTAuthentication  # noqa: E402
+backend-1  |     ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+backend-1  |   File "/app/apps/identity_access/authentication.py", line 16, in <module>
+backend-1  |     from rest_framework_simplejwt.tokens import AccessToken
+backend-1  |   File "/usr/local/lib/python3.12/site-packages/rest_framework_simplejwt/tokens.py", line 6, in <module>
+backend-1  |     from django.contrib.auth.models import AbstractBaseUser
+backend-1  |   File "/usr/local/lib/python3.12/site-packages/django/contrib/auth/models.py", line 5, in <module>
+backend-1  |     from django.contrib.auth.base_user import AbstractBaseUser, BaseUserManager
+backend-1  |   File "/usr/local/lib/python3.12/site-packages/django/contrib/auth/base_user.py", line 43, in <module>
+backend-1  |     class AbstractBaseUser(models.Model):
+backend-1  |   File "/usr/local/lib/python3.12/site-packages/django/db/models/base.py", line 131, in __new__
+backend-1  |     app_config = apps.get_containing_app_config(module)
+backend-1  |                  ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+backend-1  |   File "/usr/local/lib/python3.12/site-packages/django/apps/registry.py", line 260, in get_containing_app_config
+backend-1  |     self.check_apps_ready()
+backend-1  |   File "/usr/local/lib/python3.12/site-packages/django/apps/registry.py", line 138, in check_apps_ready
+backend-1  |     raise AppRegistryNotReady("Apps aren't loaded yet.")
+backend-1  | django.core.exceptions.AppRegistryNotReady: Apps aren't loaded yet.

@@ -1,21 +1,51 @@
+# Prometheus scrape configuration for the production stack (PRD NFR-019).
+
 global:
   scrape_interval: 15s
   evaluation_interval: 15s
+  external_labels:
+    cluster: mhc-ticketing-prod
+    environment: production
+
+rule_files:
+  - /etc/prometheus/alerts/*.yml
+
+alerting:
+  alertmanagers:
+    - static_configs:
+        - targets: ["alertmanager:9093"]
 
 scrape_configs:
-  - job_name: 'backend'
+  - job_name: prometheus
+    static_configs:
+      - targets: ["localhost:9090"]
+
+  - job_name: backend
     metrics_path: /api/v1/metrics
     static_configs:
-      - targets: ['backend:8000']
+      - targets: ["backend:8000"]
+    relabel_configs:
+      - source_labels: [__address__]
+        target_label: instance
+        replacement: backend
 
-  - job_name: 'postgres'
+  - job_name: postgres
     static_configs:
-      - targets: ['postgres-exporter:9187']
+      - targets: ["postgres-exporter:9187"]
 
-  - job_name: 'rabbitmq'
+  - job_name: redis
     static_configs:
-      - targets: ['rabbitmq:15692']
+      - targets: ["redis-exporter:9121"]
 
-  - job_name: 'redis'
+  - job_name: rabbitmq
     static_configs:
-      - targets: ['redis-exporter:9121']
+      - targets: ["rabbitmq:15692"]
+    metrics_path: /metrics
+
+  - job_name: nginx
+    static_configs:
+      - targets: ["nginx-exporter:9113"]
+
+  - job_name: node
+    static_configs:
+      - targets: ["node-exporter:9100"]

@@ -1,7 +1,7 @@
 # syntax=docker/dockerfile:1.7
 # =============================================================================
-# MHC e-Ticketing — backend image
-# Used by web, worker, and beat services.
+# MHC e-Ticketing — production backend image
+# Runs gunicorn with the prod settings. The dev profile uses Dockerfile.dev.
 # =============================================================================
 FROM python:3.12-slim AS base
 
@@ -10,33 +10,32 @@ ENV PYTHONDONTWRITEBYTECODE=1 \
     PIP_NO_CACHE_DIR=1 \
     PIP_DISABLE_PIP_VERSION_CHECK=1
 
-# System dependencies: build tools, libpq, libmagic, clamav client libs, curl
 RUN apt-get update && apt-get install -y --no-install-recommends \
-        build-essential \
         libpq-dev \
         libmagic1 \
-        libclamav-dev \
-        clamav-daemon \
-        clamav-freshclam \
         curl \
-        netcat-openbsd \
+        tini \
     && rm -rf /var/lib/apt/lists/*
 
 WORKDIR /app
 
-# Install Python dependencies separately to leverage Docker layer cache
 COPY requirements/ ./requirements/
 RUN pip install --upgrade pip && \
-    pip install -r requirements/base.txt
+    pip install -r requirements/base.txt && \
+    pip install gunicorn==23.0.0
 
-# Copy application source
 COPY . /app
 
-# Drop privileges
 RUN useradd --create-home --shell /bin/bash app && chown -R app:app /app
 USER app
 
+ENV DJANGO_SETTINGS_MODULE=config.settings.prod \
+    PORT=8000
+
 EXPOSE 8000
 
-# Default command (overridden by docker-compose for worker/beat)
-CMD ["gunicorn", "config.wsgi:application", "--bind", "0.0.0.0:8000", "--workers", "3", "--access-logfile", "-"]
+HEALTHCHECK --interval=15s --timeout=5s --retries=3 \
+    CMD curl -fsS http://localhost:${PORT}/api/v1/health/live || exit 1
+
+ENTRYPOINT ["/usr/bin/tini", "--"]
+CMD ["gunicorn", "-c", "gunicorn.conf.py", "config.wsgi:application"]

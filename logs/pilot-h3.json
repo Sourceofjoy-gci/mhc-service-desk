@@ -1,0 +1,8 @@
+﻿docker : Error response from daemon: Container f96ef249fcd2a27eb6f71fb9abe674a27fee3c2e1d768a57b0341a5ad984803a is 
+restarting, wait until the container is running
+At line:9 char:1
++ docker compose exec -T backend curl -s http://localhost:8000/api/v1/h ...
++ ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+    + CategoryInfo          : NotSpecified: (Error response ...iner is running:String) [], RemoteException
+    + FullyQualifiedErrorId : NativeCommandError
+ 

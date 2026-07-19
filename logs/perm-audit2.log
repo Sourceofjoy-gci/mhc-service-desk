@@ -1,0 +1,5 @@
+﻿Traceback (most recent call last):
+  File "/app/scripts/permission_audit.py", line 16, in <module>
+    import config.urls  # noqa: F401  (forces URL setup)
+    ^^^^^^^^^^^^^^^^^^
+ModuleNotFoundError: No module named 'config'

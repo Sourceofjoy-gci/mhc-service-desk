@@ -9,7 +9,8 @@
 const API_BASE = (import.meta.env.VITE_API_BASE_URL ?? "") + "/api/v1";
 
 export const DEV_AUTH_TOKEN =
-  import.meta.env.VITE_DEV_AUTH === "1"
+  import.meta.env.VITE_DEV_AUTH === "1" &&
+  import.meta.env.MODE === "development"
     ? "Bearer dev:demo:ops-agents"
     : null;
 

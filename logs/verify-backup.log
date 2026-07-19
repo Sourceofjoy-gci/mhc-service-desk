@@ -1,0 +1,9 @@
+﻿[verify] collecting live row counts
+bash : failed to connect to the docker API at unix:///var/run/docker.sock; check if the path is correct and if the 
+daemon is running: dial unix /var/run/docker.sock: connect: no such file or directory
+At line:3 char:1
++ bash scripts/verify_backup.sh 2>&1 | Out-File -FilePath "C:\Users\sou ...
++ ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+    + CategoryInfo          : NotSpecified: (failed to conne...le or directory:String) [], RemoteException
+    + FullyQualifiedErrorId : NativeCommandError
+ 

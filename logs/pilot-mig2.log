@@ -1,0 +1,7 @@
+﻿Migrations for 'tickets':
+  apps/tickets/migrations/0003_ticket_legal_hold_ticket_legal_hold_expires_at_and_more.py
+    + Add field legal_hold to ticket
+    + Add field legal_hold_expires_at to ticket
+    + Add field legal_hold_reason to ticket
+    + Add field legal_hold to ticketmessage
+    + Add field legal_hold to ticketnote

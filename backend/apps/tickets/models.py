@@ -90,6 +90,14 @@ class Ticket(models.Model):
         max_length=16, choices=Confidentiality.choices, default=Confidentiality.NORMAL
     )
 
+    # --- Legal hold ------------------------------------------------------
+    # When set, retention disposal (apps.administration.retention) MUST skip
+    # this ticket and all messages/notes attached to it. Holds are set by an
+    # authorised administrator and have an optional expiry.
+    legal_hold = models.BooleanField(default=False, db_index=True)
+    legal_hold_expires_at = models.DateTimeField(null=True, blank=True)
+    legal_hold_reason = models.CharField(max_length=255, blank=True)
+
     matter_reference = models.CharField(max_length=128, blank=True, db_index=True)
     external_message_id = models.CharField(max_length=255, blank=True, db_index=True)
 
@@ -146,6 +154,7 @@ class TicketMessage(models.Model):
     template_version = models.CharField(max_length=32, blank=True)
     external_message_id = models.CharField(max_length=255, blank=True, db_index=True)
     delivery_status = models.CharField(max_length=32, blank=True)
+    legal_hold = models.BooleanField(default=False, db_index=True)
     created_at = models.DateTimeField(auto_now_add=True, db_index=True)
 
     class Meta:
@@ -160,6 +169,7 @@ class TicketNote(models.Model):
     ticket = models.ForeignKey(Ticket, on_delete=models.CASCADE, related_name="notes")
     author_subject = models.CharField(max_length=255)
     body = models.TextField()
+    legal_hold = models.BooleanField(default=False, db_index=True)
     created_at = models.DateTimeField(auto_now_add=True, db_index=True)
 
     class Meta:

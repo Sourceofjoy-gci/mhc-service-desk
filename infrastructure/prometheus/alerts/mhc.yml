@@ -1,0 +1,104 @@
+# Alertmanager rule files for the MHC e-Ticketing platform.
+# All alerts are critical (page on-call) or warning (Slack/PagerDuty).
+
+groups:
+  - name: mhc.availability
+    rules:
+      - alert: BackendDown
+        expr: up{job="backend"} == 0
+        for: 2m
+        labels: { severity: critical, team: sre }
+        annotations:
+          summary: "Backend is down"
+          runbook: "https://wiki.mhc-ticketing.local/runbooks/backend-down"
+
+      - alert: Backend5xxRateHigh
+        expr: |
+          sum(rate(django_http_responses_total_by_status_view_total{status=~"5.."}[5m])) /
+          sum(rate(django_http_responses_total_by_status_view_total[5m])) > 0.05
+        for: 5m
+        labels: { severity: critical, team: sre }
+        annotations:
+          summary: "Backend 5xx ratio > 5% for 5m"
+
+      - alert: HealthCheckDegraded
+        expr: probe_success{job="blackbox-health"} == 0
+        for: 3m
+        labels: { severity: critical, team: sre }
+
+  - name: mhc.performance
+    rules:
+      - alert: RequestLatencyP95High
+        expr: |
+          histogram_quantile(0.95, sum by (le) (rate(django_http_request_duration_seconds_view_bucket[5m]))) > 2.0
+        for: 10m
+        labels: { severity: warning, team: sre }
+        annotations:
+          summary: "p95 latency > 2s for 10m"
+
+      - alert: QueueDepthHigh
+        expr: rabbitmq_queue_messages_ready{queue=~"celery|notifications|sla|files"} > 1000
+        for: 5m
+        labels: { severity: warning, team: sre }
+
+      - alert: DatabaseConnectionsHigh
+        expr: pg_stat_activity_count > 80
+        for: 5m
+        labels: { severity: warning, team: sre }
+
+  - name: mhc.security
+    rules:
+      - alert: FailedLoginSpike
+        expr: |
+          sum(rate(django_http_responses_total_by_status_view_total{view="identity.me",status="401"}[5m])) > 5
+        for: 5m
+        labels: { severity: warning, team: security }
+        annotations:
+          summary: "401 spike on /identity/me — possible credential stuffing"
+
+      - alert: AuthorizationDeniedSpike
+        expr: |
+          sum(rate(apps_audit_middleware_authorization_denied_total[5m])) > 0.5
+        for: 5m
+        labels: { severity: warning, team: security }
+
+      - alert: AttachmentInfectedDetected
+        expr: |
+          increase(apps_files_attachments_infected_total[15m]) > 0
+        for: 0m
+        labels: { severity: critical, team: security }
+        annotations:
+          summary: "An infected attachment was quarantined"
+
+  - name: mhc.sla
+    rules:
+      - alert: SlaBreachesGrowing
+        expr: |
+          increase(apps_sla_evaluator_breached_total[1h]) > 5
+        for: 0m
+        labels: { severity: warning, team: ops }
+        annotations:
+          summary: "More than 5 SLA breaches in the last hour"
+
+      - alert: SlaEvaluatorStalled
+        expr: time() - apps_sla_evaluator_last_run_timestamp > 120
+        for: 5m
+        labels: { severity: critical, team: ops }
+        annotations:
+          summary: "SLA evaluator has not run in over 2 minutes"
+
+  - name: mhc.infra
+    rules:
+      - alert: DiskSpaceLow
+        expr: (node_filesystem_avail_bytes{mountpoint="/"} / node_filesystem_size_bytes) < 0.10
+        for: 5m
+        labels: { severity: critical, team: sre }
+        annotations:
+          summary: "Less than 10% disk space"
+
+      - alert: CertificateExpiringSoon
+        expr: probe_ssl_earliest_cert_expiry - time() < 86400 * 14
+        for: 1h
+        labels: { severity: warning, team: sre }
+        annotations:
+          summary: "TLS certificate expires in < 14 days"

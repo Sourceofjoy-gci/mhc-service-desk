@@ -1,0 +1,5 @@
+﻿backend-1  |   File "/usr/local/lib/python3.12/site-packages/django/apps/registry.py", line 260, in get_containing_app_config
+backend-1  |     self.check_apps_ready()
+backend-1  |   File "/usr/local/lib/python3.12/site-packages/django/apps/registry.py", line 138, in check_apps_ready
+backend-1  |     raise AppRegistryNotReady("Apps aren't loaded yet.")
+backend-1  | django.core.exceptions.AppRegistryNotReady: Apps aren't loaded yet.

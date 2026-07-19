@@ -1,7 +1,16 @@
-﻿/app
-__init__.py
-asgi.py
-celery.py
-settings.py
-urls.py
-wsgi.py
+﻿
+
+    Directory: C:\Users\sourc\Downloads\ticket\backups
+
+
+Mode                 LastWriteTime         Length Name                                                                 
+----                 -------------         ------ ----                                                                 
+d-----        2026/07/19     14:37                verify-20260719T123717Z                                              
+d-----        2026/07/19     14:37                verify-20260719T123749Z                                              
+d-----        2026/07/19     14:38                verify-20260719T123806Z                                              
+d-----        2026/07/19     14:38                verify-20260719T123831Z                                              
+d-----        2026/07/19     14:39                verify-20260719T123858Z                                              
+d-----        2026/07/19     14:39                verify-20260719T123937Z                                              
+d-----        2026/07/19     14:40                verify-20260719T124008Z                                              
+
+

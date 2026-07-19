@@ -1,0 +1,13 @@
+﻿powershell : Get-Date : A parameter cannot be found that matches parameter name 'AsUTC'.
+At line:2 char:1
++ powershell -ExecutionPolicy Bypass -File scripts/verify_backup.ps1 2> ...
++ ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+    + CategoryInfo          : NotSpecified: (Get-Date : A pa...r name 'AsUTC'.:String) [], RemoteException
+    + FullyQualifiedErrorId : NativeCommandError
+ 
+At C:\Users\sourc\Downloads\ticket\scripts\verify_backup.ps1:17 char:24
++ $timestamp = (Get-Date -AsUTC).ToString("yyyyMMddTHHmmssZ")
++                        ~~~~~~
+    + CategoryInfo          : InvalidArgument: (:) [Get-Date], ParentContainsErrorRecordException
+    + FullyQualifiedErrorId : NamedParameterNotFound,Microsoft.PowerShell.Commands.GetDateCommand
+ 

@@ -1,0 +1,14 @@
+﻿[verify] collecting live row counts
+powershell : docker : ERROR:  relation "workflow_transitionhistory" does not exist
+At line:2 char:1
++ powershell -ExecutionPolicy Bypass -File scripts/verify_backup.ps1 2> ...
++ ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+    + CategoryInfo          : NotSpecified: (docker : ERROR:... does not exist:String) [], RemoteException
+    + FullyQualifiedErrorId : NativeCommandError
+ 
+At C:\Users\sourc\Downloads\ticket\scripts\verify_backup.ps1:35 char:18
++ ...    $count = docker compose exec -T postgres psql -U $postgresUser -d  ...
++                 ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+    + CategoryInfo          : NotSpecified: (ERROR:  relatio... does not exist:String) [], RemoteException
+    + FullyQualifiedErrorId : NativeCommandError
+ 

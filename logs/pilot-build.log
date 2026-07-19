@@ -1,0 +1,581 @@
+﻿docker :  Image mhc-ticketing-backend Building 
+At line:9 char:1
++ docker compose build backend 2>&1 | Out-File -FilePath "C:\Users\sour ...
++ ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+    + CategoryInfo          : NotSpecified: ( Image mhc-ticketing-backend Building :String) [], RemoteException
+    + FullyQualifiedErrorId : NativeCommandError
+ 
+#1 [internal] load local bake definitions
+#1 reading from stdin 557B done
+#1 DONE 0.0s
+
+#2 [internal] load build definition from Dockerfile
+#2 transferring dockerfile: 1.25kB 0.0s done
+#2 DONE 0.0s
+
+#3 resolve image config for docker-image://docker.io/docker/dockerfile:1.7
+#3 DONE 2.2s
+
+#4 docker-image://docker.io/docker/dockerfile:1.7@sha256:a57df69d0ea827fb7266491f2813635de6f17269be881f696fbfdf2d83dda33e
+#4 resolve docker.io/docker/dockerfile:1.7@sha256:a57df69d0ea827fb7266491f2813635de6f17269be881f696fbfdf2d83dda33e 0.1s done
+#4 CACHED
+
+#5 [internal] load metadata for docker.io/library/python:3.12-slim
+#5 DONE 2.7s
+
+#6 [internal] load .dockerignore
+#6 transferring context: 2B done
+#6 DONE 0.0s
+
+#7 [1/7] FROM docker.io/library/python:3.12-slim@sha256:57cd7c3a7a273101a6485ba99423ee568157882804b1124b4dd04266317710de
+#7 resolve docker.io/library/python:3.12-slim@sha256:57cd7c3a7a273101a6485ba99423ee568157882804b1124b4dd04266317710de 0.1s done
+#7 CACHED
+
+#8 [2/7] RUN apt-get update && apt-get install -y --no-install-recommends         libpq-dev         libmagic1         curl         tini     && rm -rf /var/lib/apt/lists/*
+#8 ...
+
+#9 [internal] load build context
+#9 transferring context: 94.24kB 0.1s done
+#9 DONE 0.1s
+
+#8 [2/7] RUN apt-get update && apt-get install -y --no-install-recommends         libpq-dev         libmagic1         curl         tini     && rm -rf /var/lib/apt/lists/*
+#8 1.446 Hit:1 http://deb.debian.org/debian trixie InRelease
+#8 1.596 Get:2 http://deb.debian.org/debian trixie-updates InRelease [47.3 kB]
+#8 1.895 Get:3 http://deb.debian.org/debian-security trixie-security InRelease [43.4 kB]
+#8 2.093 Get:4 http://deb.debian.org/debian trixie/main amd64 Packages [9673 kB]
+#8 12.38 Get:5 http://deb.debian.org/debian trixie-updates/main amd64 Packages [4412 B]
+#8 12.55 Get:6 http://deb.debian.org/debian-security trixie-security/main amd64 Packages [226 kB]
+#8 13.45 Fetched 9993 kB in 13s (781 kB/s)
+#8 13.45 Reading package lists...
+#8 14.13 Reading package lists...
+#8 14.97 Building dependency tree...
+#8 15.23 Reading state information...
+#8 15.56 The following additional packages will be installed:
+#8 15.56   libbrotli1 libcom-err2 libcurl4t64 libgnutls30t64 libgssapi-krb5-2 libidn2-0
+#8 15.56   libk5crypto3 libkeyutils1 libkrb5-3 libkrb5support0 libldap2 libmagic-mgc
+#8 15.56   libnghttp2-14 libnghttp3-9 libp11-kit0 libpq5 libpsl5t64 librtmp1 libsasl2-2
+#8 15.57   libsasl2-modules-db libssh2-1t64 libssl-dev libtasn1-6 libunistring5
+#8 15.57 Suggested packages:
+#8 15.57   gnutls-bin krb5-doc krb5-user file postgresql-doc-17 libssl-doc
+#8 15.57 Recommended packages:
+#8 15.57   bash-completion krb5-locales libldap-common publicsuffix libsasl2-modules
+#8 15.84 The following NEW packages will be installed:
+#8 15.84   curl libbrotli1 libcom-err2 libcurl4t64 libgnutls30t64 libgssapi-krb5-2
+#8 15.84   libidn2-0 libk5crypto3 libkeyutils1 libkrb5-3 libkrb5support0 libldap2
+#8 15.84   libmagic-mgc libmagic1t64 libnghttp2-14 libnghttp3-9 libp11-kit0 libpq-dev
+#8 15.85   libpq5 libpsl5t64 librtmp1 libsasl2-2 libsasl2-modules-db libssh2-1t64
+#8 15.85   libssl-dev libtasn1-6 libunistring5 tini
+#8 16.21 0 upgraded, 28 newly installed, 0 to remove and 0 not upgraded.
+#8 16.21 Need to get 8958 kB of archives.
+#8 16.21 After this operation, 44.2 MB of additional disk space will be used.
+#8 16.21 Get:1 http://deb.debian.org/debian trixie/main amd64 libbrotli1 amd64 1.1.0-2+b7 [307 kB]
+#8 16.98 Get:2 http://deb.debian.org/debian trixie/main amd64 libkrb5support0 amd64 1.21.3-5+deb13u1 [33.1 kB]
+#8 17.06 Get:3 http://deb.debian.org/debian trixie/main amd64 libcom-err2 amd64 1.47.2-3+b11 [25.0 kB]
+#8 17.12 Get:4 http://deb.debian.org/debian trixie/main amd64 libk5crypto3 amd64 1.21.3-5+deb13u1 [81.2 kB]
+#8 17.21 Get:5 http://deb.debian.org/debian trixie/main amd64 libkeyutils1 amd64 1.6.3-6 [9456 B]
+#8 17.22 Get:6 http://deb.debian.org/debian trixie/main amd64 libkrb5-3 amd64 1.21.3-5+deb13u1 [326 kB]
+#8 17.77 Get:7 http://deb.debian.org/debian trixie/main amd64 libgssapi-krb5-2 amd64 1.21.3-5+deb13u1 [138 kB]
+#8 17.79 Get:8 http://deb.debian.org/debian trixie/main amd64 libunistring5 amd64 1.3-2 [477 kB]
+#8 18.13 Get:9 http://deb.debian.org/debian trixie/main amd64 libidn2-0 amd64 2.3.8-2 [109 kB]
+#8 18.29 Get:10 http://deb.debian.org/debian trixie/main amd64 libsasl2-modules-db amd64 2.1.28+dfsg1-9 [19.8 kB]
+#8 18.29 Get:11 http://deb.debian.org/debian trixie/main amd64 libsasl2-2 amd64 2.1.28+dfsg1-9 [57.5 kB]
+#8 18.42 Get:12 http://deb.debian.org/debian trixie/main amd64 libldap2 amd64 2.6.10+dfsg-1 [194 kB]
+#8 18.61 Get:13 http://deb.debian.org/debian trixie/main amd64 libnghttp2-14 amd64 1.64.0-1.1+deb13u1 [76.2 kB]
+#8 18.93 Get:14 http://deb.debian.org/debian trixie/main amd64 libnghttp3-9 amd64 1.8.0-1 [67.7 kB]
+#8 19.02 Get:15 http://deb.debian.org/debian trixie/main amd64 libpsl5t64 amd64 0.21.2-1.1+b1 [57.2 kB]
+#8 19.02 Get:16 http://deb.debian.org/debian trixie/main amd64 libp11-kit0 amd64 0.25.5-3 [425 kB]
+#8 19.72 Get:17 http://deb.debian.org/debian trixie/main amd64 libtasn1-6 amd64 4.20.0-2+deb13u1 [50.1 kB]
+#8 19.85 Get:18 http://deb.debian.org/debian trixie/main amd64 libgnutls30t64 amd64 3.8.9-3+deb13u4 [1469 kB]
+#8 21.56 Get:19 http://deb.debian.org/debian trixie/main amd64 librtmp1 amd64 2.4+20151223.gitfa8646d.1-2+b5 [58.8 kB]
+#8 21.62 Get:20 http://deb.debian.org/debian trixie/main amd64 libssh2-1t64 amd64 1.11.1-1+deb13u1 [245 kB]
+#8 21.96 Get:21 http://deb.debian.org/debian trixie/main amd64 libcurl4t64 amd64 8.14.1-2+deb13u4 [392 kB]
+#8 22.42 Get:22 http://deb.debian.org/debian trixie/main amd64 curl amd64 8.14.1-2+deb13u4 [270 kB]
+#8 22.78 Get:23 http://deb.debian.org/debian trixie/main amd64 libmagic-mgc amd64 1:5.46-5 [338 kB]
+#8 23.23 Get:24 http://deb.debian.org/debian trixie/main amd64 libmagic1t64 amd64 1:5.46-5 [109 kB]
+#8 23.38 Get:25 http://deb.debian.org/debian trixie/main amd64 libpq5 amd64 17.10-0+deb13u1 [230 kB]
+#8 23.70 Get:26 http://deb.debian.org/debian trixie/main amd64 libssl-dev amd64 3.5.6-1~deb13u2 [2959 kB]
+#8 28.72 Get:27 http://deb.debian.org/debian trixie/main amd64 libpq-dev amd64 17.10-0+deb13u1 [154 kB]
+#8 28.73 Get:28 http://deb.debian.org/debian trixie/main amd64 tini amd64 0.19.0-3+b7 [280 kB]
+#8 29.27 debconf: unable to initialize frontend: Dialog
+#8 29.27 debconf: (TERM is not set, so the dialog frontend is not usable.)
+#8 29.27 debconf: falling back to frontend: Readline
+#8 29.27 debconf: unable to initialize frontend: Readline
+#8 29.27 debconf: (Can't locate Term/ReadLine.pm in @INC (you may need to install the Term::ReadLine module) (@INC entries checked: /etc/perl /usr/local/lib/x86_64-linux-gnu/perl/5.40.1 /usr/local/share/perl/5.40.1 /usr/lib/x86_64-linux-gnu/perl5/5.40 /usr/share/perl5 /usr/lib/x86_64-linux-gnu/perl-base /usr/lib/x86_64-linux-gnu/perl/5.40 /usr/share/perl/5.40 /usr/local/lib/site_perl) at /usr/share/perl5/Debconf/FrontEnd/Readline.pm line 8, <STDIN> line 28.)
+#8 29.27 debconf: falling back to frontend: Teletype
+#8 29.28 debconf: unable to initialize frontend: Teletype
+#8 29.28 debconf: (This frontend requires a controlling tty.)
+#8 29.28 debconf: falling back to frontend: Noninteractive
+#8 29.93 Fetched 8958 kB in 13s (676 kB/s)
+#8 30.00 Selecting previously unselected package libbrotli1:amd64.
+#8 30.00 (Reading database ... 
+(Reading database ... 5%
+(Reading database ... 10%
+(Reading database ... 15%
+(Reading database ... 20%
+(Reading database ... 25%
+(Reading database ... 30%
+(Reading database ... 35%
+(Reading database ... 40%
+(Reading database ... 45%
+(Reading database ... 50%
+(Reading database ... 55%
+(Reading database ... 60%
+(Reading database ... 65%
+(Reading database ... 70%
+(Reading database ... 75%
+(Reading database ... 80%
+(Reading database ... 85%
+(Reading database ... 90%
+(Reading database ... 95%
+(Reading database ... 100%
+(Reading database ... 5645 files and directories currently installed.)
+#8 30.02 Preparing to unpack .../00-libbrotli1_1.1.0-2+b7_amd64.deb ...
+#8 30.06 Unpacking libbrotli1:amd64 (1.1.0-2+b7) ...
+#8 30.21 Selecting previously unselected package libkrb5support0:amd64.
+#8 30.21 Preparing to unpack .../01-libkrb5support0_1.21.3-5+deb13u1_amd64.deb ...
+#8 30.23 Unpacking libkrb5support0:amd64 (1.21.3-5+deb13u1) ...
+#8 30.37 Selecting previously unselected package libcom-err2:amd64.
+#8 30.37 Preparing to unpack .../02-libcom-err2_1.47.2-3+b11_amd64.deb ...
+#8 30.38 Unpacking libcom-err2:amd64 (1.47.2-3+b11) ...
+#8 30.51 Selecting previously unselected package libk5crypto3:amd64.
+#8 30.51 Preparing to unpack .../03-libk5crypto3_1.21.3-5+deb13u1_amd64.deb ...
+#8 30.53 Unpacking libk5crypto3:amd64 (1.21.3-5+deb13u1) ...
+#8 30.66 Selecting previously unselected package libkeyutils1:amd64.
+#8 30.66 Preparing to unpack .../04-libkeyutils1_1.6.3-6_amd64.deb ...
+#8 30.68 Unpacking libkeyutils1:amd64 (1.6.3-6) ...
+#8 30.81 Selecting previously unselected package libkrb5-3:amd64.
+#8 30.81 Preparing to unpack .../05-libkrb5-3_1.21.3-5+deb13u1_amd64.deb ...
+#8 30.83 Unpacking libkrb5-3:amd64 (1.21.3-5+deb13u1) ...
+#8 30.98 Selecting previously unselected package libgssapi-krb5-2:amd64.
+#8 30.98 Preparing to unpack .../06-libgssapi-krb5-2_1.21.3-5+deb13u1_amd64.deb ...
+#8 31.00 Unpacking libgssapi-krb5-2:amd64 (1.21.3-5+deb13u1) ...
+#8 31.13 Selecting previously unselected package libunistring5:amd64.
+#8 31.13 Preparing to unpack .../07-libunistring5_1.3-2_amd64.deb ...
+#8 31.15 Unpacking libunistring5:amd64 (1.3-2) ...
+#8 31.28 Selecting previously unselected package libidn2-0:amd64.
+#8 31.28 Preparing to unpack .../08-libidn2-0_2.3.8-2_amd64.deb ...
+#8 31.30 Unpacking libidn2-0:amd64 (2.3.8-2) ...
+#8 31.39 Selecting previously unselected package libsasl2-modules-db:amd64.
+#8 31.39 Preparing to unpack .../09-libsasl2-modules-db_2.1.28+dfsg1-9_amd64.deb ...
+#8 31.41 Unpacking libsasl2-modules-db:amd64 (2.1.28+dfsg1-9) ...
+#8 31.52 Selecting previously unselected package libsasl2-2:amd64.
+#8 31.52 Preparing to unpack .../10-libsasl2-2_2.1.28+dfsg1-9_amd64.deb ...
+#8 31.53 Unpacking libsasl2-2:amd64 (2.1.28+dfsg1-9) ...
+#8 31.65 Selecting previously unselected package libldap2:amd64.
+#8 31.65 Preparing to unpack .../11-libldap2_2.6.10+dfsg-1_amd64.deb ...
+#8 31.67 Unpacking libldap2:amd64 (2.6.10+dfsg-1) ...
+#8 31.79 Selecting previously unselected package libnghttp2-14:amd64.
+#8 31.79 Preparing to unpack .../12-libnghttp2-14_1.64.0-1.1+deb13u1_amd64.deb ...
+#8 31.80 Unpacking libnghttp2-14:amd64 (1.64.0-1.1+deb13u1) ...
+#8 31.93 Selecting previously unselected package libnghttp3-9:amd64.
+#8 31.93 Preparing to unpack .../13-libnghttp3-9_1.8.0-1_amd64.deb ...
+#8 31.94 Unpacking libnghttp3-9:amd64 (1.8.0-1) ...
+#8 32.06 Selecting previously unselected package libpsl5t64:amd64.
+#8 32.06 Preparing to unpack .../14-libpsl5t64_0.21.2-1.1+b1_amd64.deb ...
+#8 32.07 Unpacking libpsl5t64:amd64 (0.21.2-1.1+b1) ...
+#8 32.19 Selecting previously unselected package libp11-kit0:amd64.
+#8 32.19 Preparing to unpack .../15-libp11-kit0_0.25.5-3_amd64.deb ...
+#8 32.21 Unpacking libp11-kit0:amd64 (0.25.5-3) ...
+#8 32.34 Selecting previously unselected package libtasn1-6:amd64.
+#8 32.34 Preparing to unpack .../16-libtasn1-6_4.20.0-2+deb13u1_amd64.deb ...
+#8 32.35 Unpacking libtasn1-6:amd64 (4.20.0-2+deb13u1) ...
+#8 32.52 Selecting previously unselected package libgnutls30t64:amd64.
+#8 32.52 Preparing to unpack .../17-libgnutls30t64_3.8.9-3+deb13u4_amd64.deb ...
+#8 32.55 Unpacking libgnutls30t64:amd64 (3.8.9-3+deb13u4) ...
+#8 32.72 Selecting previously unselected package librtmp1:amd64.
+#8 32.72 Preparing to unpack .../18-librtmp1_2.4+20151223.gitfa8646d.1-2+b5_amd64.deb ...
+#8 32.74 Unpacking librtmp1:amd64 (2.4+20151223.gitfa8646d.1-2+b5) ...
+#8 33.09 Selecting previously unselected package libssh2-1t64:amd64.
+#8 33.09 Preparing to unpack .../19-libssh2-1t64_1.11.1-1+deb13u1_amd64.deb ...
+#8 33.11 Unpacking libssh2-1t64:amd64 (1.11.1-1+deb13u1) ...
+#8 33.23 Selecting previously unselected package libcurl4t64:amd64.
+#8 33.23 Preparing to unpack .../20-libcurl4t64_8.14.1-2+deb13u4_amd64.deb ...
+#8 33.24 Unpacking libcurl4t64:amd64 (8.14.1-2+deb13u4) ...
+#8 33.35 Selecting previously unselected package curl.
+#8 33.35 Preparing to unpack .../21-curl_8.14.1-2+deb13u4_amd64.deb ...
+#8 33.36 Unpacking curl (8.14.1-2+deb13u4) ...
+#8 33.46 Selecting previously unselected package libmagic-mgc.
+#8 33.46 Preparing to unpack .../22-libmagic-mgc_1%3a5.46-5_amd64.deb ...
+#8 33.48 Unpacking libmagic-mgc (1:5.46-5) ...
+#8 33.62 Selecting previously unselected package libmagic1t64:amd64.
+#8 33.62 Preparing to unpack .../23-libmagic1t64_1%3a5.46-5_amd64.deb ...
+#8 33.64 Unpacking libmagic1t64:amd64 (1:5.46-5) ...
+#8 33.75 Selecting previously unselected package libpq5:amd64.
+#8 33.75 Preparing to unpack .../24-libpq5_17.10-0+deb13u1_amd64.deb ...
+#8 33.77 Unpacking libpq5:amd64 (17.10-0+deb13u1) ...
+#8 33.88 Selecting previously unselected package libssl-dev:amd64.
+#8 33.88 Preparing to unpack .../25-libssl-dev_3.5.6-1~deb13u2_amd64.deb ...
+#8 33.90 Unpacking libssl-dev:amd64 (3.5.6-1~deb13u2) ...
+#8 34.13 Selecting previously unselected package libpq-dev.
+#8 34.14 Preparing to unpack .../26-libpq-dev_17.10-0+deb13u1_amd64.deb ...
+#8 34.15 Unpacking libpq-dev (17.10-0+deb13u1) ...
+#8 34.25 Selecting previously unselected package tini.
+#8 34.25 Preparing to unpack .../27-tini_0.19.0-3+b7_amd64.deb ...
+#8 34.27 Unpacking tini (0.19.0-3+b7) ...
+#8 34.38 Setting up libkeyutils1:amd64 (1.6.3-6) ...
+#8 34.43 Setting up libmagic-mgc (1:5.46-5) ...
+#8 34.48 Setting up libbrotli1:amd64 (1.1.0-2+b7) ...
+#8 34.53 Setting up libmagic1t64:amd64 (1:5.46-5) ...
+#8 34.61 Setting up libnghttp2-14:amd64 (1.64.0-1.1+deb13u1) ...
+#8 34.65 Setting up libcom-err2:amd64 (1.47.2-3+b11) ...
+#8 34.70 Setting up libkrb5support0:amd64 (1.21.3-5+deb13u1) ...
+#8 34.75 Setting up libsasl2-modules-db:amd64 (2.1.28+dfsg1-9) ...
+#8 34.80 Setting up libp11-kit0:amd64 (0.25.5-3) ...
+#8 34.84 Setting up libunistring5:amd64 (1.3-2) ...
+#8 34.88 Setting up libssl-dev:amd64 (3.5.6-1~deb13u2) ...
+#8 34.93 Setting up tini (0.19.0-3+b7) ...
+#8 34.98 Setting up libk5crypto3:amd64 (1.21.3-5+deb13u1) ...
+#8 35.04 Setting up libsasl2-2:amd64 (2.1.28+dfsg1-9) ...
+#8 35.08 Setting up libnghttp3-9:amd64 (1.8.0-1) ...
+#8 35.13 Setting up libtasn1-6:amd64 (4.20.0-2+deb13u1) ...
+#8 35.18 Setting up libkrb5-3:amd64 (1.21.3-5+deb13u1) ...
+#8 35.23 Setting up libssh2-1t64:amd64 (1.11.1-1+deb13u1) ...
+#8 35.28 Setting up libldap2:amd64 (2.6.10+dfsg-1) ...
+#8 35.35 Setting up libidn2-0:amd64 (2.3.8-2) ...
+#8 35.40 Setting up libgssapi-krb5-2:amd64 (1.21.3-5+deb13u1) ...
+#8 35.45 Setting up libgnutls30t64:amd64 (3.8.9-3+deb13u4) ...
+#8 35.49 Setting up libpsl5t64:amd64 (0.21.2-1.1+b1) ...
+#8 35.54 Setting up libpq5:amd64 (17.10-0+deb13u1) ...
+#8 35.58 Setting up libpq-dev (17.10-0+deb13u1) ...
+#8 35.63 Setting up librtmp1:amd64 (2.4+20151223.gitfa8646d.1-2+b5) ...
+#8 35.68 Setting up libcurl4t64:amd64 (8.14.1-2+deb13u4) ...
+#8 35.73 Setting up curl (8.14.1-2+deb13u4) ...
+#8 35.78 Processing triggers for libc-bin (2.41-12+deb13u3) ...
+#8 DONE 36.0s
+
+#10 [3/7] WORKDIR /app
+#10 DONE 0.2s
+
+#11 [4/7] COPY requirements/ ./requirements/
+#11 DONE 0.2s
+
+#12 [5/7] RUN pip install --upgrade pip &&     pip install -r requirements/base.txt &&     pip install gunicorn==23.0.0
+#12 1.801 Requirement already satisfied: pip in /usr/local/lib/python3.12/site-packages (25.0.1)
+#12 2.522 Collecting pip
+#12 3.194   Downloading pip-26.1.2-py3-none-any.whl.metadata (4.6 kB)
+#12 3.390 Downloading pip-26.1.2-py3-none-any.whl (1.8 MB)
+#12 5.574    ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━ 1.8/1.8 MB 987.1 kB/s eta 0:00:00
+#12 5.589 Installing collected packages: pip
+#12 5.589   Attempting uninstall: pip
+#12 5.591     Found existing installation: pip 25.0.1
+#12 5.616     Uninstalling pip-25.0.1:
+#12 5.705       Successfully uninstalled pip-25.0.1
+#12 6.539 Successfully installed pip-26.1.2
+#12 6.540 WARNING: Running pip as the 'root' user can result in broken permissions and conflicting behaviour with the system package manager, possibly rendering your system unusable. It is recommended to use a virtual environment instead: https://pip.pypa.io/warnings/venv. Use the --root-user-action option if you know what you are doing and want to suppress this warning.
+#12 8.417 Collecting Django==5.2.4 (from -r requirements/base.txt (line 5))
+#12 9.064   Downloading django-5.2.4-py3-none-any.whl.metadata (4.1 kB)
+#12 9.277 Collecting djangorestframework==3.15.2 (from -r requirements/base.txt (line 6))
+#12 9.475   Downloading djangorestframework-3.15.2-py3-none-any.whl.metadata (10 kB)
+#12 9.792 Collecting djangorestframework-simplejwt==5.3.1 (from -r requirements/base.txt (line 7))
+#12 9.988   Downloading djangorestframework_simplejwt-5.3.1-py3-none-any.whl.metadata (4.3 kB)
+#12 10.20 Collecting django-cors-headers==4.6.0 (from -r requirements/base.txt (line 8))
+#12 10.39   Downloading django_cors_headers-4.6.0-py3-none-any.whl.metadata (16 kB)
+#12 10.61 Collecting django-environ==0.11.2 (from -r requirements/base.txt (line 9))
+#12 10.81   Downloading django_environ-0.11.2-py2.py3-none-any.whl.metadata (11 kB)
+#12 11.03 Collecting psycopg==3.2.3 (from psycopg[binary]==3.2.3->-r requirements/base.txt (line 12))
+#12 11.23   Downloading psycopg-3.2.3-py3-none-any.whl.metadata (4.3 kB)
+#12 11.43 Collecting PyJWT==2.9.0 (from PyJWT[crypto]==2.9.0->-r requirements/base.txt (line 15))
+#12 11.62   Downloading PyJWT-2.9.0-py3-none-any.whl.metadata (3.0 kB)
+#12 12.31 Collecting cryptography==43.0.3 (from -r requirements/base.txt (line 16))
+#12 12.50   Downloading cryptography-43.0.3-cp39-abi3-manylinux_2_28_x86_64.whl.metadata (5.4 kB)
+#12 12.69 Collecting python-jose==3.3.0 (from python-jose[cryptography]==3.3.0->-r requirements/base.txt (line 17))
+#12 12.90   Downloading python_jose-3.3.0-py2.py3-none-any.whl.metadata (5.4 kB)
+#12 13.10 Collecting requests==2.32.3 (from -r requirements/base.txt (line 18))
+#12 13.31   Downloading requests-2.32.3-py3-none-any.whl.metadata (4.6 kB)
+#12 13.58 Collecting celery==5.4.0 (from -r requirements/base.txt (line 21))
+#12 13.78   Downloading celery-5.4.0-py3-none-any.whl.metadata (21 kB)
+#12 14.05 Collecting kombu==5.4.2 (from -r requirements/base.txt (line 22))
+#12 14.25   Downloading kombu-5.4.2-py3-none-any.whl.metadata (3.2 kB)
+#12 14.45 Collecting amqp==5.2.0 (from -r requirements/base.txt (line 23))
+#12 14.65   Downloading amqp-5.2.0-py3-none-any.whl.metadata (8.9 kB)
+#12 14.88 Collecting redis==5.1.1 (from -r requirements/base.txt (line 26))
+#12 15.09   Downloading redis-5.1.1-py3-none-any.whl.metadata (9.1 kB)
+#12 15.29 Collecting django-redis==5.4.0 (from -r requirements/base.txt (line 27))
+#12 15.49   Downloading django_redis-5.4.0-py3-none-any.whl.metadata (32 kB)
+#12 16.59 Collecting boto3==1.35.45 (from -r requirements/base.txt (line 30))
+#12 16.80   Downloading boto3-1.35.45-py3-none-any.whl.metadata (6.7 kB)
+#12 16.99 Collecting django-storages==1.14.4 (from -r requirements/base.txt (line 31))
+#12 17.19   Downloading django_storages-1.14.4-py3-none-any.whl.metadata (4.7 kB)
+#12 17.41 Collecting minio==7.2.9 (from -r requirements/base.txt (line 32))
+#12 17.61   Downloading minio-7.2.9-py3-none-any.whl.metadata (6.5 kB)
+#12 18.00 Collecting pydantic==2.9.2 (from -r requirements/base.txt (line 35))
+#12 18.20   Downloading pydantic-2.9.2-py3-none-any.whl.metadata (149 kB)
+#12 18.72 Collecting pydantic-settings==2.6.0 (from -r requirements/base.txt (line 36))
+#12 18.92   Downloading pydantic_settings-2.6.0-py3-none-any.whl.metadata (3.5 kB)
+#12 19.10 Collecting python-slugify==8.0.4 (from -r requirements/base.txt (line 37))
+#12 19.29   Downloading python_slugify-8.0.4-py2.py3-none-any.whl.metadata (8.5 kB)
+#12 19.62 Collecting phonenumberslite==8.13.52 (from -r requirements/base.txt (line 38))
+#12 19.83   Downloading phonenumberslite-8.13.52-py2.py3-none-any.whl.metadata (11 kB)
+#12 20.02 Collecting email-validator==2.2.0 (from -r requirements/base.txt (line 39))
+#12 20.22   Downloading email_validator-2.2.0-py3-none-any.whl.metadata (25 kB)
+#12 20.48 Collecting bleach==6.1.0 (from -r requirements/base.txt (line 40))
+#12 20.67   Downloading bleach-6.1.0-py3-none-any.whl.metadata (30 kB)
+#12 20.91 Collecting markdown==3.7 (from -r requirements/base.txt (line 41))
+#12 21.11   Downloading Markdown-3.7-py3-none-any.whl.metadata (7.0 kB)
+#12 21.60 Collecting python-magic==0.4.27 (from -r requirements/base.txt (line 42))
+#12 21.80   Downloading python_magic-0.4.27-py2.py3-none-any.whl.metadata (5.8 kB)
+#12 21.99 Collecting structlog==24.4.0 (from -r requirements/base.txt (line 45))
+#12 22.19   Downloading structlog-24.4.0-py3-none-any.whl.metadata (7.3 kB)
+#12 22.39 Collecting prometheus-client==0.21.0 (from -r requirements/base.txt (line 46))
+#12 22.62   Downloading prometheus_client-0.21.0-py3-none-any.whl.metadata (1.8 kB)
+#12 22.92 Collecting django-prometheus==2.3.1 (from -r requirements/base.txt (line 47))
+#12 23.14   Downloading django_prometheus-2.3.1-py2.py3-none-any.whl.metadata (9.4 kB)
+#12 23.37 Collecting opentelemetry-api==1.27.0 (from -r requirements/base.txt (line 48))
+#12 23.57   Downloading opentelemetry_api-1.27.0-py3-none-any.whl.metadata (1.4 kB)
+#12 23.76 Collecting opentelemetry-sdk==1.27.0 (from -r requirements/base.txt (line 49))
+#12 23.96   Downloading opentelemetry_sdk-1.27.0-py3-none-any.whl.metadata (1.5 kB)
+#12 24.15 Collecting opentelemetry-instrumentation-django==0.48b0 (from -r requirements/base.txt (line 50))
+#12 24.35   Downloading opentelemetry_instrumentation_django-0.48b0-py3-none-any.whl.metadata (2.2 kB)
+#12 24.61 Collecting opentelemetry-instrumentation-psycopg==0.48b0 (from -r requirements/base.txt (line 51))
+#12 24.84   Downloading opentelemetry_instrumentation_psycopg-0.48b0-py3-none-any.whl.metadata (1.9 kB)
+#12 25.04 Collecting opentelemetry-instrumentation-celery==0.48b0 (from -r requirements/base.txt (line 52))
+#12 25.24   Downloading opentelemetry_instrumentation_celery-0.48b0-py3-none-any.whl.metadata (1.9 kB)
+#12 25.53 Collecting opentelemetry-instrumentation-redis==0.48b0 (from -r requirements/base.txt (line 53))
+#12 25.73   Downloading opentelemetry_instrumentation_redis-0.48b0-py3-none-any.whl.metadata (1.9 kB)
+#12 25.92 Collecting opentelemetry-exporter-otlp==1.27.0 (from -r requirements/base.txt (line 54))
+#12 26.12   Downloading opentelemetry_exporter_otlp-1.27.0-py3-none-any.whl.metadata (2.3 kB)
+#12 26.32 Collecting asgiref>=3.8.1 (from Django==5.2.4->-r requirements/base.txt (line 5))
+#12 26.56   Downloading asgiref-3.12.1-py3-none-any.whl.metadata (9.4 kB)
+#12 26.75 Collecting sqlparse>=0.3.1 (from Django==5.2.4->-r requirements/base.txt (line 5))
+#12 26.95   Downloading sqlparse-0.5.5-py3-none-any.whl.metadata (4.7 kB)
+#12 27.16 Collecting typing-extensions>=4.6 (from psycopg==3.2.3->psycopg[binary]==3.2.3->-r requirements/base.txt (line 12))
+#12 27.36   Downloading typing_extensions-4.16.0-py3-none-any.whl.metadata (3.3 kB)
+#12 27.73 Collecting cffi>=1.12 (from cryptography==43.0.3->-r requirements/base.txt (line 16))
+#12 27.93   Downloading cffi-2.1.0-cp312-cp312-manylinux2014_x86_64.manylinux_2_17_x86_64.whl.metadata (2.5 kB)
+#12 28.11 Collecting ecdsa!=0.15 (from python-jose==3.3.0->python-jose[cryptography]==3.3.0->-r requirements/base.txt (line 17))
+#12 28.31   Downloading ecdsa-0.19.2-py2.py3-none-any.whl.metadata (29 kB)
+#12 28.56 Collecting rsa (from python-jose==3.3.0->python-jose[cryptography]==3.3.0->-r requirements/base.txt (line 17))
+#12 28.76   Downloading rsa-4.9.1-py3-none-any.whl.metadata (5.6 kB)
+#12 28.97 Collecting pyasn1 (from python-jose==3.3.0->python-jose[cryptography]==3.3.0->-r requirements/base.txt (line 17))
+#12 29.21   Downloading pyasn1-0.6.4-py3-none-any.whl.metadata (8.4 kB)
+#12 29.57 Collecting charset-normalizer<4,>=2 (from requests==2.32.3->-r requirements/base.txt (line 18))
+#12 29.77   Downloading charset_normalizer-3.4.9-cp312-cp312-manylinux2014_x86_64.manylinux_2_17_x86_64.manylinux_2_28_x86_64.whl.metadata (41 kB)
+#12 30.03 Collecting idna<4,>=2.5 (from requests==2.32.3->-r requirements/base.txt (line 18))
+#12 30.23   Downloading idna-3.18-py3-none-any.whl.metadata (6.1 kB)
+#12 30.45 Collecting urllib3<3,>=1.21.1 (from requests==2.32.3->-r requirements/base.txt (line 18))
+#12 30.65   Downloading urllib3-2.7.0-py3-none-any.whl.metadata (6.9 kB)
+#12 30.88 Collecting certifi>=2017.4.17 (from requests==2.32.3->-r requirements/base.txt (line 18))
+#12 31.08   Downloading certifi-2026.6.17-py3-none-any.whl.metadata (2.5 kB)
+#12 31.28 Collecting billiard<5.0,>=4.2.0 (from celery==5.4.0->-r requirements/base.txt (line 21))
+#12 31.48   Downloading billiard-4.2.4-py3-none-any.whl.metadata (4.8 kB)
+#12 31.67 Collecting vine<6.0,>=5.1.0 (from celery==5.4.0->-r requirements/base.txt (line 21))
+#12 31.90   Downloading vine-5.1.0-py3-none-any.whl.metadata (2.7 kB)
+#12 32.10 Collecting click<9.0,>=8.1.2 (from celery==5.4.0->-r requirements/base.txt (line 21))
+#12 32.30   Downloading click-8.4.2-py3-none-any.whl.metadata (2.6 kB)
+#12 32.48 Collecting click-didyoumean>=0.3.0 (from celery==5.4.0->-r requirements/base.txt (line 21))
+#12 32.72   Downloading click_didyoumean-0.3.1-py3-none-any.whl.metadata (3.9 kB)
+#12 32.91 Collecting click-repl>=0.2.0 (from celery==5.4.0->-r requirements/base.txt (line 21))
+#12 33.11   Downloading click_repl-0.3.0-py3-none-any.whl.metadata (3.6 kB)
+#12 33.29 Collecting click-plugins>=1.1.1 (from celery==5.4.0->-r requirements/base.txt (line 21))
+#12 33.49   Downloading click_plugins-1.1.1.2-py2.py3-none-any.whl.metadata (6.5 kB)
+#12 33.67 Collecting tzdata>=2022.7 (from celery==5.4.0->-r requirements/base.txt (line 21))
+#12 33.87   Downloading tzdata-2026.3-py2.py3-none-any.whl.metadata (1.4 kB)
+#12 34.05 Collecting python-dateutil>=2.8.2 (from celery==5.4.0->-r requirements/base.txt (line 21))
+#12 34.25   Downloading python_dateutil-2.9.0.post0-py2.py3-none-any.whl.metadata (8.4 kB)
+#12 35.21 Collecting botocore<1.36.0,>=1.35.45 (from boto3==1.35.45->-r requirements/base.txt (line 30))
+#12 35.41   Downloading botocore-1.35.99-py3-none-any.whl.metadata (5.7 kB)
+#12 35.60 Collecting jmespath<2.0.0,>=0.7.1 (from boto3==1.35.45->-r requirements/base.txt (line 30))
+#12 35.81   Downloading jmespath-1.1.0-py3-none-any.whl.metadata (7.6 kB)
+#12 36.01 Collecting s3transfer<0.11.0,>=0.10.0 (from boto3==1.35.45->-r requirements/base.txt (line 30))
+#12 36.21   Downloading s3transfer-0.10.4-py3-none-any.whl.metadata (1.7 kB)
+#12 36.41 Collecting argon2-cffi (from minio==7.2.9->-r requirements/base.txt (line 32))
+#12 36.60   Downloading argon2_cffi-25.1.0-py3-none-any.whl.metadata (4.1 kB)
+#12 36.93 Collecting pycryptodome (from minio==7.2.9->-r requirements/base.txt (line 32))
+#12 37.13   Downloading pycryptodome-3.23.0-cp37-abi3-manylinux_2_17_x86_64.manylinux2014_x86_64.whl.metadata (3.4 kB)
+#12 37.33 Collecting annotated-types>=0.6.0 (from pydantic==2.9.2->-r requirements/base.txt (line 35))
+#12 37.59   Downloading annotated_types-0.7.0-py3-none-any.whl.metadata (15 kB)
+#12 39.59 Collecting pydantic-core==2.23.4 (from pydantic==2.9.2->-r requirements/base.txt (line 35))
+#12 39.79   Downloading pydantic_core-2.23.4-cp312-cp312-manylinux_2_17_x86_64.manylinux2014_x86_64.whl.metadata (6.6 kB)
+#12 39.99 Collecting python-dotenv>=0.21.0 (from pydantic-settings==2.6.0->-r requirements/base.txt (line 36))
+#12 40.19   Downloading python_dotenv-1.2.2-py3-none-any.whl.metadata (27 kB)
+#12 40.41 Collecting text-unidecode>=1.3 (from python-slugify==8.0.4->-r requirements/base.txt (line 37))
+#12 40.61   Downloading text_unidecode-1.3-py2.py3-none-any.whl.metadata (2.4 kB)
+#12 40.79 Collecting dnspython>=2.0.0 (from email-validator==2.2.0->-r requirements/base.txt (line 39))
+#12 40.99   Downloading dnspython-2.8.0-py3-none-any.whl.metadata (5.7 kB)
+#12 41.19 Collecting six>=1.9.0 (from bleach==6.1.0->-r requirements/base.txt (line 40))
+#12 41.39   Downloading six-1.17.0-py2.py3-none-any.whl.metadata (1.7 kB)
+#12 41.57 Collecting webencodings (from bleach==6.1.0->-r requirements/base.txt (line 40))
+#12 41.77   Downloading webencodings-0.5.1-py2.py3-none-any.whl.metadata (2.1 kB)
+#12 41.96 Collecting deprecated>=1.2.6 (from opentelemetry-api==1.27.0->-r requirements/base.txt (line 48))
+#12 42.16   Downloading deprecated-1.3.1-py2.py3-none-any.whl.metadata (5.9 kB)
+#12 42.38 Collecting importlib-metadata<=8.4.0,>=6.0 (from opentelemetry-api==1.27.0->-r requirements/base.txt (line 48))
+#12 42.58   Downloading importlib_metadata-8.4.0-py3-none-any.whl.metadata (4.7 kB)
+#12 42.78 Collecting opentelemetry-semantic-conventions==0.48b0 (from opentelemetry-sdk==1.27.0->-r requirements/base.txt (line 49))
+#12 42.99   Downloading opentelemetry_semantic_conventions-0.48b0-py3-none-any.whl.metadata (2.4 kB)
+#12 43.19 Collecting opentelemetry-instrumentation-wsgi==0.48b0 (from opentelemetry-instrumentation-django==0.48b0->-r requirements/base.txt (line 50))
+#12 43.39   Downloading opentelemetry_instrumentation_wsgi-0.48b0-py3-none-any.whl.metadata (2.0 kB)
+#12 43.59 Collecting opentelemetry-instrumentation==0.48b0 (from opentelemetry-instrumentation-django==0.48b0->-r requirements/base.txt (line 50))
+#12 43.79   Downloading opentelemetry_instrumentation-0.48b0-py3-none-any.whl.metadata (6.1 kB)
+#12 44.00 Collecting opentelemetry-util-http==0.48b0 (from opentelemetry-instrumentation-django==0.48b0->-r requirements/base.txt (line 50))
+#12 44.19   Downloading opentelemetry_util_http-0.48b0-py3-none-any.whl.metadata (2.5 kB)
+#12 44.39 Collecting opentelemetry-instrumentation-dbapi==0.48b0 (from opentelemetry-instrumentation-psycopg==0.48b0->-r requirements/base.txt (line 51))
+#12 44.59   Downloading opentelemetry_instrumentation_dbapi-0.48b0-py3-none-any.whl.metadata (1.9 kB)
+#12 45.44 Collecting wrapt>=1.12.1 (from opentelemetry-instrumentation-redis==0.48b0->-r requirements/base.txt (line 53))
+#12 45.64   Downloading wrapt-2.2.2-cp312-cp312-manylinux1_x86_64.manylinux_2_28_x86_64.manylinux_2_5_x86_64.whl.metadata (7.4 kB)
+#12 45.84 Collecting opentelemetry-exporter-otlp-proto-grpc==1.27.0 (from opentelemetry-exporter-otlp==1.27.0->-r requirements/base.txt (line 54))
+#12 46.07   Downloading opentelemetry_exporter_otlp_proto_grpc-1.27.0-py3-none-any.whl.metadata (2.3 kB)
+#12 46.26 Collecting opentelemetry-exporter-otlp-proto-http==1.27.0 (from opentelemetry-exporter-otlp==1.27.0->-r requirements/base.txt (line 54))
+#12 46.46   Downloading opentelemetry_exporter_otlp_proto_http-1.27.0-py3-none-any.whl.metadata (2.3 kB)
+#12 46.75 Collecting googleapis-common-protos~=1.52 (from opentelemetry-exporter-otlp-proto-grpc==1.27.0->opentelemetry-exporter-otlp==1.27.0->-r requirements/base.txt (line 54))
+#12 46.95   Downloading googleapis_common_protos-1.75.0-py3-none-any.whl.metadata (8.6 kB)
+#12 48.61 Collecting grpcio<2.0.0,>=1.0.0 (from opentelemetry-exporter-otlp-proto-grpc==1.27.0->opentelemetry-exporter-otlp==1.27.0->-r requirements/base.txt (line 54))
+#12 48.81   Downloading grpcio-1.82.1-cp312-cp312-manylinux2014_x86_64.manylinux_2_17_x86_64.whl.metadata (3.7 kB)
+#12 49.00 Collecting opentelemetry-exporter-otlp-proto-common==1.27.0 (from opentelemetry-exporter-otlp-proto-grpc==1.27.0->opentelemetry-exporter-otlp==1.27.0->-r requirements/base.txt (line 54))
+#12 49.21   Downloading opentelemetry_exporter_otlp_proto_common-1.27.0-py3-none-any.whl.metadata (1.8 kB)
+#12 49.40 Collecting opentelemetry-proto==1.27.0 (from opentelemetry-exporter-otlp-proto-grpc==1.27.0->opentelemetry-exporter-otlp==1.27.0->-r requirements/base.txt (line 54))
+#12 49.60   Downloading opentelemetry_proto-1.27.0-py3-none-any.whl.metadata (2.3 kB)
+#12 49.98 Collecting setuptools>=16.0 (from opentelemetry-instrumentation==0.48b0->opentelemetry-instrumentation-django==0.48b0->-r requirements/base.txt (line 50))
+#12 50.17   Downloading setuptools-83.0.0-py3-none-any.whl.metadata (6.6 kB)
+#12 50.19 Collecting wrapt>=1.12.1 (from opentelemetry-instrumentation-redis==0.48b0->-r requirements/base.txt (line 53))
+#12 50.39   Downloading wrapt-1.17.3-cp312-cp312-manylinux1_x86_64.manylinux_2_28_x86_64.manylinux_2_5_x86_64.whl.metadata (6.4 kB)
+#12 51.10 Collecting protobuf<5.0,>=3.19 (from opentelemetry-proto==1.27.0->opentelemetry-exporter-otlp-proto-grpc==1.27.0->opentelemetry-exporter-otlp==1.27.0->-r requirements/base.txt (line 54))
+#12 51.30   Downloading protobuf-4.25.9-cp37-abi3-manylinux2014_x86_64.whl.metadata (541 bytes)
+#12 52.01 Collecting psycopg-binary==3.2.3 (from psycopg[binary]==3.2.3->-r requirements/base.txt (line 12))
+#12 52.22   Downloading psycopg_binary-3.2.3-cp312-cp312-manylinux_2_17_x86_64.manylinux2014_x86_64.whl.metadata (2.8 kB)
+#12 52.43 Collecting zipp>=0.5 (from importlib-metadata<=8.4.0,>=6.0->opentelemetry-api==1.27.0->-r requirements/base.txt (line 48))
+#12 52.64   Downloading zipp-4.1.0-py3-none-any.whl.metadata (3.6 kB)
+#12 52.86 Collecting pycparser (from cffi>=1.12->cryptography==43.0.3->-r requirements/base.txt (line 16))
+#12 53.06   Downloading pycparser-3.0-py3-none-any.whl.metadata (8.2 kB)
+#12 53.29 Collecting prompt-toolkit>=3.0.36 (from click-repl>=0.2.0->celery==5.4.0->-r requirements/base.txt (line 21))
+#12 53.50   Downloading prompt_toolkit-3.0.52-py3-none-any.whl.metadata (6.4 kB)
+#12 53.69 Collecting wcwidth (from prompt-toolkit>=3.0.36->click-repl>=0.2.0->celery==5.4.0->-r requirements/base.txt (line 21))
+#12 53.89   Downloading wcwidth-0.8.2-py3-none-any.whl.metadata (43 kB)
+#12 54.14 Collecting argon2-cffi-bindings (from argon2-cffi->minio==7.2.9->-r requirements/base.txt (line 32))
+#12 54.34   Downloading argon2_cffi_bindings-25.1.0-cp39-abi3-manylinux_2_26_x86_64.manylinux_2_28_x86_64.whl.metadata (7.4 kB)
+#12 54.57 Downloading django-5.2.4-py3-none-any.whl (8.3 MB)
+#12 65.00    ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━ 8.3/8.3 MB 802.8 kB/s  0:00:10
+#12 65.21 Downloading djangorestframework-3.15.2-py3-none-any.whl (1.1 MB)
+#12 66.46    ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━ 1.1/1.1 MB 850.7 kB/s  0:00:01
+#12 66.66 Downloading djangorestframework_simplejwt-5.3.1-py3-none-any.whl (101 kB)
+#12 66.97 Downloading PyJWT-2.9.0-py3-none-any.whl (22 kB)
+#12 67.19 Downloading django_cors_headers-4.6.0-py3-none-any.whl (12 kB)
+#12 67.40 Downloading django_environ-0.11.2-py2.py3-none-any.whl (19 kB)
+#12 67.61 Downloading psycopg-3.2.3-py3-none-any.whl (197 kB)
+#12 68.20 Downloading cryptography-43.0.3-cp39-abi3-manylinux_2_28_x86_64.whl (4.0 MB)
+#12 74.02    ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━ 4.0/4.0 MB 709.2 kB/s  0:00:05
+#12 74.22 Downloading python_jose-3.3.0-py2.py3-none-any.whl (33 kB)
+#12 74.45 Downloading requests-2.32.3-py3-none-any.whl (64 kB)
+#12 74.72 Downloading celery-5.4.0-py3-none-any.whl (425 kB)
+#12 75.38 Downloading kombu-5.4.2-py3-none-any.whl (201 kB)
+#12 75.81 Downloading amqp-5.2.0-py3-none-any.whl (50 kB)
+#12 76.05 Downloading vine-5.1.0-py3-none-any.whl (9.6 kB)
+#12 76.26 Downloading redis-5.1.1-py3-none-any.whl (261 kB)
+#12 76.74 Downloading django_redis-5.4.0-py3-none-any.whl (31 kB)
+#12 76.98 Downloading boto3-1.35.45-py3-none-any.whl (139 kB)
+#12 77.32 Downloading django_storages-1.14.4-py3-none-any.whl (31 kB)
+#12 77.55 Downloading minio-7.2.9-py3-none-any.whl (93 kB)
+#12 77.84 Downloading pydantic-2.9.2-py3-none-any.whl (434 kB)
+#12 78.68 Downloading pydantic_settings-2.6.0-py3-none-any.whl (28 kB)
+#12 78.93 Downloading python_slugify-8.0.4-py2.py3-none-any.whl (10 kB)
+#12 79.14 Downloading phonenumberslite-8.13.52-py2.py3-none-any.whl (471 kB)
+#12 80.03 Downloading email_validator-2.2.0-py3-none-any.whl (33 kB)
+#12 80.27 Downloading bleach-6.1.0-py3-none-any.whl (162 kB)
+#12 80.70 Downloading Markdown-3.7-py3-none-any.whl (106 kB)
+#12 81.01 Downloading python_magic-0.4.27-py2.py3-none-any.whl (13 kB)
+#12 81.21 Downloading structlog-24.4.0-py3-none-any.whl (67 kB)
+#12 81.48 Downloading prometheus_client-0.21.0-py3-none-any.whl (54 kB)
+#12 81.73 Downloading django_prometheus-2.3.1-py2.py3-none-any.whl (29 kB)
+#12 81.96 Downloading opentelemetry_api-1.27.0-py3-none-any.whl (63 kB)
+#12 82.22 Downloading opentelemetry_sdk-1.27.0-py3-none-any.whl (110 kB)
+#12 82.53 Downloading opentelemetry_instrumentation_django-0.48b0-py3-none-any.whl (19 kB)
+#12 82.77 Downloading opentelemetry_instrumentation_psycopg-0.48b0-py3-none-any.whl (10 kB)
+#12 82.99 Downloading opentelemetry_instrumentation_celery-0.48b0-py3-none-any.whl (13 kB)
+#12 83.21 Downloading opentelemetry_instrumentation_redis-0.48b0-py3-none-any.whl (11 kB)
+#12 83.42 Downloading opentelemetry_exporter_otlp-1.27.0-py3-none-any.whl (7.0 kB)
+#12 83.63 Downloading opentelemetry_exporter_otlp_proto_grpc-1.27.0-py3-none-any.whl (18 kB)
+#12 83.83 Downloading opentelemetry_exporter_otlp_proto_common-1.27.0-py3-none-any.whl (17 kB)
+#12 84.06 Downloading opentelemetry_exporter_otlp_proto_http-1.27.0-py3-none-any.whl (17 kB)
+#12 84.28 Downloading opentelemetry_instrumentation-0.48b0-py3-none-any.whl (29 kB)
+#12 84.53 Downloading opentelemetry_instrumentation_dbapi-0.48b0-py3-none-any.whl (11 kB)
+#12 84.74 Downloading opentelemetry_instrumentation_wsgi-0.48b0-py3-none-any.whl (13 kB)
+#12 84.97 Downloading opentelemetry_proto-1.27.0-py3-none-any.whl (52 kB)
+#12 85.20 Downloading opentelemetry_semantic_conventions-0.48b0-py3-none-any.whl (149 kB)
+#12 85.57 Downloading opentelemetry_util_http-0.48b0-py3-none-any.whl (6.9 kB)
+#12 85.82 Downloading psycopg_binary-3.2.3-cp312-cp312-manylinux_2_17_x86_64.manylinux2014_x86_64.whl (4.2 MB)
+#12 90.55    ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━ 4.2/4.2 MB 896.2 kB/s  0:00:04
+#12 90.76 Downloading pydantic_core-2.23.4-cp312-cp312-manylinux_2_17_x86_64.manylinux2014_x86_64.whl (2.1 MB)
+#12 93.07    ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━ 2.1/2.1 MB 898.1 kB/s  0:00:02
+#12 93.27 Downloading billiard-4.2.4-py3-none-any.whl (87 kB)
+#12 93.57 Downloading botocore-1.35.99-py3-none-any.whl (13.3 MB)
+#12 106.4    ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━ 13.3/13.3 MB 1.0 MB/s  0:00:12
+#12 106.6 Downloading charset_normalizer-3.4.9-cp312-cp312-manylinux2014_x86_64.manylinux_2_17_x86_64.manylinux_2_28_x86_64.whl (224 kB)
+#12 107.0 Downloading click-8.4.2-py3-none-any.whl (119 kB)
+#12 107.3 Downloading googleapis_common_protos-1.75.0-py3-none-any.whl (300 kB)
+#12 107.8 Downloading grpcio-1.82.1-cp312-cp312-manylinux2014_x86_64.manylinux_2_17_x86_64.whl (6.9 MB)
+#12 115.3    ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━ 6.9/6.9 MB 910.0 kB/s  0:00:07
+#12 115.5 Downloading idna-3.18-py3-none-any.whl (65 kB)
+#12 115.8 Downloading importlib_metadata-8.4.0-py3-none-any.whl (26 kB)
+#12 116.0 Downloading jmespath-1.1.0-py3-none-any.whl (20 kB)
+#12 116.3 Downloading protobuf-4.25.9-cp37-abi3-manylinux2014_x86_64.whl (295 kB)
+#12 116.8 Downloading python_dateutil-2.9.0.post0-py2.py3-none-any.whl (229 kB)
+#12 117.2 Downloading s3transfer-0.10.4-py3-none-any.whl (83 kB)
+#12 117.5 Downloading typing_extensions-4.16.0-py3-none-any.whl (45 kB)
+#12 117.8 Downloading urllib3-2.7.0-py3-none-any.whl (131 kB)
+#12 118.1 Downloading wrapt-1.17.3-cp312-cp312-manylinux1_x86_64.manylinux_2_28_x86_64.manylinux_2_5_x86_64.whl (88 kB)
+#12 118.3 Downloading annotated_types-0.7.0-py3-none-any.whl (13 kB)
+#12 118.6 Downloading asgiref-3.12.1-py3-none-any.whl (25 kB)
+#12 118.8 Downloading certifi-2026.6.17-py3-none-any.whl (133 kB)
+#12 119.1 Downloading cffi-2.1.0-cp312-cp312-manylinux2014_x86_64.manylinux_2_17_x86_64.whl (221 kB)
+#12 119.5 Downloading click_didyoumean-0.3.1-py3-none-any.whl (3.6 kB)
+#12 119.7 Downloading click_plugins-1.1.1.2-py2.py3-none-any.whl (11 kB)
+#12 119.9 Downloading click_repl-0.3.0-py3-none-any.whl (10 kB)
+#12 120.1 Downloading deprecated-1.3.1-py2.py3-none-any.whl (11 kB)
+#12 120.3 Downloading dnspython-2.8.0-py3-none-any.whl (331 kB)
+#12 120.8 Downloading ecdsa-0.19.2-py2.py3-none-any.whl (150 kB)
+#12 121.1 Downloading prompt_toolkit-3.0.52-py3-none-any.whl (391 kB)
+#12 121.7 Downloading python_dotenv-1.2.2-py3-none-any.whl (22 kB)
+#12 121.9 Downloading setuptools-83.0.0-py3-none-any.whl (1.0 MB)
+#12 123.0    ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━ 1.0/1.0 MB 1.0 MB/s  0:00:01
+#12 123.2 Downloading six-1.17.0-py2.py3-none-any.whl (11 kB)
+#12 123.4 Downloading sqlparse-0.5.5-py3-none-any.whl (46 kB)
+#12 123.6 Downloading text_unidecode-1.3-py2.py3-none-any.whl (78 kB)
+#12 123.9 Downloading tzdata-2026.3-py2.py3-none-any.whl (348 kB)
+#12 124.4 Downloading zipp-4.1.0-py3-none-any.whl (10 kB)
+#12 124.6 Downloading argon2_cffi-25.1.0-py3-none-any.whl (14 kB)
+#12 124.8 Downloading argon2_cffi_bindings-25.1.0-cp39-abi3-manylinux_2_26_x86_64.manylinux_2_28_x86_64.whl (87 kB)
+#12 125.1 Downloading pyasn1-0.6.4-py3-none-any.whl (84 kB)
+#12 125.4 Downloading pycparser-3.0-py3-none-any.whl (48 kB)
+#12 125.6 Downloading pycryptodome-3.23.0-cp37-abi3-manylinux_2_17_x86_64.manylinux2014_x86_64.whl (2.3 MB)
+#12 127.8    ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━ 2.3/2.3 MB 1.0 MB/s  0:00:02
+#12 128.0 Downloading rsa-4.9.1-py3-none-any.whl (34 kB)
+#12 128.2 Downloading wcwidth-0.8.2-py3-none-any.whl (323 kB)
+#12 128.8 Downloading webencodings-0.5.1-py2.py3-none-any.whl (11 kB)
+#12 129.4 Installing collected packages: webencodings, text-unidecode, phonenumberslite, zipp, wrapt, wcwidth, vine, urllib3, tzdata, typing-extensions, structlog, sqlparse, six, setuptools, redis, python-slugify, python-magic, python-dotenv, PyJWT, pycryptodome, pycparser, pyasn1, psycopg-binary, protobuf, prometheus-client, opentelemetry-util-http, markdown, jmespath, idna, dnspython, django-environ, click, charset-normalizer, certifi, billiard, asgiref, annotated-types, rsa, requests, python-dateutil, pydantic-core, psycopg, prompt-toolkit, opentelemetry-proto, importlib-metadata, grpcio, googleapis-common-protos, email-validator, ecdsa, django-prometheus, Django, deprecated, click-plugins, click-didyoumean, cffi, bleach, amqp, python-jose, pydantic, opentelemetry-exporter-otlp-proto-common, opentelemetry-api, kombu, djangorestframework, django-storages, django-redis, django-cors-headers, cryptography, click-repl, botocore, argon2-cffi-bindings, s3transfer, pydantic-settings, opentelemetry-semantic-conventions, opentelemetry-instrumentation, djangorestframework-simplejwt, celery, argon2-cffi, opentelemetry-sdk, opentelemetry-instrumentation-wsgi, opentelemetry-instrumentation-redis, opentelemetry-instrumentation-dbapi, opentelemetry-instrumentation-celery, minio, boto3, opentelemetry-instrumentation-psycopg, opentelemetry-instrumentation-django, opentelemetry-exporter-otlp-proto-http, opentelemetry-exporter-otlp-proto-grpc, opentelemetry-exporter-otlp
+#12 143.6 
+#12 143.6 Successfully installed Django-5.2.4 PyJWT-2.9.0 amqp-5.2.0 annotated-types-0.7.0 argon2-cffi-25.1.0 argon2-cffi-bindings-25.1.0 asgiref-3.12.1 billiard-4.2.4 bleach-6.1.0 boto3-1.35.45 botocore-1.35.99 celery-5.4.0 certifi-2026.6.17 cffi-2.1.0 charset-normalizer-3.4.9 click-8.4.2 click-didyoumean-0.3.1 click-plugins-1.1.1.2 click-repl-0.3.0 cryptography-43.0.3 deprecated-1.3.1 django-cors-headers-4.6.0 django-environ-0.11.2 django-prometheus-2.3.1 django-redis-5.4.0 django-storages-1.14.4 djangorestframework-3.15.2 djangorestframework-simplejwt-5.3.1 dnspython-2.8.0 ecdsa-0.19.2 email-validator-2.2.0 googleapis-common-protos-1.75.0 grpcio-1.82.1 idna-3.18 importlib-metadata-8.4.0 jmespath-1.1.0 kombu-5.4.2 markdown-3.7 minio-7.2.9 opentelemetry-api-1.27.0 opentelemetry-exporter-otlp-1.27.0 opentelemetry-exporter-otlp-proto-common-1.27.0 opentelemetry-exporter-otlp-proto-grpc-1.27.0 opentelemetry-exporter-otlp-proto-http-1.27.0 opentelemetry-instrumentation-0.48b0 opentelemetry-instrumentation-celery-0.48b0 opentelemetry-instrumentation-dbapi-0.48b0 opentelemetry-instrumentation-django-0.48b0 opentelemetry-instrumentation-psycopg-0.48b0 opentelemetry-instrumentation-redis-0.48b0 opentelemetry-instrumentation-wsgi-0.48b0 opentelemetry-proto-1.27.0 opentelemetry-sdk-1.27.0 opentelemetry-semantic-conventions-0.48b0 opentelemetry-util-http-0.48b0 phonenumberslite-8.13.52 prometheus-client-0.21.0 prompt-toolkit-3.0.52 protobuf-4.25.9 psycopg-3.2.3 psycopg-binary-3.2.3 pyasn1-0.6.4 pycparser-3.0 pycryptodome-3.23.0 pydantic-2.9.2 pydantic-core-2.23.4 pydantic-settings-2.6.0 python-dateutil-2.9.0.post0 python-dotenv-1.2.2 python-jose-3.3.0 python-magic-0.4.27 python-slugify-8.0.4 redis-5.1.1 requests-2.32.3 rsa-4.9.1 s3transfer-0.10.4 setuptools-83.0.0 six-1.17.0 sqlparse-0.5.5 structlog-24.4.0 text-unidecode-1.3 typing-extensions-4.16.0 tzdata-2026.3 urllib3-2.7.0 vine-5.1.0 wcwidth-0.8.2 webencodings-0.5.1 wrapt-1.17.3 zipp-4.1.0
+#12 143.6 WARNING: Running pip as the 'root' user can result in broken permissions and conflicting behaviour with the system package manager, possibly rendering your system unusable. It is recommended to use a virtual environment instead: https://pip.pypa.io/warnings/venv. Use the --root-user-action option if you know what you are doing and want to suppress this warning.
+#12 145.6 Collecting gunicorn==23.0.0
+#12 146.5   Downloading gunicorn-23.0.0-py3-none-any.whl.metadata (4.4 kB)
+#12 146.8 Collecting packaging (from gunicorn==23.0.0)
+#12 147.0   Downloading packaging-26.2-py3-none-any.whl.metadata (3.5 kB)
+#12 147.2 Downloading gunicorn-23.0.0-py3-none-any.whl (85 kB)
+#12 147.7 Downloading packaging-26.2-py3-none-any.whl (100 kB)
+#12 147.9 Installing collected packages: packaging, gunicorn
+#12 148.0 
+#12 148.1 Successfully installed gunicorn-23.0.0 packaging-26.2
+#12 148.1 WARNING: Running pip as the 'root' user can result in broken permissions and conflicting behaviour with the system package manager, possibly rendering your system unusable. It is recommended to use a virtual environment instead: https://pip.pypa.io/warnings/venv. Use the --root-user-action option if you know what you are doing and want to suppress this warning.
+#12 DONE 148.6s
+
+#13 [6/7] COPY . /app
+#13 DONE 0.4s
+
+#14 [7/7] RUN useradd --create-home --shell /bin/bash app && chown -R app:app /app
+#14 DONE 3.9s
+
+#15 exporting to image
+#15 exporting layers
+#15 exporting layers 8.0s done
+#15 exporting manifest sha256:726397e4f0b2b6f5dd3a5d2673dbbf3594e33855f6d15ad777577128084dd623 0.0s done
+#15 exporting config sha256:6bedacb799482341e14273a0ca2be3b854f57bedf0e59591fcbd1ad8e9f75dad 0.0s done
+#15 exporting attestation manifest sha256:91a5f1855e7ea9943cc75aef8c143dd72dd3d577272e4984d9fc052f343865d6
+#15 exporting attestation manifest sha256:91a5f1855e7ea9943cc75aef8c143dd72dd3d577272e4984d9fc052f343865d6 0.1s done
+#15 exporting manifest list sha256:80d9044c7f29b0691d218a3e8795c75ffeda9701ed0f70aa0958998cddea3c1c
+#15 exporting manifest list sha256:80d9044c7f29b0691d218a3e8795c75ffeda9701ed0f70aa0958998cddea3c1c 0.1s done
+#15 naming to docker.io/library/mhc-ticketing-backend:latest done
+#15 unpacking to docker.io/library/mhc-ticketing-backend:latest
+#15 unpacking to docker.io/library/mhc-ticketing-backend:latest 4.3s done
+#15 DONE 12.7s
+
+#16 resolving provenance for metadata file
+#16 DONE 0.0s
+ Image mhc-ticketing-backend Built 
