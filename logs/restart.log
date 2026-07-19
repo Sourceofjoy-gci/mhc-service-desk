@@ -1,0 +1,56 @@
+﻿docker :  Container mhc-ticketing-clamav-1 Running 
+At line:3 char:1
++ docker compose up -d 2>&1 | Out-File -FilePath "C:\Users\sourc\Downlo ...
++ ~~~~~~~~~~~~~~~~~~~~~~~~~
+    + CategoryInfo          : NotSpecified: ( Container mhc-...amav-1 Running :String) [], RemoteException
+    + FullyQualifiedErrorId : NativeCommandError
+ 
+ Container mhc-ticketing-postgres-1 Running 
+ Container mhc-ticketing-keycloak-1 Recreate 
+ Container mhc-ticketing-minio-1 Recreate 
+ Container mhc-ticketing-rabbitmq-1 Recreate 
+ Container mhc-ticketing-redis-1 Recreate 
+ Container mhc-ticketing-minio-1 Recreated 
+ Container mhc-ticketing-minio-bootstrap-1 Recreate 
+ Container mhc-ticketing-redis-1 Recreated 
+ Container mhc-ticketing-keycloak-1 Recreated 
+ Container mhc-ticketing-minio-bootstrap-1 Recreated 
+ Container mhc-ticketing-rabbitmq-1 Recreated 
+ Container mhc-ticketing-backend-1 Recreate 
+ Container mhc-ticketing-backend-1 Recreated 
+ Container mhc-ticketing-beat-1 Recreate 
+ Container mhc-ticketing-frontend-1 Recreate 
+ Container mhc-ticketing-worker-1 Recreate 
+ Container mhc-ticketing-frontend-1 Recreated 
+ Container mhc-ticketing-beat-1 Recreated 
+ Container mhc-ticketing-worker-1 Recreated 
+ Container mhc-ticketing-minio-1 Starting 
+ Container mhc-ticketing-redis-1 Starting 
+ Container mhc-ticketing-rabbitmq-1 Starting 
+ Container mhc-ticketing-keycloak-1 Starting 
+ Container mhc-ticketing-keycloak-1 Started 
+ Container mhc-ticketing-rabbitmq-1 Started 
+ Container mhc-ticketing-redis-1 Started 
+ Container mhc-ticketing-minio-1 Started 
+ Container mhc-ticketing-minio-1 Waiting 
+ Container mhc-ticketing-postgres-1 Waiting 
+ Container mhc-ticketing-redis-1 Waiting 
+ Container mhc-ticketing-rabbitmq-1 Waiting 
+ Container mhc-ticketing-minio-1 Waiting 
+ Container mhc-ticketing-keycloak-1 Waiting 
+ Container mhc-ticketing-postgres-1 Healthy 
+ Container mhc-ticketing-redis-1 Healthy 
+ Container mhc-ticketing-minio-1 Healthy 
+ Container mhc-ticketing-minio-bootstrap-1 Starting 
+ Container mhc-ticketing-minio-1 Healthy 
+ Container mhc-ticketing-minio-bootstrap-1 Started 
+ Container mhc-ticketing-rabbitmq-1 Healthy 
+ Container mhc-ticketing-keycloak-1 Healthy 
+ Container mhc-ticketing-backend-1 Starting 
+ Container mhc-ticketing-backend-1 Started 
+ Container mhc-ticketing-beat-1 Starting 
+ Container mhc-ticketing-frontend-1 Starting 
+ Container mhc-ticketing-worker-1 Starting 
+ Container mhc-ticketing-beat-1 Started 
+ Container mhc-ticketing-worker-1 Started 
+ Container mhc-ticketing-frontend-1 Started 
