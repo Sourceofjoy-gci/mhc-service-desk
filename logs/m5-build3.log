@@ -1,0 +1,75 @@
+﻿docker :  Image mhc-ticketing-backend Building 
+At line:6 char:1
++ docker compose build backend 2>&1 | Out-File -FilePath "C:\Users\sour ...
++ ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+    + CategoryInfo          : NotSpecified: ( Image mhc-ticketing-backend Building :String) [], RemoteException
+    + FullyQualifiedErrorId : NativeCommandError
+ 
+#1 [internal] load local bake definitions
+#1 reading from stdin 557B done
+#1 DONE 0.0s
+
+#2 [internal] load build definition from Dockerfile
+#2 transferring dockerfile: 1.35kB 0.0s done
+#2 DONE 0.1s
+
+#3 resolve image config for docker-image://docker.io/docker/dockerfile:1.7
+#3 DONE 5.7s
+
+#4 docker-image://docker.io/docker/dockerfile:1.7@sha256:a57df69d0ea827fb7266491f2813635de6f17269be881f696fbfdf2d83dda33e
+#4 resolve docker.io/docker/dockerfile:1.7@sha256:a57df69d0ea827fb7266491f2813635de6f17269be881f696fbfdf2d83dda33e 0.1s done
+#4 CACHED
+
+#5 [internal] load metadata for docker.io/library/python:3.12-slim
+#5 DONE 1.1s
+
+#6 [internal] load .dockerignore
+#6 transferring context: 2B 0.0s done
+#6 DONE 0.1s
+
+#7 [internal] load build context
+#7 DONE 0.0s
+
+#8 [1/7] FROM docker.io/library/python:3.12-slim@sha256:57cd7c3a7a273101a6485ba99423ee568157882804b1124b4dd04266317710de
+#8 resolve docker.io/library/python:3.12-slim@sha256:57cd7c3a7a273101a6485ba99423ee568157882804b1124b4dd04266317710de
+#8 resolve docker.io/library/python:3.12-slim@sha256:57cd7c3a7a273101a6485ba99423ee568157882804b1124b4dd04266317710de 0.3s done
+#8 DONE 0.3s
+
+#7 [internal] load build context
+#7 transferring context: 43.19kB 0.3s done
+#7 DONE 0.4s
+
+#9 [3/7] WORKDIR /app
+#9 CACHED
+
+#10 [4/7] COPY requirements/ ./requirements/
+#10 CACHED
+
+#11 [2/7] RUN apt-get update && apt-get install -y --no-install-recommends         build-essential         libpq-dev         libmagic1         libclamav-dev         clamav-daemon         clamav-freshclam         curl         netcat-openbsd     && rm -rf /var/lib/apt/lists/*
+#11 CACHED
+
+#12 [5/7] RUN pip install --upgrade pip &&     pip install -r requirements/base.txt
+#12 CACHED
+
+#13 [6/7] COPY . /app
+#13 DONE 0.4s
+
+#14 [7/7] RUN useradd --create-home --shell /bin/bash app && chown -R app:app /app
+#14 DONE 4.5s
+
+#15 exporting to image
+#15 exporting layers
+#15 exporting layers 0.7s done
+#15 exporting manifest sha256:54a7dc29c81dfb896c4ab70ecc8d675d1511d2c3934437d067fbafaea4ba43fe 0.1s done
+#15 exporting config sha256:ffb41fa028edfb0e7a894cb0b4fe068c60bb4c685e3677b8cb33ce5dd63f4328 0.1s done
+#15 exporting attestation manifest sha256:dc26fc67f72590bbd1c7d339b4c54d7da0cbdc7c3003cc90c852e106ab0d6c66 0.1s done
+#15 exporting manifest list sha256:89b08f74c29bf4cc211e06364c0e961761b7b64c388ea7e3a17854f866ba22c1
+#15 exporting manifest list sha256:89b08f74c29bf4cc211e06364c0e961761b7b64c388ea7e3a17854f866ba22c1 0.1s done
+#15 naming to docker.io/library/mhc-ticketing-backend:latest done
+#15 unpacking to docker.io/library/mhc-ticketing-backend:latest
+#15 unpacking to docker.io/library/mhc-ticketing-backend:latest 0.3s done
+#15 DONE 1.6s
+
+#16 resolving provenance for metadata file
+#16 DONE 0.0s
+ Image mhc-ticketing-backend Built 

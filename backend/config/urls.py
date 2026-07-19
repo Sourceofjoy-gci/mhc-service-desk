@@ -36,6 +36,10 @@ urlpatterns = [
     path("api/v1/", include("apps.notifications.urls")),
     path("api/v1/", include("apps.integrations.urls")),
     path("api/v1/", include("apps.email_channel.urls")),
+    path("api/v1/", include("apps.whatsapp.urls")),
+    path("api/v1/", include("apps.knowledge.urls")),
+    path("api/v1/", include("apps.csat.urls")),
+    path("api/v1/", include("apps.automation.urls")),
     path("api/v1/", include("apps.reporting.urls")),
     path("api/v1/", include("apps.administration.urls")),
     # Prometheus exposition

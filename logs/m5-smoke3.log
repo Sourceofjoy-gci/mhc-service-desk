@@ -1,0 +1,11 @@
+﻿OK   public knowledge search (no auth): HTTP 200
+     1 public articles
+OK   create knowledge article (supervisor): HTTP 201
+     code=OFFICE-HOURS-7ee747
+FAIL WhatsApp inbound webhook: HTTP 500 — <!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta http-equiv="content-type" content="text/html; charset=utf-8">
+  <meta name="robots" content="NONE,NOARCHIVE">
+  <title>IntegrityError
+          at /api/

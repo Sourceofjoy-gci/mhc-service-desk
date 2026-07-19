@@ -1,0 +1,25 @@
+﻿docker :  Container mhc-ticketing-keycloak-1 Running 
+At line:5 char:1
++ docker compose run --rm --no-deps backend python manage.py migrate -- ...
++ ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+    + CategoryInfo          : NotSpecified: ( Container mhc-...loak-1 Running :String) [], RemoteException
+    + FullyQualifiedErrorId : NativeCommandError
+ 
+ Container mhc-ticketing-clamav-1 Running 
+ Container mhc-ticketing-minio-1 Running 
+ Container mhc-ticketing-backend-1 Running 
+ Container mhc-ticketing-worker-1 Running 
+ Container mhc-ticketing-beat-1 Running 
+ Container mhc-ticketing-frontend-1 Running 
+ Container mhc-ticketing-postgres-1 Running 
+ Container mhc-ticketing-redis-1 Running 
+ Container mhc-ticketing-rabbitmq-1 Running 
+ Container mhc-ticketing-backend-run-f6b4e96c54b0 Creating 
+ Container mhc-ticketing-backend-run-f6b4e96c54b0 Created 
+Operations to perform:
+  Apply all migrations: admin, administration, audit, auth, automation, catalogue, contacts, contenttypes, csat, email_channel, files, identity_access, integrations, knowledge, notifications, organisations, reporting, sessions, sla, tickets, whatsapp, workflow
+Running migrations:
+  Applying automation.0001_initial... OK
+  Applying csat.0001_initial... OK
+  Applying knowledge.0001_initial... OK
+  Applying whatsapp.0001_initial... OK

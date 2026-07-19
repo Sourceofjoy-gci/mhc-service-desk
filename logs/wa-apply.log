@@ -1,0 +1,22 @@
+﻿docker :  Container mhc-ticketing-rabbitmq-1 Running 
+At line:4 char:1
++ docker compose run --rm --no-deps backend python manage.py migrate wh ...
++ ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+    + CategoryInfo          : NotSpecified: ( Container mhc-...itmq-1 Running :String) [], RemoteException
+    + FullyQualifiedErrorId : NativeCommandError
+ 
+ Container mhc-ticketing-clamav-1 Running 
+ Container mhc-ticketing-minio-1 Running 
+ Container mhc-ticketing-backend-1 Running 
+ Container mhc-ticketing-frontend-1 Running 
+ Container mhc-ticketing-worker-1 Running 
+ Container mhc-ticketing-postgres-1 Running 
+ Container mhc-ticketing-redis-1 Running 
+ Container mhc-ticketing-keycloak-1 Running 
+ Container mhc-ticketing-beat-1 Running 
+ Container mhc-ticketing-backend-run-8a2993325eb9 Creating 
+ Container mhc-ticketing-backend-run-8a2993325eb9 Created 
+Operations to perform:
+  Apply all migrations: whatsapp
+Running migrations:
+  Applying whatsapp.0002_alter_whatsappmessage_account... OK
