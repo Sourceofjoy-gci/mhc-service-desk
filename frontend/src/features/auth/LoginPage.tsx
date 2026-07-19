@@ -1,5 +1,5 @@
 import { useEffect, useState } from "react";
-import { initKeycloak, type AuthState } from "./keycloak";
+import { getKeycloak, initKeycloak, type AuthState } from "./keycloak";
 
 export default function LoginPage() {
   const [auth, setAuth] = useState<AuthState>({ status: "idle" });
@@ -28,17 +28,38 @@ export default function LoginPage() {
   if (auth.status === "unauthenticated") {
     return (
       <div className="rounded-md border border-ink-100 bg-white p-6 text-sm text-ink-700">
-        You are not signed in. The interactive login flow is wired in Milestone 2
-        (Operational Vertical Slice). For now, this page verifies the Keycloak
-        realm is reachable.
+        <p className="mb-3">
+          You are not signed in. Sign in with your MHC realm account to access
+          the agent console.
+        </p>
+        <button
+          type="button"
+          onClick={() =>
+            getKeycloak().login({ redirectUri: window.location.origin + "/login" })
+          }
+          className="rounded-md bg-brand-600 px-4 py-2 text-sm font-medium text-white hover:bg-brand-700"
+        >
+          Sign in with Keycloak
+        </button>
       </div>
     );
   }
 
   return (
     <div className="rounded-md border border-green-200 bg-green-50 p-6 text-sm text-green-800">
-      Signed in as <strong>{auth.profile?.username}</strong> — token expires at{" "}
-      {new Date((auth.expiresAt ?? 0) * 1000).toLocaleString()}.
+      <p className="mb-3">
+        Signed in as <strong>{auth.profile?.username}</strong> — token expires at{" "}
+        {new Date((auth.expiresAt ?? 0) * 1000).toLocaleString()}.
+      </p>
+      <button
+        type="button"
+        onClick={() =>
+          getKeycloak().logout({ redirectUri: window.location.origin + "/login" })
+        }
+        className="rounded-md border border-green-300 bg-white px-3 py-1.5 text-sm text-green-800 hover:bg-green-50"
+      >
+        Sign out
+      </button>
     </div>
   );
 }

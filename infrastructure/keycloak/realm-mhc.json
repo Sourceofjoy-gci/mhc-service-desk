@@ -82,7 +82,19 @@
       "attributes": {
         "pkce.code.challenge.method": "S256"
       },
-      "defaultClientScopes": ["openid", "profile", "email", "groups"]
+      "defaultClientScopes": ["openid", "profile", "email", "groups"],
+      "protocolMappers": [
+        {
+          "name": "mhc-backend-audience",
+          "protocol": "openid-connect",
+          "protocolMapper": "oidc-audience-mapper",
+          "config": {
+            "included.custom.audience": "mhc-backend",
+            "id.token.claim": "true",
+            "access.token.claim": "true"
+          }
+        }
+      ]
     },
     {
       "clientId": "mhc-backend",
@@ -96,15 +108,88 @@
       "name": "groups",
       "protocol": "openid-connect",
       "attributes": { "include.in.token.claim": "true" },
-      "mappers": [
+      "protocolMappers": [
         {
           "name": "groups",
+          "protocol": "openid-connect",
           "protocolMapper": "oidc-group-membership-mapper",
           "config": {
             "full.path": "false",
             "id.token.claim": "true",
             "access.token.claim": "true",
             "claim.name": "groups"
+          }
+        }
+      ]
+    },
+    {
+      "name": "openid",
+      "protocol": "openid-connect",
+      "attributes": { "include.in.token.claim": "true" },
+      "protocolMappers": [
+        {
+          "name": "sub",
+          "protocol": "openid-connect",
+          "protocolMapper": "oidc-sub-mapper",
+          "config": { "access.token.claim": "true" }
+        }
+      ]
+    },
+    {
+      "name": "profile",
+      "protocol": "openid-connect",
+      "attributes": { "include.in.token.claim": "true" },
+      "protocolMappers": [
+        {
+          "name": "username",
+          "protocol": "openid-connect",
+          "protocolMapper": "oidc-usermodel-property-mapper",
+          "config": {
+            "user.attribute": "username",
+            "claim.name": "preferred_username",
+            "access.token.claim": "true",
+            "id.token.claim": "true",
+            "userinfo.token.claim": "true"
+          }
+        },
+        {
+          "name": "given_name",
+          "protocol": "openid-connect",
+          "protocolMapper": "oidc-usermodel-property-mapper",
+          "config": {
+            "user.attribute": "firstName",
+            "claim.name": "given_name",
+            "access.token.claim": "true",
+            "id.token.claim": "true"
+          }
+        },
+        {
+          "name": "family_name",
+          "protocol": "openid-connect",
+          "protocolMapper": "oidc-usermodel-property-mapper",
+          "config": {
+            "user.attribute": "lastName",
+            "claim.name": "family_name",
+            "access.token.claim": "true",
+            "id.token.claim": "true"
+          }
+        }
+      ]
+    },
+    {
+      "name": "email",
+      "protocol": "openid-connect",
+      "attributes": { "include.in.token.claim": "true" },
+      "protocolMappers": [
+        {
+          "name": "email",
+          "protocol": "openid-connect",
+          "protocolMapper": "oidc-usermodel-property-mapper",
+          "config": {
+            "user.attribute": "email",
+            "claim.name": "email",
+            "access.token.claim": "true",
+            "id.token.claim": "true"
           }
         }
       ]

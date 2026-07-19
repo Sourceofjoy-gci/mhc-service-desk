@@ -106,18 +106,31 @@ class KeycloakJWTAuthentication(authentication.BaseAuthentication):
         if not sub:
             raise exceptions.AuthenticationFailed("Token missing sub")
 
-        user, _ = User.objects.get_or_create(
-            keycloak_subject=sub,
-            defaults={
-                "username": payload.get("preferred_username", sub)[:150],
-                "email": payload.get("email", ""),
-                "display_name": payload.get("name", ""),
-                "mfa_enabled": bool(payload.get("acr") in ("mfa", "urn:mace:incommon:iap:silver")),
-            },
-        )
-        new_email = payload.get("email", "")
-        if new_email and new_email != user.email:
-            user.email = new_email
+        preferred_username = payload.get("preferred_username", sub)[:150]
+        email = payload.get("email", "")
+        mfa_enabled = bool(payload.get("acr") in ("mfa", "urn:mace:incommon:iap:silver"))
+
+        # Look up by keycloak_subject first (the stable link to the IdP).
+        user = User.objects.filter(keycloak_subject=sub).first()
+        if user is None:
+            # Fallback: a stale user with the same username (e.g. the IdP was
+            # re-bootstrapped and minted a new sub). Re-link them.
+            user = User.objects.filter(username=preferred_username).first()
+            if user is not None:
+                user.keycloak_subject = sub
+                user.email = email or user.email
+                user.mfa_enabled = mfa_enabled
+                user.save(update_fields=["keycloak_subject", "email", "mfa_enabled"])
+        if user is None:
+            # Brand-new IdP user — create the local mirror.
+            user = User.objects.create(
+                keycloak_subject=sub,
+                username=preferred_username,
+                email=email,
+                mfa_enabled=mfa_enabled,
+            )
+        elif email and email != user.email:
+            user.email = email
             user.save(update_fields=["email"])
         # Capture groups for scope calculation
         user._groups = payload.get("groups", []) or []
