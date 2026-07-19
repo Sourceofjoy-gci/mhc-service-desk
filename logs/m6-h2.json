@@ -1,0 +1,1 @@
+﻿{"status": "ok", "environment": "development", "version": "0.1.0", "checks": {"database": {"ok": true, "latency_ms": 23.7}, "redis": {"ok": true, "latency_ms": 3.9}, "minio": {"ok": true, "latency_ms": 1.2}, "keycloak": {"ok": true, "latency_ms": 18.8}}, "total_ms": 47.8}

@@ -1,0 +1,42 @@
+﻿F                                                                        [100%]
+=================================== FAILURES ===================================
+_________________ test_apply_suggestion_requires_kind_payload __________________
+
+basic_world = {'contact': <Contact: Tester>, 'gen_info': <Service: GEN-INFO — General info>, 'it_inc': <Service: IT-INC — IT incident>, 'office': <Office: TST-1 — Test Office>, ...}
+
+    def test_apply_suggestion_requires_kind_payload(basic_world):
+        from apps.catalogue.models import Service, RequestType
+        from apps.organisations.models import Office
+        from apps.contacts.models import Contact
+        from apps.tickets import services
+    
+        service = Service.objects.filter(domain="operational").first()
+        request_type = RequestType.objects.filter(service=service).first() if service else None
+        office = Office.objects.filter(is_active=True).first()
+        contact = Contact.objects.first()
+        ticket = services.create_ticket(
+            domain="operational", title="AI apply", description="",
+            requester=contact, service=service, request_type=request_type, office=office, channel="web",
+        )
+        # Apply a classify with invalid priority — should return False (no change)
+        suggestion = AiSuggestion(
+            suggestion_id="s-2",
+            ticket_number=ticket.number,
+            kind="classify",
+            payload={"priority": "P9"},
+            confidence=0.5,
+            model_id="m",
+            model_version="0.1",
+            prompt_hash="p",
+            created_at="2026-07-19T10:00:00Z",
+        )
+>       assert apply_suggestion(ticket=ticket, suggestion=suggestion, approver_subject="alice") is False
+E       AssertionError: assert True is False
+E        +  where True = apply_suggestion(ticket=<Ticket: OP-202607-000001>, suggestion=AiSuggestion(suggestion_id='s-2', ticket_number='OP-202607-000001', kind='classify', payload={'priority': 'P9'}, confidence=0.5, model_id='m', model_version='0.1', prompt_hash='p', created_at='2026-07-19T10:00:00Z'), approver_subject='alice')
+
+apps/automation/tests/test_ai_assist.py:69: AssertionError
+----------------------------- Captured stderr call -----------------------------
+{"ts": "2026-07-19T08:45:42.101202+00:00", "level": "INFO", "logger": "apps.tickets.services", "msg": "ticket_created", "correlation_id": "OP-202607-000001"}
+=========================== short test summary info ============================
+FAILED apps/automation/tests/test_ai_assist.py::test_apply_suggestion_requires_kind_payload
+1 failed in 12.97s

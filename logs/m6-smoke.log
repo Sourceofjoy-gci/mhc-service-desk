@@ -1,0 +1,10 @@
+﻿OK   flow metrics (operational): HTTP 200
+     wip=17 throughput=0
+OK   monitoring webhook creates coalesced tickets: HTTP 201
+     created=['IT-202607-000007', 'IT-202607-000008'] groups=2
+OK   duplicate monitoring alert is ignored: HTTP 201
+     correctly produced 0 new tickets
+OK   list monitoring tickets: HTTP 200
+SKIP: no monitoring tickets to test AI on
+
+All M6 smoke checks passed ✅
