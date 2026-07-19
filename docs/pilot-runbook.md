@@ -58,6 +58,7 @@ mitigations, the key-rotation schedule, and the access-review cadence.
    ```bash
    docker compose exec -T backend python manage.py migrate
    docker compose exec -T backend python /app/scripts/seed_dev.py
+   python scripts/seed_keycloak_user.py   # creates 'alice' in the mhc realm
    ```
 8. Configure Keycloak:
    * Sign in to <https://mhc-ticketing.local/admin> with `KEYCLOAK_ADMIN`.
@@ -179,6 +180,18 @@ mitigations, the key-rotation schedule, and the access-review cadence.
   Keycloak's DB (in our prod profile, Keycloak uses its own internal
   H2 by default; in production you should point it at Postgres).
 
+### 5.6 Keycloak sign-in broken (agents get dead-end / tokens have no claims)
+
+* Symptom: `/login` page either shows a stale "wired in M2" stub, or
+  Keycloak issues tokens with no `sub` / `preferred_username` / `groups`,
+  or the backend returns 401 `"Token is missing the 'aud' claim"` / 500
+  `IntegrityError` on `identity_user_username_key`.
+* Cause: the persisted realm has drifted from `infrastructure/keycloak/realm-mhc.json`
+  — usually after a manual change via the admin console, an interrupted
+  first start, or a botched re-import. The realm file may have changed
+  on disk but Keycloak only re-imports when the realm doesn't yet exist.
+* Fix: see section 7 below.
+
 ## 6. Rollback
 
 ```bash
@@ -195,7 +208,108 @@ After rollback:
 2. Open a post-mortem within 48h.
 3. Update the runbook with what you learned.
 
-## 7. Compliance evidence to collect
+## 7. Keycloak realm recovery
+
+Use this procedure when the `mhc` realm has drifted from the JSON source
+of truth (`infrastructure/keycloak/realm-mhc.json`) and section 5.6 doesn't
+resolve with a simple restart. The two recovery scripts
+(`scripts/kcclean.py` and `scripts/seed_keycloak_user.py`) are designed
+to be safe to re-run.
+
+### 8.1 Symptoms that indicate realm drift
+
+* `/login` page shows a "Sign in" button but clicking it fails
+  immediately or returns you to the page logged out.
+* Access tokens from Keycloak have `scope: groups` only and **no** `sub`,
+  `preferred_username`, `email`, or `groups` claims.
+* Backend logs show `psycopg.errors.UniqueViolation: identity_user_username_key`
+  the first time a user authenticates.
+* Backend logs show `Token verification failed: Token is missing the "aud" claim`.
+* `Keycloak admin → Realm mhc → Client scopes` shows `openid`, `profile`,
+  or `email` scopes missing entirely, OR the `groups` scope has no
+  protocol mappers underneath it.
+
+### 8.2 The fix in three commands
+
+```bash
+# 1. Surgically reset the H2 database so Keycloak re-bootstraps from JSON
+#    (master admin from .env + realm from realm-mhc.json).
+#    Old H2 files are kept as <file>.bak-<timestamp> for forensics.
+docker compose stop keycloak
+python scripts/kcclean.py
+docker compose start keycloak
+
+# 2. Wait for Keycloak to be healthy (~1 min), then re-seed the
+#    dev/pilot user. Idempotent — safe to run repeatedly.
+python scripts/seed_keycloak_user.py
+
+# 3. Verify the token actually carries the claims the backend needs.
+python -c "
+import urllib.request, urllib.parse, json, base64
+b = urllib.parse.urlencode({'username':'alice','password':'p@ssw0rd','grant_type':'password','client_id':'mhc-frontend'}, quote_via=urllib.parse.quote).encode()
+r = json.loads(urllib.request.urlopen(urllib.request.Request('http://localhost:8080/realms/mhc/protocol/openid-connect/token', data=b, method='POST', headers={'Content-Type':'application/x-www-form-urlencoded'})).read())
+payload = json.loads(base64.urlsafe_b64decode(r['access_token'].split('.')[1] + '==='))
+assert all(k in payload for k in ('sub', 'preferred_username', 'email', 'groups', 'azp')), payload
+assert payload['azp'] == 'mhc-frontend', payload
+print('OK: token has', sorted(payload.keys()))
+"
+```
+
+If the assertion passes, sign-in is restored. Update any
+operator-Keycloak-only users via the admin console afterwards
+(`http://localhost:8080` → realm `mhc` → Users).
+
+### 8.3 Why this works
+
+* Keycloak's `--import-realm` only applies `realm-mhc.json` when the
+  realm doesn't yet exist in its database. Once a realm exists, the
+  file is ignored on subsequent starts. That means a fix to
+  `realm-mhc.json` only takes effect after a clean slate.
+* `kcclean.py` moves the live H2 files aside (keeping them as `.bak` for
+  forensics) without nuking the whole `keycloak-data` volume. On next
+  start, Keycloak re-creates the H2 DB, bootstraps the master admin from
+  `KEYCLOAK_ADMIN` / `KEYCLOAK_ADMIN_PASSWORD` in `.env`, and re-imports
+  the realm from JSON.
+* `seed_keycloak_user.py` re-creates the dev/pilot user `alice` in the
+  `mhc` realm, joins her to `ops-agents` (which grants `staff` +
+  `agent-operational` via the group's `realmRoles` mapping), and sets
+  a non-temporary password. Re-running is safe: it looks up by username,
+  updates the password and group membership rather than failing on
+  duplicate.
+
+### 8.4 Common gotchas
+
+* **Old BACKUP_ENCRYPTION_KEY.** Rotating that key invalidates older
+  encrypted backups. Stash the previous key in a secure note if you have
+  pre-rotation backups you may need to restore.
+* **The master admin password is set from `.env` only on first start.**
+  If you re-bootstrap and `.env` has a different value, the persisted
+  master admin (from before the reset) is gone and a new one is created
+  with the `.env` value. If you can't log in after a re-bootstrap, check
+  the latest `.env`.
+* **Public SPA clients (like `mhc-frontend`) don't get an `aud` claim on
+  their access tokens in Keycloak 26 — only `azp`.** The realm includes
+  an `oidc-audience-mapper` on the client that adds `mhc-backend` to
+  `aud` so the backend's `verify_aud` check passes. If you re-import
+  the realm from a stale or hand-edited JSON that lacks this mapper,
+  re-do the recovery.
+* **The realm-mhc.json `clientScopes[].protocolMappers[]` field name is
+  `protocolMappers` (with the `s`)** — Keycloak silently drops anything
+  under `mappers`. Verify with `git grep protocolMappers infrastructure/`
+  after any future realm edit.
+
+### 8.5 After recovery
+
+1. Open a brief incident note (what drifted, when, why, and which
+   command fixed it).
+2. Commit any new scripts or `.env` updates that were needed.
+3. If the drift came from a manual change via the admin console, mirror
+   that change into `realm-mhc.json` so the next re-import reproduces it.
+4. If the drift came from a bad `realm-mhc.json` edit, add a code-review
+   note for the next person to look at scope / mapper / audience changes
+   carefully.
+
+## 8. Compliance evidence to collect
 
 Every quarter, archive:
 * Backup verification drill evidence (`backups/verify-*`).
