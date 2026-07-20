@@ -17,15 +17,14 @@ from collections import defaultdict
 from rest_framework.decorators import api_view, permission_classes
 from rest_framework.permissions import AllowAny
 from rest_framework.response import Response
-from rest_framework import status
 
 from apps.catalogue.models import RequestType, Service
 from apps.contacts.models import Contact
 from apps.organisations.models import Office
+from apps.sla.models import SlaPolicy
+from apps.sla.services import instantiate_slas
 from apps.tickets import services
 from apps.tickets.models import OutboxEvent, Ticket
-from apps.sla.services import instantiate_slas
-from apps.sla.models import SlaPolicy
 
 logger = logging.getLogger(__name__)
 
@@ -34,7 +33,7 @@ def _coalesce(alerts: list[dict]) -> list[list[dict]]:
     """Group alerts by their deduplication key, preserving order."""
     buckets: dict[str, list[dict]] = defaultdict(list)
     for alert in alerts:
-        key = alert.get("deduplication_key") or hashlib.md5(
+        key = alert.get("deduplication_key") or hashlib.sha256(
             (alert.get("title") or "").encode()
         ).hexdigest()[:12]
         buckets[key].append(alert)
@@ -54,7 +53,7 @@ def monitoring_webhook(request):
     for group in groups:
         first = group[0]
         # Idempotency
-        ext_id = first.get("external_id") or hashlib.md5(
+        ext_id = first.get("external_id") or hashlib.sha256(
             f"{first.get('title','')}|{first.get('deduplication_key','')}".encode()
         ).hexdigest()
         if Ticket.objects.filter(external_message_id=ext_id).exists():

@@ -8,7 +8,6 @@ from __future__ import annotations
 import logging
 
 from django.db.models import Q
-from django.shortcuts import get_object_or_404
 from rest_framework import status, viewsets
 from rest_framework.decorators import action, api_view, permission_classes, throttle_classes
 from rest_framework.permissions import AllowAny, IsAuthenticated
@@ -17,9 +16,14 @@ from rest_framework.throttling import AnonRateThrottle
 
 from apps.contacts.models import Contact
 from apps.identity_access.authentication import KeycloakJWTAuthentication
-from apps.identity_access.scope import Scope, ScopePermission, attach_scopes, has_scope, public_endpoint
-from apps.sla.services import instantiate_slas
+from apps.identity_access.scope import (
+    ScopePermission,
+    attach_scopes,
+    public_endpoint,
+    scope_required,
+)
 from apps.sla.models import SlaPolicy
+from apps.sla.services import instantiate_slas
 
 from . import services
 from .api import (
@@ -30,7 +34,7 @@ from .api import (
     TicketListSerializer,
     TransitionRequestSerializer,
 )
-from .models import OutboxEvent, Ticket
+from .models import Ticket
 
 logger = logging.getLogger(__name__)
 
@@ -168,7 +172,6 @@ class TicketViewSet(viewsets.ModelViewSet):
                "carry_matter_reference": true|false}
         """
         from .it_child import create_it_child_ticket
-        from .services import transition_ticket
         parent = self.get_object()
         if parent.domain != "operational":
             return Response(
@@ -235,9 +238,10 @@ def public_intake(request):
     Rate-limited by ``PublicIntakeThrottle`` (5/min per IP).
     No authentication required.
     """
+    import bleach
+
     from apps.catalogue.models import RequestType, Service
     from apps.organisations.models import Office
-    import bleach
 
     ip = request.META.get("REMOTE_ADDR", "unknown")
     ser = PublicIntakeSerializer(data=request.data)
@@ -314,13 +318,26 @@ def public_intake(request):
 
 
 @api_view(["GET"])
-@permission_classes([AllowAny])
-@public_endpoint
+@permission_classes([IsAuthenticated, ScopePermission])
 def operational_dashboard(request):
-    """Essential operational dashboard data for the M2 milestone."""
-    from django.db.models import Count, Q
-    from django.utils import timezone
+    """Essential operational dashboard data for the M2 milestone.
+
+    Restricted to authenticated users with an operational scope. IT-only
+    users must not see this; the cross-domain guard is enforced by an
+    explicit ``has_scope`` check (the ``@scope_required`` decorator only
+    works on class-based views).
+    """
+    from apps.identity_access.scope import Scope, attach_scopes, has_scope
+    attach_scopes(request)
+    if not has_scope(request.user, Scope(domain="operational")):
+        return Response(
+            {"detail": "Operational scope required."},
+            status=status.HTTP_403_FORBIDDEN,
+        )
     from datetime import timedelta
+
+    from django.db.models import Count
+    from django.utils import timezone
 
     qs = Ticket.objects.filter(domain="operational")
     now = timezone.now()

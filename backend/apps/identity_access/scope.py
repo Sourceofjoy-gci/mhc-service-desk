@@ -7,8 +7,6 @@ The frontend never grants access — it only renders what the backend approves.
 from __future__ import annotations
 
 from dataclasses import dataclass
-from functools import wraps
-from typing import Iterable
 
 from rest_framework import permissions
 
@@ -20,7 +18,7 @@ class Scope:
     service_id: str | None = None
     queue_id: str | None = None
 
-    def matches(self, other: "Scope") -> bool:
+    def matches(self, other: Scope) -> bool:
         if self.domain == "admin":
             return True
         if self.domain != other.domain:
@@ -83,7 +81,7 @@ def can_view_restricted(user) -> bool:
         return True
     groups = set(getattr(user, "_groups", []) or [])
     privileged = {
-        "ops-supervisors", "lead-it", "security-responders",
+        "ops-supervisors", "it-leads", "security-responders",
         "system-admins", "auditors",
     }
     return bool(groups & privileged)

@@ -4,12 +4,9 @@ from __future__ import annotations
 import pytest
 from django.utils import timezone
 
-from apps.catalogue.models import RequestType, Service
-from apps.contacts.models import Contact
-from apps.organisations.models import Office, Region
-from apps.tickets import services, it_child
+from apps.catalogue.models import RequestType
+from apps.tickets import it_child, services
 from apps.tickets.models import TicketLink
-from apps.workflow.shortcuts import seed_workflow_for_tests
 
 pytestmark = pytest.mark.django_db
 

@@ -26,7 +26,9 @@ ignore = [
 [tool.mypy]
 python_version = "3.12"
 plugins = ["mypy_django_plugin.main", "mypy_drf_plugin.main"]
-django_settings_module = "config.settings"
 strict = true
 ignore_missing_imports = true
 exclude = ["migrations", "tests"]
+
+[tool.django-stubs]
+django_settings_module = "config.settings.dev"

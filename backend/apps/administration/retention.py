@@ -14,7 +14,7 @@ import hashlib
 import json
 import logging
 from dataclasses import asdict, dataclass
-from datetime import datetime, timezone
+from datetime import UTC, datetime
 
 from django.core.management.base import BaseCommand
 from django.db import transaction
@@ -31,11 +31,11 @@ DEFAULT_RETENTION = {
     "ticket":              {"days": 2555, "description": "7 years (operational record)"},
     "ticket_message":      {"days": 2555, "description": "tied to ticket lifecycle"},
     "ticket_note":         {"days": 2555, "description": "tied to ticket lifecycle"},
-    "audit_auditevent":    {"days": 2555, "description": "audit trail, 7 years"},
-    "whatsapp_whatsappmessage": {"days": 1095, "description": "3 years (channel record)"},
+    "auditevent":          {"days": 2555, "description": "audit trail, 7 years"},
+    "whatsapp_message":    {"days": 1095, "description": "3 years (channel record)"},
     "integrationevent":    {"days": 1095, "description": "3 years (integration log)"},
     "email_delivery":      {"days": 1095, "description": "3 years (delivery record)"},
-    "csat_csatresponse":   {"days": 2555, "description": "7 years"},
+    "csat_response":       {"days": 2555, "description": "7 years"},
 }
 
 
@@ -105,7 +105,7 @@ class Command(BaseCommand):
             # Honour legal hold: skip tickets that are under hold.
             sql_hold = f"SELECT count(*) FROM {table} WHERE legal_hold = TRUE AND created_at < %s"
         else:
-            sql_hold = f"SELECT 0"
+            sql_hold = "SELECT 0"
         with connection.cursor() as cur:
             cur.execute(sql_hold, [cutoff])
             rows_preserved_legal_hold = cur.fetchone()[0]
@@ -121,7 +121,7 @@ class Command(BaseCommand):
             else:
                 rows_disposed = total_old - rows_preserved_legal_hold
         cert = DisposalCertificate(
-            issued_at=datetime.now(tz=timezone.utc).isoformat(),
+            issued_at=datetime.now(tz=UTC).isoformat(),
             table=table,
             rows_disposed=rows_disposed,
             retention_class_days=rule.get("days", 0),

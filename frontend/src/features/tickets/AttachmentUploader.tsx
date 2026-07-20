@@ -1,6 +1,6 @@
 import { useState } from "react";
 import { useMutation } from "@tanstack/react-query";
-import { ticketsApi, DEV_AUTH_TOKEN } from "../../lib/api";
+import { DEV_AUTH_TOKEN } from "../../lib/api";
 
 interface UploadResult {
   id: string;

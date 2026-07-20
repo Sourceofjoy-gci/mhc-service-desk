@@ -7,11 +7,10 @@ the same domain logic (numbering, status, SLA, scope) continues to work.
 from __future__ import annotations
 
 import logging
-import uuid
+from typing import TYPE_CHECKING
 
-from django.db import models
-from django.db.models.signals import post_save
-from django.dispatch import receiver
+if TYPE_CHECKING:
+    from .models import Ticket
 
 logger = logging.getLogger(__name__)
 
@@ -20,12 +19,13 @@ class ProblemManager:
     """Operations for problem records and their incident links."""
 
     @staticmethod
-    def open_problem(*, title: str, description: str, opened_by: str, related_incident_ids: list[str] | None = None) -> "Ticket":
+    def open_problem(*, title: str, description: str, opened_by: str, related_incident_ids: list[str] | None = None) -> Ticket:
+        from apps.catalogue.models import RequestType, Service
+        from apps.contacts.models import Contact
+        from apps.organisations.models import Office
+
         from .models import Ticket, TicketLink
         from .services import create_ticket
-        from apps.organisations.models import Office
-        from apps.contacts.models import Contact
-        from apps.catalogue.models import RequestType, Service
 
         # Open problems in IT domain
         service = Service.objects.filter(domain="it", code="IT-INC").first()
@@ -65,12 +65,12 @@ class ChangeManager:
     """Planned change windows with risk and approval status."""
 
     @staticmethod
-    def open_change(*, title: str, description: str, scheduled_at, risk: str, opened_by: str) -> "Ticket":
-        from .models import Ticket
-        from .services import create_ticket
-        from apps.organisations.models import Office
-        from apps.contacts.models import Contact
+    def open_change(*, title: str, description: str, scheduled_at, risk: str, opened_by: str) -> Ticket:
         from apps.catalogue.models import RequestType, Service
+        from apps.contacts.models import Contact
+        from apps.organisations.models import Office
+
+        from .services import create_ticket
 
         service = Service.objects.filter(domain="it", code="IT-INC").first()
         request_type = RequestType.objects.filter(service=service, code="OUTAGE").first() if service else None

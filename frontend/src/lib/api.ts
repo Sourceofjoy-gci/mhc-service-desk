@@ -154,6 +154,7 @@ export const ticketsApi = {
     requester_phone?: string;
     matter_reference?: string;
     consent: boolean;
+    channel?: string;
   }) =>
     api<{
       ticket_number: string;

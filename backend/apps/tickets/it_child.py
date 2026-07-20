@@ -11,7 +11,6 @@ from __future__ import annotations
 import logging
 
 from django.db import transaction
-from django.utils import timezone
 
 from apps.catalogue.models import RequestType, Service
 from apps.contacts.models import Contact
@@ -57,7 +56,7 @@ def create_it_child_ticket(
     requester: Contact,
     requester_office: Office,
     technical_priority: str,
-    carry_matter_reference: bool = True,
+    carry_matter_reference: bool = False,
     actor_subject: str = "",
 ) -> Ticket:
     """Create a sanitised IT child ticket linked to an operational parent.
