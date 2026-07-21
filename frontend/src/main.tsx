@@ -4,6 +4,7 @@ import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import { BrowserRouter } from "react-router-dom";
 import App from "./app/App";
 import { ThemeProvider } from "./components/theme-provider";
+import { Toaster } from "./components/ui/sonner";
 import "./index.css";
 
 const queryClient = new QueryClient({
@@ -46,6 +47,7 @@ ReactDOM.createRoot(root).render(
         <BrowserRouter>
           <App />
         </BrowserRouter>
+        <Toaster richColors={false} position="top-right" />
       </QueryClientProvider>
     </ThemeProvider>
   </React.StrictMode>,
