@@ -1,6 +1,59 @@
 import { cva } from "class-variance-authority";
-import { Badge } from "./ui/badge";
 import { cn } from "@/lib/utils";
+import { Badge } from "./ui/badge";
+
+export type StatusCode =
+  | "new"
+  | "triage"
+  | "assigned"
+  | "in_progress"
+  | "waiting_requester"
+  | "waiting_internal"
+  | "waiting_it"
+  | "quality_review"
+  | "resolved"
+  | "closed"
+  | "cancelled"
+  | "rejected"
+  | "duplicate"
+  | "spam";
+
+export type PriorityCode = "P1" | "P2" | "P3" | "P4";
+export type SlaState = "on_track" | "at_risk" | "breached" | "paused" | "none";
+
+const STATUS_CODES: StatusCode[] = [
+  "new",
+  "triage",
+  "assigned",
+  "in_progress",
+  "waiting_requester",
+  "waiting_internal",
+  "waiting_it",
+  "quality_review",
+  "resolved",
+  "closed",
+  "cancelled",
+  "rejected",
+  "duplicate",
+  "spam",
+];
+
+const STATUS_LABELS: Record<StatusCode, string> = {
+  new: "New",
+  triage: "Triage",
+  assigned: "Assigned",
+  in_progress: "In progress",
+  waiting_requester: "Waiting on requester",
+  waiting_internal: "Waiting internal",
+  waiting_it: "Waiting on IT",
+  quality_review: "Quality review",
+  resolved: "Resolved",
+  closed: "Closed",
+  cancelled: "Cancelled",
+  rejected: "Rejected",
+  duplicate: "Duplicate",
+  spam: "Spam",
+};
 
 const statusBadge = cva("border-transparent font-medium", {
   variants: {
@@ -21,66 +74,45 @@ const statusBadge = cva("border-transparent font-medium", {
         "bg-accent text-accent-foreground ring-1 ring-inset ring-border",
       resolved:
         "bg-success/15 text-success-foreground ring-1 ring-inset ring-success/30",
-      closed:
-        "bg-muted text-muted-foreground ring-1 ring-inset ring-border",
-      cancelled:
-        "bg-muted text-muted-foreground ring-1 ring-inset ring-border",
-      rejected: "bg-destructive/10 text-destructive ring-1 ring-inset ring-destructive/30",
-      duplicate:
-        "bg-muted text-muted-foreground ring-1 ring-inset ring-border",
+      closed: "bg-muted text-muted-foreground ring-1 ring-inset ring-border",
+      cancelled: "bg-muted text-muted-foreground ring-1 ring-inset ring-border",
+      rejected:
+        "bg-destructive/10 text-destructive ring-1 ring-inset ring-destructive/30",
+      duplicate: "bg-muted text-muted-foreground ring-1 ring-inset ring-border",
       spam: "bg-destructive/10 text-destructive ring-1 ring-inset ring-destructive/30",
     },
   },
   defaultVariants: { code: "new" },
 });
 
-export interface StatusBadgeProps
-  extends Omit<React.HTMLAttributes<HTMLSpanElement>, "children"> {
+function normalizeStatusCode(code: string): StatusCode {
+  return STATUS_CODES.find((status) => status === code) ?? "new";
+}
+
+export interface StatusBadgeProps extends Omit<
+  React.HTMLAttributes<HTMLSpanElement>,
+  "children"
+> {
   code: string;
   label?: string;
 }
 
-const STATUS_LABELS: Record<string, string> = {
-  new: "New",
-  triage: "Triage",
-  assigned: "Assigned",
-  in_progress: "In progress",
-  waiting_requester: "Waiting on requester",
-  waiting_internal: "Waiting internal",
-  waiting_it: "Waiting on IT",
-  quality_review: "Quality review",
-  resolved: "Resolved",
-  closed: "Closed",
-  cancelled: "Cancelled",
-  rejected: "Rejected",
-  duplicate: "Duplicate",
-  spam: "Spam",
-};
+export function StatusBadge({
+  code,
+  label,
+  className,
+  ...rest
+}: StatusBadgeProps) {
+  const status = normalizeStatusCode(code);
 
-export function StatusBadge({ code, label, className, ...rest }: StatusBadgeProps) {
-  const key = (STATUS_LABELS[code] ? code : "new") as
-    | "new"
-    | "triage"
-    | "assigned"
-    | "in_progress"
-    | "waiting_requester"
-    | "waiting_internal"
-    | "waiting_it"
-    | "quality_review"
-    | "resolved"
-    | "closed"
-    | "cancelled"
-    | "rejected"
-    | "duplicate"
-    | "spam";
   return (
     <Badge
       data-slot="status-badge"
       data-status={code}
-      className={cn(statusBadge({ code: key }), className)}
+      className={cn(statusBadge({ code: status }), className)}
       {...rest}
     >
-      {label ?? STATUS_LABELS[code] ?? code}
+      {label ?? (code === status ? STATUS_LABELS[status] : code)}
     </Badge>
   );
 }
@@ -97,9 +129,11 @@ const priorityDot = cva("size-1.5 rounded-full", {
   defaultVariants: { code: "P3" },
 });
 
-export interface PriorityBadgeProps
-  extends Omit<React.HTMLAttributes<HTMLSpanElement>, "children"> {
-  code: string;
+export interface PriorityBadgeProps extends Omit<
+  React.HTMLAttributes<HTMLSpanElement>,
+  "children"
+> {
+  code: PriorityCode;
   showDot?: boolean;
 }
 
@@ -122,7 +156,8 @@ export function PriorityBadge({
     >
       {showDot ? (
         <span
-          className={cn(priorityDot({ code: code as any }), "mr-1")}
+          data-icon="inline-start"
+          className={priorityDot({ code })}
           aria-hidden
         />
       ) : null}
@@ -131,7 +166,7 @@ export function PriorityBadge({
   );
 }
 
-const channelLabel: Record<string, string> = {
+const CHANNEL_LABELS: Record<string, string> = {
   web: "Web",
   call: "Call",
   walk_in: "Walk-in",
@@ -154,10 +189,18 @@ export function ChannelBadge({
       data-slot="channel-badge"
       className={cn("text-[11px] font-normal", className)}
     >
-      {channelLabel[channel] ?? channel}
+      {CHANNEL_LABELS[channel] ?? channel}
     </Badge>
   );
 }
+
+const SLA_LABELS: Record<SlaState, string> = {
+  on_track: "On track",
+  at_risk: "At risk",
+  breached: "Breached",
+  paused: "Paused",
+  none: "No SLA",
+};
 
 const slaHealthDot = cva("size-2 rounded-full ring-2 ring-background", {
   variants: {
@@ -176,33 +219,25 @@ export function SlaIndicator({
   health,
   className,
 }: {
-  health:
-    | "on_track"
-    | "at_risk"
-    | "breached"
-    | "paused"
-    | "none"
-    | string;
+  health: SlaState;
   className?: string;
 }) {
-  const state = (health as any) ?? "none";
-  const label =
-    health === "on_track"
-      ? "On track"
-      : health === "at_risk"
-        ? "At risk"
-        : health === "breached"
-          ? "Breached"
-          : health === "paused"
-            ? "Paused"
-            : "No SLA";
+  const label = SLA_LABELS[health];
+
   return (
-    <span
-      className={cn("inline-flex items-center gap-1.5 text-xs", className)}
+    <Badge
+      variant="outline"
+      data-slot="sla-indicator"
+      data-sla={health}
+      className={cn("font-normal text-muted-foreground", className)}
       title={`SLA: ${label}`}
     >
-      <span className={cn(slaHealthDot({ state }))} aria-hidden />
-      <span className="text-muted-foreground">{label}</span>
-    </span>
+      <span
+        data-icon="inline-start"
+        className={slaHealthDot({ state: health })}
+        aria-hidden
+      />
+      {label}
+    </Badge>
   );
 }

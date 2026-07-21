@@ -1,20 +1,23 @@
-import { Link } from "react-router-dom";
+import { useQuery } from "@tanstack/react-query";
 import {
-  ArrowRight,
-  Shield,
-  Workflow,
   Activity,
-  Users,
-  KanbanSquare,
-  Phone,
+  ArrowRight,
   Globe,
   HeartPulse,
-  ListChecks,
+  KanbanSquare,
   LayoutDashboard,
+  ListChecks,
   Mail,
+  Phone,
+  Shield,
   Smartphone,
+  Users,
+  Workflow,
 } from "lucide-react";
-import { useQuery } from "@tanstack/react-query";
+import { Link } from "react-router-dom";
+import { BrandLockup } from "@/components/brand";
+import { Badge } from "@/components/ui/badge";
+import { buttonVariants } from "@/components/ui/button";
 import {
   Card,
   CardContent,
@@ -22,12 +25,11 @@ import {
   CardHeader,
   CardTitle,
 } from "@/components/ui/card";
-import { Badge } from "@/components/ui/badge";
-import { Button } from "@/components/ui/button";
+import { Separator } from "@/components/ui/separator";
 import { Skeleton } from "@/components/ui/skeleton";
-import { BrandLockup } from "@/components/brand";
-// health fetch is inline to avoid pulling the api lib here
+import { cn } from "@/lib/utils";
 
+// health fetch is inline to avoid pulling the api lib here
 interface HealthResponse {
   status: string;
   environment: string;
@@ -67,54 +69,64 @@ function Hero({
   isLoading: boolean;
 }) {
   return (
-    <section className="relative overflow-hidden rounded-2xl border border-border/60 bg-gradient-to-br from-card via-card to-muted/40 p-6 sm:p-10">
+    <section className="relative overflow-hidden rounded-2xl bg-primary p-6 text-primary-foreground sm:p-10">
       <div
         aria-hidden
-        className="pointer-events-none absolute inset-0 -z-0 opacity-[0.18] dark:opacity-[0.08]"
+        className="pointer-events-none absolute inset-0 opacity-30"
         style={{
           backgroundImage:
-            "radial-gradient(circle at 20% 0%, var(--primary), transparent 40%), radial-gradient(circle at 90% 30%, var(--gold), transparent 50%)",
+            "radial-gradient(circle at 85% 15%, var(--gold), transparent 38%), radial-gradient(circle at 10% 100%, var(--background), transparent 45%)",
         }}
       />
       <div className="relative grid gap-8 lg:grid-cols-[1.4fr_1fr] lg:items-center">
-        <div className="flex flex-col gap-5">
-          <Badge
-            variant="secondary"
-            className="w-fit gap-1.5 text-xs font-medium"
-          >
-            <Shield className="size-3" />
+        <div className="flex flex-col gap-6">
+          <Badge variant="secondary" className="w-fit">
+            <Shield data-icon="inline-start" />
             MHC Unified e-Ticketing · M2–M6 ready
           </Badge>
           <div className="flex flex-col gap-3">
             <h1 className="text-balance text-3xl font-semibold tracking-tight sm:text-4xl lg:text-5xl">
               Capture every request.
               <br />
-              <span className="text-primary">Route with rigour.</span>
+              <span className="text-gold">Route with rigour.</span>
             </h1>
-            <p className="max-w-2xl text-pretty text-base text-muted-foreground sm:text-lg">
+            <p className="max-w-2xl text-pretty text-base text-primary-foreground/80 sm:text-lg">
               Operational and IT service desks with strict separation. Every
               request becomes a traceable ticket with Kanban workflow, SLA
               tracking, audit trail, and a requester-safe public entry point.
             </p>
           </div>
           <div className="flex flex-wrap items-center gap-2">
-            <Button render={<Link to="/tickets" />} data-icon>
+            <Link
+              to="/tickets"
+              className={cn(
+                buttonVariants({ variant: "secondary" }),
+                "no-underline hover:no-underline",
+              )}
+            >
               Open the queue
               <ArrowRight data-icon="inline-end" />
-            </Button>
-            <Button variant="outline" render={<Link to="/kanban" />} data-icon>
+            </Link>
+            <Link
+              to="/kanban"
+              className={cn(
+                buttonVariants({ variant: "outline" }),
+                "no-underline hover:no-underline",
+              )}
+            >
               <KanbanSquare data-icon="inline-start" />
               Kanban board
-            </Button>
-            <Button
-              variant="ghost"
-              render={<Link to="/public" />}
-              className="text-muted-foreground"
-              data-icon
+            </Link>
+            <Link
+              to="/public"
+              className={cn(
+                buttonVariants({ variant: "ghost" }),
+                "text-primary-foreground no-underline hover:bg-primary-foreground/10 hover:text-primary-foreground hover:no-underline",
+              )}
             >
               <Globe data-icon="inline-start" />
               Public form
-            </Button>
+            </Link>
           </div>
         </div>
 
@@ -140,21 +152,21 @@ function PlatformStatus({
   ];
 
   return (
-    <Card className="self-start lg:self-center" data-size="sm">
+    <Card size="sm" className="self-start lg:self-center">
       <CardHeader>
-        <div className="flex items-center justify-between">
-          <CardTitle className="flex items-center gap-2 text-sm font-medium">
-            <Activity className="size-4 text-primary" />
+        <div className="flex items-center justify-between gap-4">
+          <CardTitle className="flex items-center gap-2">
+            <Activity className="size-4 text-primary" aria-hidden />
             Platform status
           </CardTitle>
           {data ? (
             <Badge
               variant="secondary"
-              className={
+              className={cn(
                 data.status === "ok"
                   ? "bg-success/15 text-success-foreground ring-1 ring-inset ring-success/30"
-                  : "bg-destructive/10 text-destructive ring-1 ring-inset ring-destructive/30"
-              }
+                  : "bg-destructive/10 text-destructive ring-1 ring-inset ring-destructive/30",
+              )}
             >
               {data.status === "ok" ? "Healthy" : data.status}
             </Badge>
@@ -168,7 +180,7 @@ function PlatformStatus({
           {data ? `${data.environment} · v${data.version}` : "Pinging API…"}
         </CardDescription>
       </CardHeader>
-      <CardContent className="flex flex-col gap-2.5">
+      <CardContent className="flex flex-col gap-3">
         {entries.map((entry) => {
           const check = checks[entry.key];
           return (
@@ -178,16 +190,17 @@ function PlatformStatus({
             >
               <div className="flex items-center gap-2">
                 <span
-                  className={
+                  className={cn(
+                    "size-1.5 rounded-full",
                     check?.ok
-                      ? "size-1.5 rounded-full bg-success"
+                      ? "bg-success"
                       : check
-                        ? "size-1.5 rounded-full bg-destructive"
-                        : "size-1.5 rounded-full bg-muted-foreground/40"
-                  }
+                        ? "bg-destructive"
+                        : "bg-muted-foreground/40",
+                  )}
                   aria-hidden
                 />
-                <span className="text-foreground">{entry.label}</span>
+                <span>{entry.label}</span>
               </div>
               {check ? (
                 <span className="font-mono text-xs text-muted-foreground">
@@ -214,45 +227,42 @@ function DomainSeparation() {
         title="Strict OP/IT separation"
         description="Operational agents and IT engineers work in the same application, but they never see each other's tickets. The sanitised IT-child pattern lets a referrer pass context without leaking content."
       />
-      <div className="grid gap-4 md:grid-cols-2">
-        <Card>
-          <CardHeader>
-            <div className="flex items-center gap-2">
-              <span className="grid size-9 place-items-center rounded-md bg-info/15 text-info-foreground ring-1 ring-inset ring-info/30">
-                <Users className="size-4" />
-              </span>
-              <div>
-                <CardTitle>Operational desk</CardTitle>
-                <CardDescription>Estates, wills, walk-ins, calls</CardDescription>
-              </div>
+      <div className="grid gap-6 md:grid-cols-2">
+        <article className="flex items-start gap-3 py-2">
+          <Users
+            className="mt-0.5 size-5 shrink-0 text-info-foreground"
+            aria-hidden
+          />
+          <div className="flex flex-col gap-2">
+            <div>
+              <h3 className="font-medium">Operational desk</h3>
+              <p className="text-sm text-muted-foreground">
+                Estates, wills, walk-ins, calls
+              </p>
             </div>
-          </CardHeader>
-          <CardContent className="text-sm text-muted-foreground">
-            Front-of-house work. Requesters see only this surface. Tickets
-            start here, are triaged by ops, and either resolve or hand off
-            to IT via a sanitised child.
-          </CardContent>
-        </Card>
-        <Card>
-          <CardHeader>
-            <div className="flex items-center gap-2">
-              <span className="grid size-9 place-items-center rounded-md bg-gold/20 text-gold-foreground ring-1 ring-inset ring-gold/30">
-                <Workflow className="size-4" />
-              </span>
-              <div>
-                <CardTitle>IT desk</CardTitle>
-                <CardDescription>
-                  Internal work orders, monitoring alerts
-                </CardDescription>
-              </div>
+            <p className="text-sm text-muted-foreground">
+              Front-of-house work. Requesters see only this surface. Tickets
+              start here, are triaged by ops, and either resolve or hand off to
+              IT via a sanitised child.
+            </p>
+          </div>
+        </article>
+        <article className="flex items-start gap-3 py-2">
+          <Workflow className="mt-0.5 size-5 shrink-0 text-gold" aria-hidden />
+          <div className="flex flex-col gap-2">
+            <div>
+              <h3 className="font-medium">IT desk</h3>
+              <p className="text-sm text-muted-foreground">
+                Internal work orders, monitoring alerts
+              </p>
             </div>
-          </CardHeader>
-          <CardContent className="text-sm text-muted-foreground">
-            Technical work, isolated from the operational parent. The child
-            receives a sanitised summary — never the parent's message body
-            or attachments. Status only syncs back as a safe summary.
-          </CardContent>
-        </Card>
+            <p className="text-sm text-muted-foreground">
+              Technical work, isolated from the operational parent. The child
+              receives a sanitised summary — never the parent's message body or
+              attachments. Status only syncs back as a safe summary.
+            </p>
+          </div>
+        </article>
       </div>
     </section>
   );
@@ -276,16 +286,18 @@ function Channels() {
         description="Each originating channel is recorded on the ticket. Idempotency and threading ensure a noisy email thread or a flapping alert never produces duplicates."
       />
       <div className="grid grid-cols-2 gap-2 sm:grid-cols-3 md:grid-cols-6">
-        {channels.map((c) => (
-          <Button
-            key={c.label}
-            variant="outline"
-            render={<Link to={c.to} />}
-            className="h-auto flex-col items-start gap-1.5 py-3 text-left"
+        {channels.map((channel) => (
+          <Link
+            key={channel.label}
+            to={channel.to}
+            className={cn(
+              buttonVariants({ variant: "outline" }),
+              "h-auto min-h-16 flex-col items-start gap-1 py-3 text-left no-underline hover:no-underline",
+            )}
           >
-            <c.icon className="size-4 text-primary" />
-            <span className="text-sm font-medium">{c.label}</span>
-          </Button>
+            <channel.icon data-icon="inline-start" />
+            <span>{channel.label}</span>
+          </Link>
         ))}
       </div>
     </section>
@@ -336,18 +348,25 @@ function Operations() {
           <Link
             key={card.to}
             to={card.to}
-            className="group rounded-xl border border-border/60 bg-card p-4 text-card-foreground no-underline transition-all hover:border-primary/40 hover:shadow-sm"
+            className="group block text-card-foreground no-underline hover:no-underline focus-visible:outline-none"
           >
-            <div className="mb-3 flex items-center justify-between">
-              <span className="grid size-9 place-items-center rounded-md bg-primary/10 text-primary ring-1 ring-inset ring-primary/20">
-                <card.icon className="size-4" />
-              </span>
-              <ArrowRight className="size-4 text-muted-foreground transition-transform group-hover:translate-x-0.5 group-hover:text-primary" />
-            </div>
-            <h3 className="text-sm font-semibold">{card.title}</h3>
-            <p className="mt-1 text-xs text-muted-foreground">
-              {card.description}
-            </p>
+            <Card className="h-full transition-[transform,box-shadow] group-hover:-translate-y-0.5 group-hover:shadow-sm group-focus-visible:ring-3 group-focus-visible:ring-ring/50">
+              <CardHeader>
+                <div className="flex items-center justify-between text-primary">
+                  <card.icon className="size-5" aria-hidden />
+                  <ArrowRight
+                    className="size-4 text-muted-foreground"
+                    aria-hidden
+                  />
+                </div>
+                <CardTitle>{card.title}</CardTitle>
+              </CardHeader>
+              <CardContent>
+                <p className="text-xs text-muted-foreground">
+                  {card.description}
+                </p>
+              </CardContent>
+            </Card>
           </Link>
         ))}
       </div>
@@ -357,38 +376,49 @@ function Operations() {
 
 function Cta() {
   return (
-    <Card className="overflow-hidden">
-      <div
-        aria-hidden
-        className="pointer-events-none absolute inset-0 opacity-20"
-        style={{
-          backgroundImage:
-            "linear-gradient(135deg, var(--primary) 0%, transparent 50%, var(--gold) 100%)",
-        }}
-      />
-      <CardContent className="flex flex-col items-start gap-4 p-6 sm:flex-row sm:items-center sm:justify-between sm:p-8">
-        <div className="flex flex-col gap-2">
-          <BrandLockup size="md" />
-          <p className="text-sm text-muted-foreground">
-            Judiciary of Eswatini · Operational and IT service desks
-          </p>
+    <>
+      <Separator />
+      <section className="relative overflow-hidden py-8">
+        <div
+          aria-hidden
+          className="pointer-events-none absolute inset-0 opacity-10"
+          style={{
+            backgroundImage:
+              "linear-gradient(135deg, var(--primary) 0%, transparent 50%, var(--gold) 100%)",
+          }}
+        />
+        <div className="relative flex flex-col items-start gap-4 sm:flex-row sm:items-center sm:justify-between">
+          <div className="flex flex-col gap-2">
+            <BrandLockup size="md" />
+            <p className="text-sm text-muted-foreground">
+              Judiciary of Eswatini · Operational and IT service desks
+            </p>
+          </div>
+          <div className="flex flex-wrap gap-2">
+            <Link
+              to="/login"
+              className={cn(
+                buttonVariants(),
+                "no-underline hover:no-underline",
+              )}
+            >
+              <Shield data-icon="inline-start" />
+              Sign in
+            </Link>
+            <Link
+              to="/health"
+              className={cn(
+                buttonVariants({ variant: "outline" }),
+                "no-underline hover:no-underline",
+              )}
+            >
+              <Activity data-icon="inline-start" />
+              Health
+            </Link>
+          </div>
         </div>
-        <div className="flex flex-wrap gap-2">
-          <Button render={<Link to="/login" />} data-icon>
-            <Shield data-icon="inline-start" />
-            Sign in
-          </Button>
-          <Button
-            variant="outline"
-            render={<Link to="/health" />}
-            data-icon
-          >
-            <Activity data-icon="inline-start" />
-            Health
-          </Button>
-        </div>
-      </CardContent>
-    </Card>
+      </section>
+    </>
   );
 }
 
@@ -402,7 +432,7 @@ function SectionHeader({
   description: string;
 }) {
   return (
-    <div className="flex flex-col gap-1.5">
+    <div className="flex flex-col gap-2">
       <span className="text-xs font-semibold uppercase tracking-wider text-primary">
         {eyebrow}
       </span>

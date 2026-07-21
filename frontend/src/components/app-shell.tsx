@@ -49,23 +49,20 @@ const UTILITY_NAV: NavItem[] = [
   { to: "/health", label: "Health", icon: HeartPulse },
 ];
 
-function navLinkClass(active: boolean) {
+function navLinkClass(active: boolean, touchSafe = false) {
   return cn(
-    "inline-flex items-center gap-1.5 rounded-md px-2.5 py-1.5 text-sm transition-colors",
-    "hover:bg-accent hover:text-accent-foreground",
-    "focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring",
+    "inline-flex min-h-9 shrink-0 items-center gap-2 rounded-lg px-3 text-sm transition-colors",
+    "focus-visible:outline-none focus-visible:ring-3 focus-visible:ring-ring/50",
+    touchSafe && "min-h-11",
     active
-      ? "bg-accent font-medium text-foreground"
-      : "text-muted-foreground",
+      ? "bg-accent font-medium text-accent-foreground"
+      : "text-muted-foreground hover:bg-accent/70 hover:text-foreground",
   );
 }
 
-function NavGroup({ items }: { items: NavItem[] }) {
+function NavGroup({ label, items }: { label: string; items: NavItem[] }) {
   return (
-    <nav
-      aria-label={items[0]?.label}
-      className="flex flex-wrap items-center gap-1"
-    >
+    <nav aria-label={label} className="flex flex-wrap items-center gap-1">
       {items.map((item) => (
         <NavLink
           key={item.to}
@@ -97,17 +94,16 @@ export function AppShell({ children }: { children: React.ReactNode }) {
           <Separator orientation="vertical" className="mx-1 h-6" />
 
           <div className="hidden flex-1 items-center gap-4 md:flex">
-            <NavGroup items={PRIMARY_NAV} />
+            <NavGroup label="Ticket workspace" items={PRIMARY_NAV} />
             <Separator orientation="vertical" className="h-5" />
-            <NavGroup items={INTAKE_NAV} />
+            <NavGroup label="Intake channels" items={INTAKE_NAV} />
           </div>
 
-          <div className="ml-auto flex items-center gap-1.5">
+          <div className="ml-auto flex items-center gap-2">
             <Button
               variant="ghost"
               size="sm"
               className="hidden text-muted-foreground lg:inline-flex"
-              data-icon
               aria-label="Search"
             >
               <Search data-icon="inline-start" />
@@ -122,20 +118,22 @@ export function AppShell({ children }: { children: React.ReactNode }) {
           </div>
         </div>
 
-        {/* Mobile nav row */}
-        <div className="flex gap-2 overflow-x-auto border-t border-border/40 px-4 py-2 md:hidden">
+        <nav
+          aria-label="Mobile navigation"
+          className="flex gap-1 overflow-x-auto border-t border-border/40 px-4 py-2 md:hidden"
+        >
           {[...PRIMARY_NAV, ...INTAKE_NAV, ...UTILITY_NAV].map((item) => (
             <NavLink
               key={item.to}
               to={item.to}
               end={item.end}
-              className={({ isActive }) => navLinkClass(isActive)}
+              className={({ isActive }) => navLinkClass(isActive, true)}
             >
               <item.icon className="size-4" />
               <span>{item.label}</span>
             </NavLink>
           ))}
-        </div>
+        </nav>
       </header>
 
       <main
@@ -166,12 +164,7 @@ function UserMenu() {
     <DropdownMenu>
       <DropdownMenuTrigger
         render={
-          <Button
-            variant="ghost"
-            size="icon"
-            aria-label="User menu"
-            data-icon
-          >
+          <Button variant="ghost" size="icon" aria-label="User menu">
             <Avatar className="size-7">
               <AvatarFallback className="bg-primary/15 text-xs font-semibold text-primary">
                 OP

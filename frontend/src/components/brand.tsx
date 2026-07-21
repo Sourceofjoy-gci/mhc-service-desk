@@ -41,16 +41,20 @@ interface BrandLockupProps {
   size?: "sm" | "md" | "lg";
 }
 
+const BRAND_LOCKUP_SIZES = {
+  sm: { mark: 24, text: "text-sm" },
+  md: { mark: 28, text: "text-base" },
+  lg: { mark: 36, text: "text-lg" },
+} as const;
+
 export function BrandLockup({ className, size = "md" }: BrandLockupProps) {
-  const markSize = size === "sm" ? 24 : size === "lg" ? 36 : 28;
-  const textClass =
-    size === "sm" ? "text-sm" : size === "lg" ? "text-lg" : "text-base";
+  const lockupSize = BRAND_LOCKUP_SIZES[size];
 
   return (
-    <div className={cn("flex items-center gap-2.5", className)}>
-      <BrandMark size={markSize} />
+    <div className={cn("flex items-center gap-2", className)}>
+      <BrandMark size={lockupSize.mark} />
       <div className="flex flex-col leading-tight">
-        <span className={cn("font-semibold tracking-tight", textClass)}>
+        <span className={cn("font-semibold tracking-tight", lockupSize.text)}>
           MHC Service Desk
         </span>
         <span className="text-[10px] font-medium uppercase tracking-wider text-muted-foreground">
