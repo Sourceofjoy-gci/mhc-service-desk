@@ -128,7 +128,7 @@ export default function DashboardPage() {
         </Empty>
       ) : (
         <div className="grid grid-cols-1 gap-4 lg:grid-cols-2">
-          <Card className="rounded-[10px]">
+          <Card className="rounded-lg!">
             <CardHeader>
               <CardTitle>By priority</CardTitle>
               <CardDescription>
@@ -163,7 +163,7 @@ export default function DashboardPage() {
             </CardContent>
           </Card>
 
-          <Card className="rounded-[10px]">
+          <Card className="rounded-lg!">
             <CardHeader>
               <CardTitle>By status</CardTitle>
               <CardDescription>
@@ -219,7 +219,7 @@ function DashboardSkeleton() {
       </div>
       <div className="grid grid-cols-1 gap-4 sm:grid-cols-2 xl:grid-cols-5">
         {Array.from({ length: 5 }, (_, index) => (
-          <Card key={index} className="rounded-[10px]">
+          <Card key={index} className="rounded-lg!">
             <CardHeader>
               <Skeleton className="h-5 w-24" />
               <Skeleton className="h-4 w-32" />
@@ -232,7 +232,7 @@ function DashboardSkeleton() {
       </div>
       <div className="grid grid-cols-1 gap-4 lg:grid-cols-2">
         {Array.from({ length: 2 }, (_, index) => (
-          <Card key={index} className="rounded-[10px]">
+          <Card key={index} className="rounded-lg!">
             <CardHeader>
               <Skeleton className="h-5 w-28" />
               <Skeleton className="h-4 w-48" />
@@ -261,7 +261,7 @@ function MetricCard({
   isDestructive?: boolean;
 }) {
   return (
-    <Card className="rounded-[10px]">
+    <Card className="rounded-lg!">
       <CardHeader>
         <CardTitle>{label}</CardTitle>
         <CardDescription>{description}</CardDescription>
