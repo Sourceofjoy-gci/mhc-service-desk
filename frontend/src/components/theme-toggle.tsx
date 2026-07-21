@@ -4,6 +4,7 @@ import { Button } from "./ui/button";
 import {
   DropdownMenu,
   DropdownMenuContent,
+  DropdownMenuGroup,
   DropdownMenuItem,
   DropdownMenuLabel,
   DropdownMenuSeparator,
@@ -32,25 +33,33 @@ export function ThemeToggle() {
         }
       />
       <DropdownMenuContent align="end" className="min-w-36">
-        <DropdownMenuLabel>Theme</DropdownMenuLabel>
+        <DropdownMenuGroup>
+          <DropdownMenuLabel>Theme</DropdownMenuLabel>
+        </DropdownMenuGroup>
         <DropdownMenuSeparator />
-        <DropdownMenuItem onClick={() => setTheme("light")}>
-          <Sun />
-          Light
-          {theme === "light" ? <span className="ml-auto text-primary">•</span> : null}
-        </DropdownMenuItem>
-        <DropdownMenuItem onClick={() => setTheme("dark")}>
-          <Moon />
-          Dark
-          {theme === "dark" ? <span className="ml-auto text-primary">•</span> : null}
-        </DropdownMenuItem>
-        <DropdownMenuItem onClick={() => setTheme("system")}>
-          <Monitor />
-          System
-          {theme === "system" ? (
-            <span className="ml-auto text-primary">•</span>
-          ) : null}
-        </DropdownMenuItem>
+        <DropdownMenuGroup>
+          <DropdownMenuItem onClick={() => setTheme("light")}>
+            <Sun />
+            Light
+            {theme === "light" ? (
+              <span className="ml-auto text-primary">•</span>
+            ) : null}
+          </DropdownMenuItem>
+          <DropdownMenuItem onClick={() => setTheme("dark")}>
+            <Moon />
+            Dark
+            {theme === "dark" ? (
+              <span className="ml-auto text-primary">•</span>
+            ) : null}
+          </DropdownMenuItem>
+          <DropdownMenuItem onClick={() => setTheme("system")}>
+            <Monitor />
+            System
+            {theme === "system" ? (
+              <span className="ml-auto text-primary">•</span>
+            ) : null}
+          </DropdownMenuItem>
+        </DropdownMenuGroup>
       </DropdownMenuContent>
     </DropdownMenu>
   );

@@ -44,7 +44,9 @@ export default function LoginPage() {
             <div className="mx-auto grid size-12 place-items-center rounded-lg bg-muted text-primary">
               <KeyRound />
             </div>
-            <CardTitle className="text-xl">Agent sign-in</CardTitle>
+            <CardTitle>
+              <h1 className="text-xl">Agent sign-in</h1>
+            </CardTitle>
             <CardDescription>
               Sign in with your MHC Keycloak realm account to access the agent
               console.
