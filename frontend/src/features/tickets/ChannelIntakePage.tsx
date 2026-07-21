@@ -1,7 +1,27 @@
 import { useState } from "react";
 import { useMutation } from "@tanstack/react-query";
 import { Link, useLocation } from "react-router-dom";
-import { ticketsApi } from "../../lib/api";
+import { Phone, User, ArrowRight, CheckCircle2, RotateCcw } from "lucide-react";
+import { ticketsApi } from "@/lib/api";
+import { Button } from "@/components/ui/button";
+import {
+  Card,
+  CardContent,
+  CardDescription,
+  CardFooter,
+  CardHeader,
+  CardTitle,
+} from "@/components/ui/card";
+import { Input } from "@/components/ui/input";
+import { Textarea } from "@/components/ui/textarea";
+import { Badge } from "@/components/ui/badge";
+import {
+  Select,
+  SelectContent,
+  SelectItem,
+  SelectTrigger,
+  SelectValue,
+} from "@/components/ui/select";
 
 interface ChannelIntakeProps {
   channel: "call" | "walk_in";
@@ -9,152 +29,291 @@ interface ChannelIntakeProps {
   description: string;
 }
 
-const CHANNEL_LABELS: Record<ChannelIntakeProps["channel"], string> = {
-  call: "Call centre",
-  walk_in: "Walk-in",
+const CHANNEL_META: Record<
+  ChannelIntakeProps["channel"],
+  { label: string; icon: typeof Phone; tone: string }
+> = {
+  call: {
+    label: "Call centre",
+    icon: Phone,
+    tone: "info",
+  },
+  walk_in: {
+    label: "Walk-in",
+    icon: User,
+    tone: "gold",
+  },
 };
 
-export default function ChannelIntakePage({ channel, title, description }: ChannelIntakeProps) {
+interface FormState {
+  service_code: string;
+  request_type_code: string;
+  office_code: string;
+  title: string;
+  description: string;
+  requester_name: string;
+  requester_email: string;
+  requester_phone: string;
+  matter_reference: string;
+}
+
+const EMPTY: FormState = {
+  service_code: "GEN-INFO",
+  request_type_code: "HOURS",
+  office_code: "MHC-MBA",
+  title: "",
+  description: "",
+  requester_name: "",
+  requester_email: "",
+  requester_phone: "",
+  matter_reference: "",
+};
+
+const SERVICES = [
+  { value: "GEN-INFO", label: "General information" },
+  { value: "EST-REG", label: "Estate registration or reference" },
+  { value: "WIL-REG", label: "Will registration or safekeeping" },
+];
+const REQUEST_TYPES = [
+  { value: "HOURS", label: "Office hours and contact" },
+  { value: "CALLBACK", label: "Callback request" },
+  { value: "NEW-EST", label: "New estate enquiry" },
+  { value: "STATUS", label: "Estate status check" },
+  { value: "SEARCH", label: "Will search request" },
+];
+const OFFICES = [
+  { value: "MHC-MBA", label: "Mbabane (Main)" },
+  { value: "MHC-MAN", label: "Manzini" },
+];
+
+export default function ChannelIntakePage({
+  channel,
+  title,
+  description,
+}: ChannelIntakeProps) {
   const location = useLocation();
-  const [form, setForm] = useState({
-    service_code: "GEN-INFO",
-    request_type_code: "HOURS",
-    office_code: "MHC-MBA",
-    title: "",
-    description: "",
-    requester_name: "",
-    requester_email: "",
-    requester_phone: "",
-    matter_reference: "",
-  });
+  const [form, setForm] = useState<FormState>(EMPTY);
   const [submitted, setSubmitted] = useState<{ number: string; priority: string } | null>(null);
+  const meta = CHANNEL_META[channel];
+  const Icon = meta.icon;
 
   const submit = useMutation({
-    mutationFn: (data: typeof form) =>
+    mutationFn: (data: FormState) =>
       ticketsApi.publicIntake({ ...data, consent: true, channel }),
-    onSuccess: (r) => setSubmitted({ number: r.ticket_number, priority: r.priority }),
+    onSuccess: (r) =>
+      setSubmitted({ number: r.ticket_number, priority: r.priority }),
   });
+
+  const update = <K extends keyof FormState>(key: K) => (value: FormState[K]) =>
+    setForm((prev) => ({ ...prev, [key]: value }));
 
   if (submitted) {
     return (
-      <section className="mx-auto max-w-2xl space-y-4">
-        <div className="rounded-md border border-green-200 bg-green-50 p-4 text-sm text-green-800">
-          <h1 className="text-lg font-semibold">{CHANNEL_LABELS[channel]} capture complete</h1>
-          <p className="mt-1">
-            Ticket <span className="font-mono">{submitted.number}</span> ({submitted.priority}) created.
-          </p>
-          <div className="mt-3 flex gap-2">
-            <Link
-              to={`/tickets/${submitted.number}`}
-              className="rounded-md border border-green-300 bg-white px-3 py-1.5"
-            >
-              Open ticket
-            </Link>
-            <button
-              onClick={() => {
-                setSubmitted(null);
-                setForm({ ...form, title: "", description: "" });
-              }}
-              className="rounded-md border border-ink-100 bg-white px-3 py-1.5"
-            >
-              New capture
-            </button>
-          </div>
-        </div>
-      </section>
+      <div className="mx-auto max-w-2xl">
+        <Card>
+          <CardContent className="flex flex-col items-center gap-5 p-10 text-center">
+            <div className="grid size-14 place-items-center rounded-full bg-success/15 text-success-foreground ring-1 ring-inset ring-success/30">
+              <CheckCircle2 className="size-7" />
+            </div>
+            <div className="flex flex-col gap-2">
+              <h1 className="text-2xl font-semibold tracking-tight">
+                {meta.label} capture complete
+              </h1>
+              <p className="text-sm text-muted-foreground">
+                Ticket <span className="font-mono">{submitted.number}</span> at priority{" "}
+                <Badge variant="secondary" className="font-mono">
+                  {submitted.priority}
+                </Badge>{" "}
+                has been created.
+              </p>
+            </div>
+            <div className="flex flex-wrap items-center justify-center gap-2">
+              <Button render={<Link to={`/tickets/${submitted.number}`} />} data-icon>
+                Open ticket
+                <ArrowRight data-icon="inline-end" />
+              </Button>
+              <Button
+                variant="outline"
+                onClick={() => {
+                  setSubmitted(null);
+                  setForm(EMPTY);
+                }}
+                data-icon
+              >
+                <RotateCcw data-icon="inline-start" />
+                New capture
+              </Button>
+            </div>
+          </CardContent>
+        </Card>
+      </div>
     );
   }
 
-  const handle = (k: keyof typeof form) => (e: React.ChangeEvent<HTMLInputElement | HTMLTextAreaElement | HTMLSelectElement>) => {
-    setForm({ ...form, [k]: e.target.value });
-  };
-
   return (
-    <section className="mx-auto max-w-2xl space-y-4">
-      <header>
-        <h1 className="text-2xl font-semibold">{title}</h1>
-        <p className="mt-1 text-sm text-ink-500">{description}</p>
-        <p className="mt-1 text-xs text-ink-400">Origin: {CHANNEL_LABELS[channel]} ({location.pathname})</p>
-      </header>
-
-      <form
-        onSubmit={(e) => {
-          e.preventDefault();
-          submit.mutate(form);
-        }}
-        className="space-y-4 rounded-md border border-ink-100 bg-white p-4"
-      >
-        <div className="grid grid-cols-1 gap-3 md:grid-cols-2">
-          <Field label="Service">
-            <select value={form.service_code} onChange={handle("service_code")} className="input">
-              <option value="GEN-INFO">General information</option>
-              <option value="EST-REG">Estate registration or reference</option>
-              <option value="WIL-REG">Will registration or safekeeping</option>
-            </select>
-          </Field>
-          <Field label="Type of request">
-            <select value={form.request_type_code} onChange={handle("request_type_code")} className="input">
-              <option value="HOURS">Office hours and contact</option>
-              <option value="CALLBACK">Callback request</option>
-              <option value="NEW-EST">New estate enquiry</option>
-              <option value="STATUS">Estate status check</option>
-              <option value="SEARCH">Will search request</option>
-            </select>
-          </Field>
-          <Field label="Office">
-            <select value={form.office_code} onChange={handle("office_code")} className="input">
-              <option value="MHC-MBA">Mbabane (Main)</option>
-              <option value="MHC-MAN">Manzini</option>
-            </select>
-          </Field>
-          <Field label="Matter reference (optional)">
-            <input type="text" value={form.matter_reference} onChange={handle("matter_reference")} className="input" maxLength={128} />
-          </Field>
-        </div>
-        <Field label="Title" required>
-          <input type="text" value={form.title} onChange={handle("title")} className="input" maxLength={255} required />
-        </Field>
-        <Field label="Notes" required>
-          <textarea value={form.description} onChange={handle("description")} className="input" rows={4} required />
-        </Field>
-        <div className="grid grid-cols-1 gap-3 md:grid-cols-3">
-          <Field label="Requester name" required>
-            <input type="text" value={form.requester_name} onChange={handle("requester_name")} className="input" maxLength={255} required />
-          </Field>
-          <Field label="Email">
-            <input type="email" value={form.requester_email} onChange={handle("requester_email")} className="input" />
-          </Field>
-          <Field label="Phone">
-            <input type="tel" value={form.requester_phone} onChange={handle("requester_phone")} className="input" maxLength={32} />
-          </Field>
-        </div>
-        {submit.isError && (
-          <div className="rounded-md border border-red-200 bg-red-50 p-3 text-sm text-red-700">
-            {(submit.error as Error)?.message}
+    <div className="mx-auto max-w-2xl">
+      <Card>
+        <CardHeader>
+          <div className="flex items-center gap-2">
+            <span
+              className="grid size-9 place-items-center rounded-md bg-primary/10 text-primary ring-1 ring-inset ring-primary/20"
+              aria-hidden
+            >
+              <Icon className="size-4" />
+            </span>
+            <Badge variant="secondary" className="font-normal">
+              {meta.label} · {location.pathname}
+            </Badge>
           </div>
-        )}
-        <div className="flex justify-end gap-2">
-          <button
-            type="submit"
-            disabled={submit.isPending || !form.title || !form.description || !form.requester_name}
-            className="rounded-md bg-brand-600 px-5 py-2 text-sm font-medium text-white hover:bg-brand-700 disabled:opacity-50"
-          >
-            {submit.isPending ? "Saving…" : "Capture ticket"}
-          </button>
-        </div>
-      </form>
-    </section>
+          <CardTitle className="text-2xl">{title}</CardTitle>
+          <CardDescription>{description}</CardDescription>
+        </CardHeader>
+        <form
+          onSubmit={(e) => {
+            e.preventDefault();
+            submit.mutate(form);
+          }}
+        >
+          <CardContent className="flex flex-col gap-4">
+            <div className="grid grid-cols-1 gap-3 md:grid-cols-2">
+              <Field label="Service">
+                <Select
+                  value={form.service_code}
+                  onValueChange={(v) => { if (v == null) return; update("service_code")(v) }}
+                >
+                  <SelectTrigger>
+                    <SelectValue />
+                  </SelectTrigger>
+                  <SelectContent>
+                    {SERVICES.map((s) => (
+                      <SelectItem key={s.value} value={s.value}>
+                        {s.label}
+                      </SelectItem>
+                    ))}
+                  </SelectContent>
+                </Select>
+              </Field>
+              <Field label="Type of request">
+                <Select
+                  value={form.request_type_code}
+                  onValueChange={(v) => { if (v == null) return; update("request_type_code")(v) }}
+                >
+                  <SelectTrigger>
+                    <SelectValue />
+                  </SelectTrigger>
+                  <SelectContent>
+                    {REQUEST_TYPES.map((s) => (
+                      <SelectItem key={s.value} value={s.value}>
+                        {s.label}
+                      </SelectItem>
+                    ))}
+                  </SelectContent>
+                </Select>
+              </Field>
+              <Field label="Office">
+                <Select
+                  value={form.office_code}
+                  onValueChange={(v) => { if (v == null) return; update("office_code")(v) }}
+                >
+                  <SelectTrigger>
+                    <SelectValue />
+                  </SelectTrigger>
+                  <SelectContent>
+                    {OFFICES.map((s) => (
+                      <SelectItem key={s.value} value={s.value}>
+                        {s.label}
+                      </SelectItem>
+                    ))}
+                  </SelectContent>
+                </Select>
+              </Field>
+              <Field label="Matter reference (optional)">
+                <Input
+                  value={form.matter_reference}
+                  onChange={(e) => update("matter_reference")(e.target.value)}
+                  maxLength={128}
+                />
+              </Field>
+            </div>
+            <Field label="Title" required>
+              <Input
+                value={form.title}
+                onChange={(e) => update("title")(e.target.value)}
+                maxLength={255}
+                required
+              />
+            </Field>
+            <Field label="Notes" required>
+              <Textarea
+                value={form.description}
+                onChange={(e) => update("description")(e.target.value)}
+                rows={4}
+                required
+              />
+            </Field>
+            <div className="grid grid-cols-1 gap-3 md:grid-cols-3">
+              <Field label="Requester name" required>
+                <Input
+                  value={form.requester_name}
+                  onChange={(e) => update("requester_name")(e.target.value)}
+                  maxLength={255}
+                  required
+                />
+              </Field>
+              <Field label="Email">
+                <Input
+                  type="email"
+                  value={form.requester_email}
+                  onChange={(e) => update("requester_email")(e.target.value)}
+                />
+              </Field>
+              <Field label="Phone">
+                <Input
+                  type="tel"
+                  value={form.requester_phone}
+                  onChange={(e) => update("requester_phone")(e.target.value)}
+                  maxLength={32}
+                />
+              </Field>
+            </div>
+          </CardContent>
+          <CardFooter className="flex justify-end">
+            <Button
+              type="submit"
+              disabled={
+                submit.isPending ||
+                !form.title ||
+                !form.description ||
+                !form.requester_name
+              }
+              data-icon
+            >
+              {submit.isPending ? "Saving…" : "Capture ticket"}
+              <ArrowRight data-icon="inline-end" />
+            </Button>
+          </CardFooter>
+        </form>
+      </Card>
+    </div>
   );
 }
 
-function Field({ label, children, required }: { label: string; children: React.ReactNode; required?: boolean }) {
+function Field({
+  label,
+  required,
+  children,
+}: {
+  label: string;
+  required?: boolean;
+  children: React.ReactNode;
+}) {
   return (
-    <label className="block">
-      <span className="block text-xs font-medium text-ink-700">
+    <div className="flex flex-col gap-1.5">
+      <label className="text-xs font-medium text-foreground/80">
         {label}
-        {required && <span className="text-red-600"> *</span>}
-      </span>
-      <div className="mt-1">{children}</div>
-    </label>
+        {required ? <span className="text-destructive"> *</span> : null}
+      </label>
+      {children}
+    </div>
   );
 }

@@ -1,52 +1,76 @@
 import { Link } from "react-router-dom";
-import type { TicketSummary } from "../../lib/api";
-import { clsx } from "clsx";
+import { Clock, Building2, ArrowUpRight } from "lucide-react";
+import type { TicketSummary } from "@/lib/api";
+import {
+  ChannelBadge,
+  PriorityBadge,
+  SlaIndicator,
+  StatusBadge,
+} from "@/components/domain-badges";
+import {
+  Card,
+  CardContent,
+  CardHeader,
+} from "@/components/ui/card";
+import { cn } from "@/lib/utils";
 
-const priorityColors: Record<string, string> = {
-  P1: "bg-red-100 text-red-800",
-  P2: "bg-amber-100 text-amber-800",
-  P3: "bg-blue-100 text-blue-800",
-  P4: "bg-ink-100 text-ink-700",
-};
+interface TicketCardProps {
+  ticket: TicketSummary;
+  draggable?: boolean;
+}
 
-const slaColors: Record<string, string> = {
-  on_track: "text-green-700",
-  at_risk: "text-amber-700",
-  breached: "text-red-700",
-  paused: "text-ink-500",
-  none: "text-ink-400",
-};
-
-export function TicketCard({ ticket, draggable = false }: { ticket: TicketSummary; draggable?: boolean }) {
+export function TicketCard({ ticket, draggable = false }: TicketCardProps) {
   return (
     <Link
       to={`/tickets/${ticket.number}`}
-      className="block rounded-md border border-ink-100 bg-white p-3 text-sm shadow-sm hover:border-brand-500 hover:shadow no-underline"
       data-ticket-number={ticket.number}
       data-draggable={draggable ? "true" : undefined}
+      className="group block focus-visible:outline-none"
     >
-      <div className="flex items-center justify-between gap-2">
-        <span className="font-mono text-xs text-ink-500">{ticket.number}</span>
-        <span
-          className={clsx(
-            "rounded-full px-2 py-0.5 text-xs font-medium",
-            priorityColors[ticket.priority] ?? priorityColors.P4,
-          )}
-        >
-          {ticket.priority}
-        </span>
-      </div>
-      <div className="mt-1 line-clamp-2 font-medium text-ink-900">{ticket.title}</div>
-      <div className="mt-2 flex items-center justify-between text-xs text-ink-500">
-        <span>{ticket.requester_name}</span>
-        <span className={slaColors[ticket.sla_health]}>
-          {ticket.sla_health === "on_track" ? "on track" : ticket.sla_health.replace("_", " ")}
-        </span>
-      </div>
-      <div className="mt-1 flex items-center justify-between text-xs text-ink-500">
-        <span>{ticket.office_code}</span>
-        <span>{ticket.age_hours.toFixed(1)}h</span>
-      </div>
+      <Card
+        className={cn(
+          "h-full transition-all",
+          "group-hover:border-primary/50 group-hover:shadow-md group-hover:-translate-y-px",
+          "group-focus-visible:ring-2 group-focus-visible:ring-ring",
+        )}
+      >
+        <CardHeader className="gap-2">
+          <div className="flex items-center justify-between gap-2">
+            <span className="font-mono text-[11px] font-medium text-muted-foreground tracking-tight">
+              {ticket.number}
+            </span>
+            <div className="flex items-center gap-1.5">
+              <PriorityBadge code={ticket.priority} />
+              <ChannelBadge channel={ticket.channel} />
+            </div>
+          </div>
+          <h3 className="line-clamp-2 text-sm font-medium leading-snug text-foreground">
+            {ticket.title}
+          </h3>
+        </CardHeader>
+        <CardContent className="flex flex-col gap-2.5 text-xs text-muted-foreground">
+          <div className="flex items-center justify-between gap-2">
+            <span className="truncate font-medium text-foreground/80">
+              {ticket.requester_name}
+            </span>
+            <StatusBadge code={ticket.status_code} label={ticket.status_public} />
+          </div>
+          <div className="flex items-center justify-between gap-2 text-muted-foreground">
+            <span className="inline-flex items-center gap-1.5">
+              <Building2 className="size-3" />
+              {ticket.office_code}
+            </span>
+            <span className="inline-flex items-center gap-1.5">
+              <Clock className="size-3" />
+              {ticket.age_hours.toFixed(1)}h
+            </span>
+          </div>
+          <div className="flex items-center justify-between gap-2 border-t border-border/60 pt-2">
+            <SlaIndicator health={ticket.sla_health} />
+            <ArrowUpRight className="size-3.5 opacity-0 transition-opacity group-hover:opacity-100" />
+          </div>
+        </CardContent>
+      </Card>
     </Link>
   );
 }
