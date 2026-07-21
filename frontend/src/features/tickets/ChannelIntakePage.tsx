@@ -145,11 +145,8 @@ export default function ChannelIntakePage({
           </CardHeader>
           <CardContent className="text-center">
             <p className="text-sm text-muted-foreground">
-              Ticket <span className="font-mono">{submitted.number}</span> at
-              priority{" "}
-              <Badge variant="secondary" className="font-mono">
-                {submitted.priority}
-              </Badge>{" "}
+              Ticket <span className="tabular-nums">{submitted.number}</span> at
+              priority <Badge variant="secondary">{submitted.priority}</Badge>{" "}
               has been created.
             </p>
           </CardContent>

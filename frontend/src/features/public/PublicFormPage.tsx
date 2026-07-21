@@ -398,14 +398,11 @@ function SuccessPanel({
           <CardDescription>
             Keep this ticket number for your records. We will respond within the
             service-level target for priority{" "}
-            <Badge variant="secondary" className="font-mono">
-              {data.priority}
-            </Badge>
-            .
+            <Badge variant="secondary">{data.priority}</Badge>.
           </CardDescription>
         </CardHeader>
         <CardContent className="text-center">
-          <p className="rounded-lg border border-border/60 bg-muted/40 px-5 py-3 font-mono text-lg font-semibold tracking-wider">
+          <p className="rounded-lg border border-border/60 bg-muted/40 px-5 py-3 text-lg font-semibold tracking-wider tabular-nums">
             {data.number}
           </p>
         </CardContent>
