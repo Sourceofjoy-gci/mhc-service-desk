@@ -21,6 +21,15 @@ export type StatusCode =
 export type PriorityCode = "P1" | "P2" | "P3" | "P4";
 export type SlaState = "on_track" | "at_risk" | "breached" | "paused" | "none";
 
+const PRIORITY_CODES: PriorityCode[] = ["P1", "P2", "P3", "P4"];
+const SLA_STATES: SlaState[] = [
+  "on_track",
+  "at_risk",
+  "breached",
+  "paused",
+  "none",
+];
+
 const STATUS_CODES: StatusCode[] = [
   "new",
   "triage",
@@ -117,7 +126,7 @@ export function StatusBadge({
   );
 }
 
-const priorityDot = cva("size-1.5 rounded-full", {
+const priorityDot = cva("size-2 rounded-full", {
   variants: {
     code: {
       P1: "bg-destructive",
@@ -133,8 +142,12 @@ export interface PriorityBadgeProps extends Omit<
   React.HTMLAttributes<HTMLSpanElement>,
   "children"
 > {
-  code: PriorityCode;
+  code: string;
   showDot?: boolean;
+}
+
+function normalizePriorityCode(code: string): PriorityCode {
+  return PRIORITY_CODES.find((priority) => priority === code) ?? "P3";
 }
 
 export function PriorityBadge({
@@ -143,6 +156,8 @@ export function PriorityBadge({
   className,
   ...rest
 }: PriorityBadgeProps) {
+  const priority = normalizePriorityCode(code);
+
   return (
     <Badge
       variant="outline"
@@ -157,7 +172,7 @@ export function PriorityBadge({
       {showDot ? (
         <span
           data-icon="inline-start"
-          className={priorityDot({ code })}
+          className={priorityDot({ code: priority })}
           aria-hidden
         />
       ) : null}
@@ -219,10 +234,11 @@ export function SlaIndicator({
   health,
   className,
 }: {
-  health: SlaState;
+  health: string;
   className?: string;
 }) {
-  const label = SLA_LABELS[health];
+  const state = SLA_STATES.find((slaState) => slaState === health) ?? "none";
+  const label = SLA_LABELS[state];
 
   return (
     <Badge
@@ -234,7 +250,7 @@ export function SlaIndicator({
     >
       <span
         data-icon="inline-start"
-        className={slaHealthDot({ state: health })}
+        className={slaHealthDot({ state })}
         aria-hidden
       />
       {label}

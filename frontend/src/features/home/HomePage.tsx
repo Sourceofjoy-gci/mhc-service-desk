@@ -191,7 +191,7 @@ function PlatformStatus({
               <div className="flex items-center gap-2">
                 <span
                   className={cn(
-                    "size-1.5 rounded-full",
+                    "size-2 rounded-full",
                     check?.ok
                       ? "bg-success"
                       : check
@@ -230,7 +230,7 @@ function DomainSeparation() {
       <div className="grid gap-6 md:grid-cols-2">
         <article className="flex items-start gap-3 py-2">
           <Users
-            className="mt-0.5 size-5 shrink-0 text-info-foreground"
+            className="mt-1 size-5 shrink-0 text-info-foreground"
             aria-hidden
           />
           <div className="flex flex-col gap-2">
@@ -248,7 +248,7 @@ function DomainSeparation() {
           </div>
         </article>
         <article className="flex items-start gap-3 py-2">
-          <Workflow className="mt-0.5 size-5 shrink-0 text-gold" aria-hidden />
+          <Workflow className="mt-1 size-5 shrink-0 text-gold" aria-hidden />
           <div className="flex flex-col gap-2">
             <div>
               <h3 className="font-medium">IT desk</h3>
@@ -350,7 +350,7 @@ function Operations() {
             to={card.to}
             className="group block text-card-foreground no-underline hover:no-underline focus-visible:outline-none"
           >
-            <Card className="h-full transition-[transform,box-shadow] group-hover:-translate-y-0.5 group-hover:shadow-sm group-focus-visible:ring-3 group-focus-visible:ring-ring/50">
+            <Card className="h-full transition-[transform,box-shadow] group-hover:-translate-y-1 group-hover:shadow-sm group-focus-visible:ring-3 group-focus-visible:ring-ring/50">
               <CardHeader>
                 <div className="flex items-center justify-between text-primary">
                   <card.icon className="size-5" aria-hidden />
@@ -359,7 +359,9 @@ function Operations() {
                     aria-hidden
                   />
                 </div>
-                <CardTitle>{card.title}</CardTitle>
+                <CardTitle>
+                  <h3>{card.title}</h3>
+                </CardTitle>
               </CardHeader>
               <CardContent>
                 <p className="text-xs text-muted-foreground">

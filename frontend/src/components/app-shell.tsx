@@ -18,6 +18,7 @@ import { Button } from "./ui/button";
 import {
   DropdownMenu,
   DropdownMenuContent,
+  DropdownMenuGroup,
   DropdownMenuItem,
   DropdownMenuLabel,
   DropdownMenuSeparator,
@@ -83,7 +84,7 @@ export function AppShell({ children }: { children: React.ReactNode }) {
   return (
     <div className="flex min-h-full flex-col bg-background">
       <header className="sticky top-0 z-40 border-b border-border/60 bg-background/80 backdrop-blur supports-[backdrop-filter]:bg-background/60">
-        <div className="mx-auto flex w-full max-w-7xl items-center gap-4 px-4 py-2.5 sm:px-6">
+        <div className="mx-auto flex w-full max-w-7xl items-center gap-4 px-4 py-2 sm:px-6">
           <Link
             to="/"
             className="flex items-center gap-2 text-foreground no-underline"
@@ -108,7 +109,7 @@ export function AppShell({ children }: { children: React.ReactNode }) {
             >
               <Search data-icon="inline-start" />
               <span className="text-xs">Search</span>
-              <kbd className="ml-2 hidden rounded border border-border/60 bg-muted px-1.5 font-mono text-[10px] text-muted-foreground lg:inline">
+              <kbd className="ml-2 hidden rounded border border-border/60 bg-muted px-2 font-mono text-[10px] text-muted-foreground lg:inline">
                 ⌘K
               </kbd>
             </Button>
@@ -145,8 +146,8 @@ export function AppShell({ children }: { children: React.ReactNode }) {
 
       <footer className="border-t border-border/60 bg-muted/30 py-4 text-center text-xs text-muted-foreground">
         <div className="mx-auto flex max-w-7xl flex-wrap items-center justify-center gap-x-3 gap-y-1 px-4">
-          <span className="inline-flex items-center gap-1.5">
-            <Scale className="size-3.5" />
+          <span className="inline-flex items-center gap-2">
+            <Scale className="size-4" />
             Judiciary of Eswatini — Master of the High Court
           </span>
           <span aria-hidden>·</span>
@@ -174,23 +175,27 @@ function UserMenu() {
         }
       />
       <DropdownMenuContent align="end" className="min-w-52">
-        <DropdownMenuLabel className="font-normal">
-          <div className="flex flex-col gap-0.5">
-            <span className="text-sm font-medium">Signed in (dev)</span>
-            <span className="text-xs text-muted-foreground">
-              Bearer dev:demo:ops-agents
-            </span>
-          </div>
-        </DropdownMenuLabel>
+        <DropdownMenuGroup>
+          <DropdownMenuLabel className="font-normal">
+            <div className="flex flex-col gap-1">
+              <span className="text-sm font-medium">Signed in (dev)</span>
+              <span className="text-xs text-muted-foreground">
+                Bearer dev:demo:ops-agents
+              </span>
+            </div>
+          </DropdownMenuLabel>
+        </DropdownMenuGroup>
         <DropdownMenuSeparator />
-        <DropdownMenuItem render={<Link to="/login" />}>
-          <LogIn />
-          Sign in with Keycloak
-        </DropdownMenuItem>
-        <DropdownMenuItem render={<Link to="/health" />}>
-          <HeartPulse />
-          System health
-        </DropdownMenuItem>
+        <DropdownMenuGroup>
+          <DropdownMenuItem render={<Link to="/login" />}>
+            <LogIn data-icon="inline-start" />
+            Sign in with Keycloak
+          </DropdownMenuItem>
+          <DropdownMenuItem render={<Link to="/health" />}>
+            <HeartPulse data-icon="inline-start" />
+            System health
+          </DropdownMenuItem>
+        </DropdownMenuGroup>
       </DropdownMenuContent>
     </DropdownMenu>
   );
