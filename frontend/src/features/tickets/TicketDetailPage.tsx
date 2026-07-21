@@ -333,35 +333,39 @@ export default function TicketDetailPage() {
                 Contact details for this ticket.
               </CardDescription>
             </CardHeader>
-            <CardContent>
-              <dl className="flex flex-col text-sm">
+            <CardContent className="flex flex-col">
+              <dl className="text-sm">
                 <div className="flex items-start justify-between gap-4">
                   <dt className="text-muted-foreground">Full name</dt>
                   <dd className="text-right font-medium">
                     {t.requester.full_name}
                   </dd>
                 </div>
-                {t.requester.email && (
-                  <div>
-                    <Separator className="mb-3" />
+              </dl>
+              {t.requester.email && (
+                <>
+                  <Separator className="my-3" />
+                  <dl className="text-sm">
                     <div className="flex items-start justify-between gap-4">
                       <dt className="text-muted-foreground">Email</dt>
                       <dd className="break-all text-right">
                         {t.requester.email}
                       </dd>
                     </div>
-                  </div>
-                )}
-                {t.requester.phone_e164 && (
-                  <div>
-                    <Separator className="mb-3" />
+                  </dl>
+                </>
+              )}
+              {t.requester.phone_e164 && (
+                <>
+                  <Separator className="my-3" />
+                  <dl className="text-sm">
                     <div className="flex items-start justify-between gap-4">
                       <dt className="text-muted-foreground">Phone</dt>
                       <dd className="text-right">{t.requester.phone_e164}</dd>
                     </div>
-                  </div>
-                )}
-              </dl>
+                  </dl>
+                </>
+              )}
             </CardContent>
           </Card>
 
@@ -372,47 +376,49 @@ export default function TicketDetailPage() {
               </CardTitle>
               <CardDescription>Routing and matter details.</CardDescription>
             </CardHeader>
-            <CardContent>
-              <dl className="flex flex-col text-sm">
+            <CardContent className="flex flex-col">
+              <dl className="text-sm">
                 <div className="flex items-center justify-between gap-4">
                   <dt className="text-muted-foreground">Channel</dt>
                   <dd>
                     <ChannelBadge channel={t.channel} />
                   </dd>
                 </div>
-                <div>
-                  <Separator className="mb-3" />
-                  <div className="flex items-start justify-between gap-4">
-                    <dt className="text-muted-foreground">Office</dt>
-                    <dd className="text-right">{t.office}</dd>
-                  </div>
+              </dl>
+              <Separator className="my-3" />
+              <dl className="text-sm">
+                <div className="flex items-start justify-between gap-4">
+                  <dt className="text-muted-foreground">Office</dt>
+                  <dd className="text-right">{t.office}</dd>
                 </div>
-                <div>
-                  <Separator className="mb-3" />
-                  <div className="flex items-start justify-between gap-4">
-                    <dt className="text-muted-foreground">Service</dt>
-                    <dd className="text-right">{t.service}</dd>
-                  </div>
+              </dl>
+              <Separator className="my-3" />
+              <dl className="text-sm">
+                <div className="flex items-start justify-between gap-4">
+                  <dt className="text-muted-foreground">Service</dt>
+                  <dd className="text-right">{t.service}</dd>
                 </div>
-                <div>
-                  <Separator className="mb-3" />
-                  <div className="flex items-start justify-between gap-4">
-                    <dt className="text-muted-foreground">Type</dt>
-                    <dd className="text-right">{t.request_type}</dd>
-                  </div>
+              </dl>
+              <Separator className="my-3" />
+              <dl className="text-sm">
+                <div className="flex items-start justify-between gap-4">
+                  <dt className="text-muted-foreground">Type</dt>
+                  <dd className="text-right">{t.request_type}</dd>
                 </div>
-                {t.matter_reference && (
-                  <div>
-                    <Separator className="mb-3" />
+              </dl>
+              {t.matter_reference && (
+                <>
+                  <Separator className="my-3" />
+                  <dl className="text-sm">
                     <div className="flex items-start justify-between gap-4">
                       <dt className="text-muted-foreground">Matter</dt>
-                      <dd className="break-all text-right font-mono text-xs">
+                      <dd className="break-all text-right text-xs">
                         {t.matter_reference}
                       </dd>
                     </div>
-                  </div>
-                )}
-              </dl>
+                  </dl>
+                </>
+              )}
             </CardContent>
           </Card>
         </aside>
