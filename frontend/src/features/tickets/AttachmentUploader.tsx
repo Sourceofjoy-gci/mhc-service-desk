@@ -1,5 +1,21 @@
-import { useState } from "react";
 import { useMutation } from "@tanstack/react-query";
+import { AlertCircle, Upload } from "lucide-react";
+import { useState } from "react";
+import { toast } from "sonner";
+import { Alert, AlertDescription, AlertTitle } from "@/components/ui/alert";
+import { Badge } from "@/components/ui/badge";
+import { Button } from "@/components/ui/button";
+import {
+  Card,
+  CardContent,
+  CardDescription,
+  CardHeader,
+  CardTitle,
+} from "@/components/ui/card";
+import { Field, FieldGroup, FieldLabel } from "@/components/ui/field";
+import { Input } from "@/components/ui/input";
+import { Separator } from "@/components/ui/separator";
+import { Spinner } from "@/components/ui/spinner";
 import { DEV_AUTH_TOKEN } from "../../lib/api";
 
 interface UploadResult {
@@ -14,7 +30,10 @@ interface UploadResponse {
   results: UploadResult[];
 }
 
-async function uploadFiles(number: string, files: File[]): Promise<UploadResponse> {
+async function uploadFiles(
+  number: string,
+  files: File[],
+): Promise<UploadResponse> {
   const form = new FormData();
   for (const f of files) form.append("files", f);
   const r = await fetch(`/api/v1/tickets/${number}/attachments/`, {
@@ -29,28 +48,46 @@ async function uploadFiles(number: string, files: File[]): Promise<UploadRespons
   return r.json();
 }
 
-export default function AttachmentUploader({ ticketNumber }: { ticketNumber: string }) {
+export default function AttachmentUploader({
+  ticketNumber,
+}: {
+  ticketNumber: string;
+}) {
   const [files, setFiles] = useState<File[]>([]);
   const upload = useMutation({
     mutationFn: (fs: File[]) => uploadFiles(ticketNumber, fs),
-    onSuccess: () => setFiles([]),
+    onSuccess: () => {
+      setFiles([]);
+      toast.success("Attachments uploaded");
+    },
   });
 
   return (
-    <div className="rounded-md border border-ink-100 bg-white p-4">
-      <h2 className="text-sm font-semibold text-ink-700">Attachments</h2>
-      <p className="mt-1 text-xs text-ink-500">
-        Files are scanned by ClamAV before they can be downloaded (FR-093, FR-094).
-      </p>
-      <div className="mt-3 space-y-2">
-        <input
-          type="file"
-          multiple
-          onChange={(e) => setFiles(Array.from(e.target.files ?? []))}
-          className="block w-full text-sm"
-        />
+    <Card className="rounded-lg!">
+      <CardHeader>
+        <CardTitle>
+          <h2>Attachments</h2>
+        </CardTitle>
+        <CardDescription>
+          Files are scanned by ClamAV before they can be downloaded (FR-093,
+          FR-094).
+        </CardDescription>
+      </CardHeader>
+      <CardContent className="flex flex-col gap-4">
+        <FieldGroup className="gap-3">
+          <Field>
+            <FieldLabel htmlFor="ticket-attachments">Choose files</FieldLabel>
+            <Input
+              id="ticket-attachments"
+              type="file"
+              multiple
+              onChange={(e) => setFiles(Array.from(e.target.files ?? []))}
+            />
+          </Field>
+        </FieldGroup>
+
         {files.length > 0 && (
-          <ul className="space-y-1 text-xs text-ink-500">
+          <ul className="flex flex-col gap-1 text-xs text-muted-foreground">
             {files.map((f) => (
               <li key={f.name}>
                 {f.name} — {Math.round(f.size / 1024)} KB
@@ -58,38 +95,58 @@ export default function AttachmentUploader({ ticketNumber }: { ticketNumber: str
             ))}
           </ul>
         )}
-        <div className="flex items-center gap-2">
-          <button
-            onClick={() => upload.mutate(files)}
-            disabled={files.length === 0 || upload.isPending}
-            className="rounded-md bg-brand-600 px-3 py-1.5 text-sm font-medium text-white hover:bg-brand-700 disabled:opacity-50"
-          >
-            {upload.isPending ? "Uploading…" : "Upload"}
-          </button>
-          {upload.isError && (
-            <span className="text-sm text-red-700">{(upload.error as Error).message}</span>
+
+        <Button
+          className="self-start"
+          onClick={() => upload.mutate(files)}
+          disabled={files.length === 0 || upload.isPending}
+        >
+          {upload.isPending ? (
+            <Spinner data-icon="inline-start" />
+          ) : (
+            <Upload data-icon="inline-start" />
           )}
-        </div>
+          {upload.isPending ? "Uploading…" : "Upload"}
+        </Button>
+
+        {upload.isError && (
+          <Alert variant="destructive">
+            <AlertCircle data-icon="inline-start" aria-hidden />
+            <AlertTitle>Upload failed</AlertTitle>
+            <AlertDescription>
+              {(upload.error as Error).message}
+            </AlertDescription>
+          </Alert>
+        )}
+
         {upload.data && (
-          <ul className="mt-2 space-y-1 text-sm">
-            {upload.data.results.map((r) => (
-              <li
-                key={r.id}
-                className={
-                  r.scan_status === "infected"
-                    ? "rounded-md bg-red-50 p-2 text-red-800"
-                    : r.scan_status === "clean"
-                    ? "rounded-md bg-green-50 p-2 text-green-800"
-                    : "rounded-md bg-amber-50 p-2 text-amber-800"
-                }
-              >
-                <span className="font-medium">{r.filename}</span> — scan: {r.scan_status}
-                {r.scan_signature ? ` (${r.scan_signature})` : ""}
+          <ul className="flex flex-col" aria-label="Attachment scan results">
+            {upload.data.results.map((r, index) => (
+              <li key={r.id} className="flex flex-col gap-2">
+                {index > 0 ? <Separator className="mb-3" /> : null}
+                <div className="flex flex-wrap items-center justify-between gap-2">
+                  <span className="font-medium">{r.filename}</span>
+                  <Badge
+                    variant={
+                      r.scan_status === "infected" || r.scan_status === "error"
+                        ? "destructive"
+                        : r.scan_status === "clean"
+                          ? "secondary"
+                          : "outline"
+                    }
+                  >
+                    {r.scan_status}
+                  </Badge>
+                </div>
+                <p className="text-xs text-muted-foreground">
+                  {Math.round(r.size_bytes / 1024)} KB
+                  {r.scan_signature ? ` · ${r.scan_signature}` : ""}
+                </p>
               </li>
             ))}
           </ul>
         )}
-      </div>
-    </div>
+      </CardContent>
+    </Card>
   );
 }

@@ -1,6 +1,33 @@
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
+import { AlertCircle, ArrowLeft, Send, StickyNote } from "lucide-react";
 import { useState } from "react";
-import { useParams, Link } from "react-router-dom";
+import { Link, useParams } from "react-router-dom";
+import {
+  ChannelBadge,
+  PriorityBadge,
+  StatusBadge,
+} from "@/components/domain-badges";
+import { Alert, AlertDescription, AlertTitle } from "@/components/ui/alert";
+import { Button } from "@/components/ui/button";
+import {
+  Card,
+  CardContent,
+  CardDescription,
+  CardFooter,
+  CardHeader,
+  CardTitle,
+} from "@/components/ui/card";
+import {
+  Empty,
+  EmptyDescription,
+  EmptyHeader,
+  EmptyTitle,
+} from "@/components/ui/empty";
+import { Field, FieldGroup, FieldLabel } from "@/components/ui/field";
+import { Separator } from "@/components/ui/separator";
+import { Skeleton } from "@/components/ui/skeleton";
+import { Spinner } from "@/components/ui/spinner";
+import { Textarea } from "@/components/ui/textarea";
 import { ticketsApi, type TicketDetail } from "../../lib/api";
 import AttachmentUploader from "./AttachmentUploader";
 
@@ -18,7 +45,8 @@ export default function TicketDetailPage() {
   const [note, setNote] = useState("");
 
   const addMessage = useMutation({
-    mutationFn: (body_text: string) => ticketsApi.addMessage(number!, body_text),
+    mutationFn: (body_text: string) =>
+      ticketsApi.addMessage(number!, body_text),
     onSuccess: () => {
       setReply("");
       qc.invalidateQueries({ queryKey: ["ticket", number] });
@@ -33,172 +61,360 @@ export default function TicketDetailPage() {
     },
   });
 
-  if (isLoading) return <p className="text-ink-500">Loading…</p>;
-  if (error || !data)
+  if (isLoading) {
     return (
-      <div className="rounded-md border border-red-200 bg-red-50 p-3 text-sm text-red-700">
-        Could not load ticket {number}.{" "}
-        <Link to="/tickets" className="underline">
-          Back to queue
-        </Link>
-      </div>
+      <section
+        className="flex flex-col gap-6"
+        aria-busy="true"
+        aria-label="Loading ticket"
+      >
+        <Skeleton className="h-7 w-32" />
+        <div className="flex flex-col gap-3">
+          <Skeleton className="h-4 w-28" />
+          <Skeleton className="h-9 w-3/4" />
+          <Skeleton className="h-5 w-2/3" />
+          <Skeleton className="h-20 w-full" />
+        </div>
+        <div className="grid grid-cols-1 gap-4 lg:grid-cols-3">
+          <div className="flex flex-col gap-4 lg:col-span-2">
+            {Array.from({ length: 3 }, (_, index) => (
+              <Card key={index} className="rounded-lg!">
+                <CardHeader>
+                  <Skeleton className="h-5 w-32" />
+                  <Skeleton className="h-4 w-48" />
+                </CardHeader>
+                <CardContent className="flex flex-col gap-3">
+                  <Skeleton className="h-16 w-full" />
+                  <Skeleton className="h-16 w-full" />
+                </CardContent>
+              </Card>
+            ))}
+          </div>
+          <div className="flex flex-col gap-4">
+            {Array.from({ length: 2 }, (_, index) => (
+              <Card key={index} className="rounded-lg!">
+                <CardHeader>
+                  <Skeleton className="h-5 w-28" />
+                  <Skeleton className="h-4 w-40" />
+                </CardHeader>
+                <CardContent className="flex flex-col gap-3">
+                  <Skeleton className="h-5 w-full" />
+                  <Skeleton className="h-5 w-full" />
+                  <Skeleton className="h-5 w-3/4" />
+                </CardContent>
+              </Card>
+            ))}
+          </div>
+        </div>
+      </section>
     );
+  }
+
+  if (error || !data) {
+    return (
+      <Alert variant="destructive">
+        <AlertCircle data-icon="inline-start" aria-hidden />
+        <AlertTitle>Could not load ticket {number}</AlertTitle>
+        <AlertDescription>
+          The ticket details are unavailable.{" "}
+          <Link to="/tickets">Back to queue</Link>
+        </AlertDescription>
+      </Alert>
+    );
+  }
 
   const t = data as TicketDetail;
 
   return (
-    <section className="space-y-6">
+    <section className="flex flex-col gap-6">
       <div>
-        <Link to="/tickets" className="text-sm">
-          ← Back to queue
-        </Link>
+        <Button
+          variant="ghost"
+          size="sm"
+          render={<Link to="/tickets" />}
+          nativeButton={false}
+        >
+          <ArrowLeft data-icon="inline-start" />
+          Back to queue
+        </Button>
       </div>
 
-      <header className="rounded-md border border-ink-100 bg-white p-4">
-        <div className="flex flex-wrap items-start justify-between gap-3">
-          <div>
-            <div className="font-mono text-xs text-ink-500">{t.number}</div>
-            <h1 className="text-xl font-semibold text-ink-900">{t.title}</h1>
-            <div className="mt-1 text-sm text-ink-500">
-              {t.requester.full_name} · {t.office} · {t.service} · {t.request_type}
-            </div>
+      <header className="flex flex-col gap-4">
+        <div className="flex flex-col justify-between gap-4 md:flex-row md:items-start">
+          <div className="flex min-w-0 flex-col gap-1">
+            <p className="font-mono text-xs text-muted-foreground">
+              {t.number}
+            </p>
+            <h1 className="text-2xl font-semibold tracking-tight">{t.title}</h1>
+            <p className="text-sm text-muted-foreground">
+              {t.requester.full_name} · {t.office} · {t.service} ·{" "}
+              {t.request_type}
+            </p>
           </div>
-          <div className="flex flex-col items-end gap-1 text-sm">
-            <span className="rounded-full bg-brand-50 px-3 py-1 text-brand-700">
-              {t.status_name}
+          <div className="flex flex-wrap items-center gap-2 md:justify-end">
+            <StatusBadge code={t.status_code} label={t.status_name} />
+            <PriorityBadge code={t.priority} />
+            <ChannelBadge channel={t.channel} />
+            <span className="text-sm tabular-nums text-muted-foreground">
+              {t.age_hours.toFixed(1)}h old
             </span>
-            <span className="text-ink-500">priority {t.priority}</span>
-            <span className="text-ink-500">{t.age_hours.toFixed(1)}h old</span>
           </div>
         </div>
         {t.description && (
-          <p className="mt-3 whitespace-pre-line text-sm text-ink-700">{t.description}</p>
+          <p className="max-w-4xl whitespace-pre-line text-sm leading-relaxed text-foreground">
+            {t.description}
+          </p>
         )}
       </header>
 
       <div className="grid grid-cols-1 gap-4 lg:grid-cols-3">
-        <div className="lg:col-span-2 space-y-4">
-          <div className="rounded-md border border-ink-100 bg-white p-4">
-            <h2 className="text-sm font-semibold text-ink-700">Conversation</h2>
-            {t.messages.length === 0 ? (
-              <p className="mt-2 text-sm text-ink-500">No messages yet.</p>
-            ) : (
-              <ul className="mt-3 space-y-3">
-                {t.messages.map((m) => (
-                  <li
-                    key={m.id}
-                    className={
-                      m.direction === "outbound"
-                        ? "rounded-md bg-brand-50 p-3"
-                        : "rounded-md bg-ink-50 p-3"
-                    }
-                  >
-                    <div className="text-xs text-ink-500">
-                      {m.direction === "outbound" ? "↑ Reply" : "↓ Inbound"} ·{" "}
-                      {m.author_label || "system"} ·{" "}
-                      {new Date(m.created_at).toLocaleString()}
-                    </div>
-                    <p className="mt-1 whitespace-pre-line text-sm text-ink-900">{m.body_text}</p>
-                  </li>
-                ))}
-              </ul>
-            )}
-            <div className="mt-4 space-y-2">
-              <textarea
-                value={reply}
-                onChange={(e) => setReply(e.target.value)}
-                placeholder="Reply to the requester…"
-                rows={3}
-                className="w-full rounded-md border border-ink-100 bg-white p-2 text-sm"
-              />
-              <div className="flex justify-end">
-                <button
-                  onClick={() => addMessage.mutate(reply)}
-                  disabled={!reply.trim() || addMessage.isPending}
-                  className="rounded-md bg-brand-600 px-4 py-1.5 text-sm font-medium text-white hover:bg-brand-700 disabled:opacity-50"
-                >
-                  {addMessage.isPending ? "Sending…" : "Send reply"}
-                </button>
-              </div>
-            </div>
-          </div>
+        <div className="flex min-w-0 flex-col gap-4 lg:col-span-2">
+          <Card className="rounded-lg!">
+            <CardHeader>
+              <CardTitle>
+                <h2>Conversation</h2>
+              </CardTitle>
+              <CardDescription>
+                Messages exchanged with the requester.
+              </CardDescription>
+            </CardHeader>
+            <CardContent>
+              {t.messages.length === 0 ? (
+                <Empty className="min-h-24 p-4">
+                  <EmptyHeader>
+                    <EmptyTitle>No messages yet.</EmptyTitle>
+                    <EmptyDescription>
+                      Replies and requester messages will appear here.
+                    </EmptyDescription>
+                  </EmptyHeader>
+                </Empty>
+              ) : (
+                <ul className="flex flex-col" aria-label="Ticket messages">
+                  {t.messages.map((m, index) => (
+                    <li key={m.id} className="flex flex-col gap-2">
+                      {index > 0 ? <Separator className="mb-3" /> : null}
+                      <div className="flex flex-wrap items-center justify-between gap-2">
+                        <p className="text-xs font-medium">
+                          {m.direction === "outbound" ? "↑ Reply" : "↓ Inbound"}{" "}
+                          · {m.author_label || "system"}
+                        </p>
+                        <time
+                          className="text-xs text-muted-foreground"
+                          dateTime={m.created_at}
+                        >
+                          {new Date(m.created_at).toLocaleString()}
+                        </time>
+                      </div>
+                      <p className="whitespace-pre-line text-sm leading-relaxed">
+                        {m.body_text}
+                      </p>
+                    </li>
+                  ))}
+                </ul>
+              )}
+            </CardContent>
+            <CardFooter className="flex-col items-stretch gap-3">
+              <FieldGroup className="gap-3">
+                <Field>
+                  <FieldLabel htmlFor="ticket-reply">
+                    Reply to requester
+                  </FieldLabel>
+                  <Textarea
+                    id="ticket-reply"
+                    value={reply}
+                    onChange={(e) => setReply(e.target.value)}
+                    placeholder="Reply to the requester…"
+                    rows={3}
+                  />
+                </Field>
+              </FieldGroup>
+              <Button
+                className="self-end"
+                disabled={!reply.trim() || addMessage.isPending}
+                onClick={() => addMessage.mutate(reply)}
+              >
+                {addMessage.isPending ? (
+                  <Spinner data-icon="inline-start" />
+                ) : (
+                  <Send data-icon="inline-start" />
+                )}
+                {addMessage.isPending ? "Sending…" : "Send reply"}
+              </Button>
+            </CardFooter>
+          </Card>
 
-          <div className="rounded-md border border-ink-100 bg-amber-50 p-4">
-            <h2 className="text-sm font-semibold text-ink-700">Internal notes</h2>
-            <p className="mt-1 text-xs text-ink-500">
-              Notes are never visible to the requester.
-            </p>
-            {t.notes.length === 0 ? (
-              <p className="mt-2 text-sm text-ink-500">No notes yet.</p>
-            ) : (
-              <ul className="mt-3 space-y-2">
-                {t.notes.map((n) => (
-                  <li key={n.id} className="rounded-md bg-white p-2 text-sm">
-                    <div className="text-xs text-ink-500">
-                      {n.author_subject} · {new Date(n.created_at).toLocaleString()}
-                    </div>
-                    <p className="mt-1 whitespace-pre-line">{n.body}</p>
-                  </li>
-                ))}
-              </ul>
-            )}
-            <div className="mt-3 space-y-2">
-              <textarea
-                value={note}
-                onChange={(e) => setNote(e.target.value)}
-                placeholder="Add an internal note…"
-                rows={2}
-                className="w-full rounded-md border border-ink-100 bg-white p-2 text-sm"
-              />
-              <div className="flex justify-end">
-                <button
-                  onClick={() => addNote.mutate(note)}
-                  disabled={!note.trim() || addNote.isPending}
-                  className="rounded-md bg-amber-600 px-4 py-1.5 text-sm font-medium text-white hover:bg-amber-700 disabled:opacity-50"
-                >
-                  {addNote.isPending ? "Saving…" : "Add note"}
-                </button>
-              </div>
-            </div>
-          </div>
+          <Card className="rounded-lg!">
+            <CardHeader>
+              <CardTitle>
+                <h2>Internal notes</h2>
+              </CardTitle>
+              <CardDescription>
+                Notes are never visible to the requester.
+              </CardDescription>
+            </CardHeader>
+            <CardContent>
+              {t.notes.length === 0 ? (
+                <Empty className="min-h-24 p-4">
+                  <EmptyHeader>
+                    <EmptyTitle>No notes yet.</EmptyTitle>
+                    <EmptyDescription>
+                      Internal notes will appear here.
+                    </EmptyDescription>
+                  </EmptyHeader>
+                </Empty>
+              ) : (
+                <ul className="flex flex-col" aria-label="Internal notes">
+                  {t.notes.map((n, index) => (
+                    <li key={n.id} className="flex flex-col gap-2">
+                      {index > 0 ? <Separator className="mb-3" /> : null}
+                      <div className="flex flex-wrap items-center justify-between gap-2">
+                        <p className="text-xs font-medium">
+                          {n.author_subject}
+                        </p>
+                        <time
+                          className="text-xs text-muted-foreground"
+                          dateTime={n.created_at}
+                        >
+                          {new Date(n.created_at).toLocaleString()}
+                        </time>
+                      </div>
+                      <p className="whitespace-pre-line text-sm leading-relaxed">
+                        {n.body}
+                      </p>
+                    </li>
+                  ))}
+                </ul>
+              )}
+            </CardContent>
+            <CardFooter className="flex-col items-stretch gap-3">
+              <FieldGroup className="gap-3">
+                <Field>
+                  <FieldLabel htmlFor="internal-note">
+                    Add internal note
+                  </FieldLabel>
+                  <Textarea
+                    id="internal-note"
+                    value={note}
+                    onChange={(e) => setNote(e.target.value)}
+                    placeholder="Add an internal note…"
+                    rows={2}
+                  />
+                </Field>
+              </FieldGroup>
+              <Button
+                variant="secondary"
+                className="self-end"
+                disabled={!note.trim() || addNote.isPending}
+                onClick={() => addNote.mutate(note)}
+              >
+                {addNote.isPending ? (
+                  <Spinner data-icon="inline-start" />
+                ) : (
+                  <StickyNote data-icon="inline-start" />
+                )}
+                {addNote.isPending ? "Saving…" : "Add note"}
+              </Button>
+            </CardFooter>
+          </Card>
 
           <AttachmentUploader ticketNumber={t.number} />
         </div>
 
-        <aside className="space-y-4">
-          <div className="rounded-md border border-ink-100 bg-white p-4 text-sm">
-            <h3 className="font-semibold text-ink-700">Requester</h3>
-            <p className="mt-2 text-ink-900">{t.requester.full_name}</p>
-            {t.requester.email && <p className="text-ink-500">{t.requester.email}</p>}
-            {t.requester.phone_e164 && <p className="text-ink-500">{t.requester.phone_e164}</p>}
-          </div>
-          <div className="rounded-md border border-ink-100 bg-white p-4 text-sm">
-            <h3 className="font-semibold text-ink-700">Classification</h3>
-            <dl className="mt-2 space-y-1 text-ink-500">
-              <div className="flex justify-between">
-                <dt>Channel</dt>
-                <dd className="text-ink-900">{t.channel}</dd>
-              </div>
-              <div className="flex justify-between">
-                <dt>Office</dt>
-                <dd className="text-ink-900">{t.office}</dd>
-              </div>
-              <div className="flex justify-between">
-                <dt>Service</dt>
-                <dd className="text-ink-900">{t.service}</dd>
-              </div>
-              <div className="flex justify-between">
-                <dt>Type</dt>
-                <dd className="text-ink-900">{t.request_type}</dd>
-              </div>
-              {t.matter_reference && (
-                <div className="flex justify-between">
-                  <dt>Matter</dt>
-                  <dd className="font-mono text-ink-900">{t.matter_reference}</dd>
+        <aside
+          className="flex min-w-0 flex-col gap-4"
+          aria-label="Ticket details"
+        >
+          <Card className="rounded-lg!">
+            <CardHeader>
+              <CardTitle>
+                <h2>Requester</h2>
+              </CardTitle>
+              <CardDescription>
+                Contact details for this ticket.
+              </CardDescription>
+            </CardHeader>
+            <CardContent>
+              <dl className="flex flex-col text-sm">
+                <div className="flex items-start justify-between gap-4">
+                  <dt className="text-muted-foreground">Full name</dt>
+                  <dd className="text-right font-medium">
+                    {t.requester.full_name}
+                  </dd>
                 </div>
-              )}
-            </dl>
-          </div>
+                {t.requester.email && (
+                  <div>
+                    <Separator className="mb-3" />
+                    <div className="flex items-start justify-between gap-4">
+                      <dt className="text-muted-foreground">Email</dt>
+                      <dd className="break-all text-right">
+                        {t.requester.email}
+                      </dd>
+                    </div>
+                  </div>
+                )}
+                {t.requester.phone_e164 && (
+                  <div>
+                    <Separator className="mb-3" />
+                    <div className="flex items-start justify-between gap-4">
+                      <dt className="text-muted-foreground">Phone</dt>
+                      <dd className="text-right">{t.requester.phone_e164}</dd>
+                    </div>
+                  </div>
+                )}
+              </dl>
+            </CardContent>
+          </Card>
+
+          <Card className="rounded-lg!">
+            <CardHeader>
+              <CardTitle>
+                <h2>Classification</h2>
+              </CardTitle>
+              <CardDescription>Routing and matter details.</CardDescription>
+            </CardHeader>
+            <CardContent>
+              <dl className="flex flex-col text-sm">
+                <div className="flex items-center justify-between gap-4">
+                  <dt className="text-muted-foreground">Channel</dt>
+                  <dd>
+                    <ChannelBadge channel={t.channel} />
+                  </dd>
+                </div>
+                <div>
+                  <Separator className="mb-3" />
+                  <div className="flex items-start justify-between gap-4">
+                    <dt className="text-muted-foreground">Office</dt>
+                    <dd className="text-right">{t.office}</dd>
+                  </div>
+                </div>
+                <div>
+                  <Separator className="mb-3" />
+                  <div className="flex items-start justify-between gap-4">
+                    <dt className="text-muted-foreground">Service</dt>
+                    <dd className="text-right">{t.service}</dd>
+                  </div>
+                </div>
+                <div>
+                  <Separator className="mb-3" />
+                  <div className="flex items-start justify-between gap-4">
+                    <dt className="text-muted-foreground">Type</dt>
+                    <dd className="text-right">{t.request_type}</dd>
+                  </div>
+                </div>
+                {t.matter_reference && (
+                  <div>
+                    <Separator className="mb-3" />
+                    <div className="flex items-start justify-between gap-4">
+                      <dt className="text-muted-foreground">Matter</dt>
+                      <dd className="break-all text-right font-mono text-xs">
+                        {t.matter_reference}
+                      </dd>
+                    </div>
+                  </div>
+                )}
+              </dl>
+            </CardContent>
+          </Card>
         </aside>
       </div>
     </section>
