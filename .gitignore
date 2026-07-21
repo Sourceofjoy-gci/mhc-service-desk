@@ -34,6 +34,7 @@ frontend/coverage/
 # Editors
 .idea/
 .vscode/
+.worktrees/
 *.swp
 .DS_Store
 Thumbs.db
