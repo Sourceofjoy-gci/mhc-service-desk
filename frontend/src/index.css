@@ -124,8 +124,7 @@
   --radius-lg: var(--radius);
   --radius-xl: calc(var(--radius) + 4px);
 
-  --font-sans:
-    "Geist Variable", "Inter", system-ui, "Segoe UI", Roboto, sans-serif;
+  --font-sans: "Geist Variable", sans-serif;
 }
 
 @custom-variant dark (&:where(.dark, .dark *));
