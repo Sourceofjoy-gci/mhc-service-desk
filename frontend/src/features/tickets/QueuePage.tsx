@@ -42,7 +42,7 @@ import {
   SelectValue,
 } from "@/components/ui/select";
 import { Skeleton } from "@/components/ui/skeleton";
-import { cn } from "@/lib/utils";
+import { Spinner } from "@/components/ui/spinner";
 
 const STATUS_OPTIONS = [
   { value: "new", label: "New" },
@@ -210,7 +210,7 @@ function PageHeader({
       <div className="flex flex-col gap-1">
         <div className="flex items-center gap-2">
           <h1 className="text-2xl font-semibold tracking-tight">Queue</h1>
-          <Badge variant="secondary" className="font-mono">
+          <Badge variant="secondary" className="tabular-nums">
             {count}
           </Badge>
         </div>
@@ -253,10 +253,11 @@ function PageHeader({
           disabled={isFetching}
           data-icon
         >
-          <RefreshCw
-            data-icon="inline-start"
-            className={cn(isFetching && "animate-spin")}
-          />
+          {isFetching ? (
+            <Spinner data-icon="inline-start" />
+          ) : (
+            <RefreshCw data-icon="inline-start" />
+          )}
           Refresh
         </Button>
       </div>
@@ -284,7 +285,7 @@ function FilterBar({
   onClear: () => void;
 }) {
   return (
-    <FieldGroup className="grid gap-3 rounded-xl bg-card p-3 ring-1 ring-foreground/10 sm:grid-cols-[minmax(12rem,1fr)_12rem_9rem_auto] sm:items-center">
+    <FieldGroup className="grid gap-3 rounded-lg bg-card p-3 ring-1 ring-foreground/10 sm:grid-cols-[minmax(12rem,1fr)_12rem_9rem_auto] sm:items-center">
       <Field>
         <FieldLabel htmlFor="queue-search" className="sr-only">
           Search tickets
@@ -403,7 +404,7 @@ function ErrorState({
 }) {
   return (
     <Alert variant="destructive">
-      <AlertCircle aria-hidden />
+      <AlertCircle data-icon="inline-start" aria-hidden />
       <AlertTitle>Could not load tickets</AlertTitle>
       <AlertDescription>{message}</AlertDescription>
       <AlertAction>
@@ -427,7 +428,7 @@ function EmptyState({
     <Empty className="border py-12">
       <EmptyHeader>
         <EmptyMedia variant="icon">
-          <Inbox aria-hidden />
+          <Inbox data-icon="inline-start" aria-hidden />
         </EmptyMedia>
         <EmptyTitle>
           {hasFilters ? "No tickets match your filters" : "Queue is empty"}
@@ -447,6 +448,7 @@ function EmptyState({
         ) : (
           <Button
             render={<Link to="/intake/call" />}
+            nativeButton={false}
             variant="outline"
             data-icon
           >
