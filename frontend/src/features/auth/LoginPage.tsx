@@ -13,9 +13,11 @@ import {
   Card,
   CardContent,
   CardDescription,
+  CardFooter,
   CardHeader,
   CardTitle,
 } from "@/components/ui/card";
+import { Alert, AlertDescription, AlertTitle } from "@/components/ui/alert";
 import { Badge } from "@/components/ui/badge";
 import { Separator } from "@/components/ui/separator";
 import { Skeleton } from "@/components/ui/skeleton";
@@ -39,8 +41,8 @@ export default function LoginPage() {
       <div className="mx-auto w-full max-w-md">
         <Card>
           <CardHeader className="text-center">
-            <div className="mx-auto mb-2 grid size-12 place-items-center rounded-full bg-primary/10 text-primary ring-1 ring-inset ring-primary/20">
-              <KeyRound className="size-5" />
+            <div className="mx-auto grid size-12 place-items-center rounded-lg bg-muted text-primary">
+              <KeyRound />
             </div>
             <CardTitle className="text-xl">Agent sign-in</CardTitle>
             <CardDescription>
@@ -52,7 +54,7 @@ export default function LoginPage() {
             {auth.status === "loading" || auth.status === "idle" ? (
               <SignInSkeleton />
             ) : auth.status === "error" ? (
-              <ErrorPanel error={auth.error} onRetry={() => setAuth({ status: "idle" })} />
+              <ErrorPanel error={auth.error} />
             ) : auth.status === "unauthenticated" ? (
               <SignInPanel />
             ) : (
@@ -62,6 +64,12 @@ export default function LoginPage() {
               />
             )}
           </CardContent>
+          <CardFooter className="flex-col">
+            <AuthAction
+              auth={auth}
+              onRetry={() => setAuth({ status: "idle" })}
+            />
+          </CardFooter>
         </Card>
       </div>
     </div>
@@ -70,7 +78,7 @@ export default function LoginPage() {
 
 function BrandPanel() {
   return (
-    <div className="relative hidden overflow-hidden rounded-2xl border border-border/60 bg-gradient-to-br from-primary to-primary/80 p-10 text-primary-foreground lg:flex lg:flex-col lg:justify-between">
+    <div className="relative hidden overflow-hidden rounded-lg border border-border/60 bg-gradient-to-br from-primary to-primary/80 p-10 text-primary-foreground lg:flex lg:flex-col lg:justify-between">
       <div
         aria-hidden
         className="pointer-events-none absolute inset-0 opacity-30"
@@ -80,13 +88,13 @@ function BrandPanel() {
         }}
       />
       <div className="relative flex flex-col gap-6">
-        <BrandLockup size="lg" className="[&_span]:text-primary-foreground [&_span]:!text-primary-foreground" />
+        <BrandLockup
+          size="lg"
+          className="[&_span]:text-primary-foreground [&_span]:!text-primary-foreground"
+        />
         <div className="flex flex-col gap-3">
-          <Badge
-            variant="secondary"
-            className="w-fit bg-white/15 text-primary-foreground ring-1 ring-inset ring-white/20"
-          >
-            <Shield className="size-3" />
+          <Badge variant="secondary">
+            <Shield />
             OIDC + MFA enforced
           </Badge>
           <h2 className="text-balance text-3xl font-semibold leading-tight tracking-tight">
@@ -133,46 +141,19 @@ function SignInSkeleton() {
   );
 }
 
-function ErrorPanel({
-  error,
-  onRetry,
-}: {
-  error: string;
-  onRetry: () => void;
-}) {
+function ErrorPanel({ error }: { error: string }) {
   return (
-    <div className="flex flex-col gap-3">
-      <div className="flex items-start gap-2.5 rounded-lg border border-destructive/30 bg-destructive/5 p-3 text-sm text-destructive">
-        <AlertCircle className="mt-0.5 size-4 shrink-0" />
-        <div>
-          <p className="font-medium">Couldn't reach Keycloak.</p>
-          <p className="mt-0.5 text-xs text-destructive/80">{error}</p>
-        </div>
-      </div>
-      <Button onClick={onRetry} variant="outline" data-icon>
-        Try again
-        <ArrowRight data-icon="inline-end" />
-      </Button>
-    </div>
+    <Alert variant="destructive">
+      <AlertCircle />
+      <AlertTitle>Couldn&apos;t reach Keycloak.</AlertTitle>
+      <AlertDescription>{error}</AlertDescription>
+    </Alert>
   );
 }
 
 function SignInPanel() {
   return (
-    <div className="flex flex-col gap-3">
-      <Button
-        onClick={() =>
-          getKeycloak().login({
-            redirectUri: window.location.origin + "/login",
-          })
-        }
-        size="lg"
-        data-icon
-      >
-        <KeyRound data-icon="inline-start" />
-        Sign in with Keycloak
-        <ArrowRight data-icon="inline-end" />
-      </Button>
+    <div>
       <p className="text-center text-xs text-muted-foreground">
         You will be redirected to the Keycloak realm to authenticate.
       </p>
@@ -188,26 +169,64 @@ function SignedInPanel({
   expiresAt: number;
 }) {
   return (
-    <div className="flex flex-col gap-3">
-      <div className="flex items-start gap-2.5 rounded-lg border border-success/30 bg-success/10 p-3 text-sm text-success-foreground">
-        <CheckCircle2 className="mt-0.5 size-4 shrink-0" />
-        <div className="flex-1">
-          <p className="font-medium">Signed in as {username}</p>
-          <p className="mt-0.5 text-xs opacity-80">
-            Token expires {new Date(expiresAt * 1000).toLocaleString()}
-          </p>
-        </div>
-      </div>
-      <Button
-        variant="outline"
-        onClick={() =>
-          getKeycloak().logout({ redirectUri: window.location.origin + "/login" })
-        }
-        data-icon
-      >
-        <LogOut data-icon="inline-start" />
-        Sign out
+    <Alert>
+      <CheckCircle2 className="text-success-foreground" />
+      <AlertTitle>Signed in as {username}</AlertTitle>
+      <AlertDescription>
+        Token expires {new Date(expiresAt * 1000).toLocaleString()}
+      </AlertDescription>
+    </Alert>
+  );
+}
+
+function AuthAction({
+  auth,
+  onRetry,
+}: {
+  auth: AuthState;
+  onRetry: () => void;
+}) {
+  if (auth.status === "loading" || auth.status === "idle") {
+    return <Skeleton className="h-10 w-full" />;
+  }
+
+  if (auth.status === "error") {
+    return (
+      <Button className="w-full" onClick={onRetry} variant="outline">
+        Try again
+        <ArrowRight data-icon="inline-end" />
       </Button>
-    </div>
+    );
+  }
+
+  if (auth.status === "unauthenticated") {
+    return (
+      <Button
+        className="w-full"
+        onClick={() =>
+          getKeycloak().login({
+            redirectUri: window.location.origin + "/login",
+          })
+        }
+        size="lg"
+      >
+        <KeyRound data-icon="inline-start" />
+        Sign in with Keycloak
+        <ArrowRight data-icon="inline-end" />
+      </Button>
+    );
+  }
+
+  return (
+    <Button
+      className="w-full"
+      variant="outline"
+      onClick={() =>
+        getKeycloak().logout({ redirectUri: window.location.origin + "/login" })
+      }
+    >
+      <LogOut data-icon="inline-start" />
+      Sign out
+    </Button>
   );
 }
