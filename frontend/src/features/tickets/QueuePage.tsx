@@ -1,35 +1,47 @@
 import { useQuery } from "@tanstack/react-query";
-import { useState, useMemo } from "react";
+import { useMemo, useState } from "react";
 import { Link } from "react-router-dom";
 import {
-  Search,
-  RefreshCw,
-  Inbox,
-  Filter,
-  X,
   AlertCircle,
-  ListChecks,
   ArrowUpDown,
+  Filter,
+  Inbox,
+  ListChecks,
+  RefreshCw,
+  Search,
+  X,
 } from "lucide-react";
 import { ticketsApi, type TicketSummary } from "@/lib/api";
 import { TicketCard } from "./TicketCard";
-import { Input } from "@/components/ui/input";
-import { Button } from "@/components/ui/button";
-import { Badge } from "@/components/ui/badge";
 import {
-  Card,
-  CardContent,
-  CardHeader,
-} from "@/components/ui/card";
-import { Skeleton } from "@/components/ui/skeleton";
-import { Separator } from "@/components/ui/separator";
+  Alert,
+  AlertAction,
+  AlertDescription,
+  AlertTitle,
+} from "@/components/ui/alert";
+import { Badge } from "@/components/ui/badge";
+import { Button } from "@/components/ui/button";
+import { Card, CardContent, CardHeader } from "@/components/ui/card";
+import {
+  Empty,
+  EmptyContent,
+  EmptyDescription,
+  EmptyHeader,
+  EmptyMedia,
+  EmptyTitle,
+} from "@/components/ui/empty";
+import { Field, FieldGroup, FieldLabel } from "@/components/ui/field";
+import { Input } from "@/components/ui/input";
 import {
   Select,
   SelectContent,
+  SelectGroup,
   SelectItem,
+  SelectSeparator,
   SelectTrigger,
   SelectValue,
 } from "@/components/ui/select";
+import { Skeleton } from "@/components/ui/skeleton";
 import { cn } from "@/lib/utils";
 
 const STATUS_OPTIONS = [
@@ -46,6 +58,25 @@ const STATUS_OPTIONS = [
 ];
 
 const PRIORITY_OPTIONS = ["P1", "P2", "P3", "P4"] as const;
+
+const SORT_OPTIONS = [
+  { value: "priority", label: "By priority" },
+  { value: "created", label: "Newest first" },
+  { value: "updated", label: "Recently updated" },
+  { value: "sla", label: "SLA at risk first" },
+];
+
+const STATUS_SELECT_ITEMS = [
+  { value: "all", label: "All statuses" },
+  ...STATUS_OPTIONS,
+];
+
+const PRIORITY_SELECT_ITEMS = [
+  { value: "all", label: "All priorities" },
+  ...PRIORITY_OPTIONS.map((value) => ({ value, label: value })),
+];
+
+const EMPTY_TICKETS: TicketSummary[] = [];
 
 type SortKey = "priority" | "created" | "updated" | "sla";
 
@@ -65,7 +96,7 @@ export default function QueuePage() {
     queryFn: () => ticketsApi.list(params),
   });
 
-  const items: TicketSummary[] = data ?? [];
+  const items = data ?? EMPTY_TICKETS;
 
   const sorted = useMemo(() => {
     const arr = [...items];
@@ -137,8 +168,8 @@ export default function QueuePage() {
         />
       ) : (
         <div className="grid grid-cols-tickets gap-3">
-          {sorted.map((t) => (
-            <TicketCard key={t.id} ticket={t} />
+          {sorted.map((ticket) => (
+            <TicketCard key={ticket.id} ticket={ticket} />
           ))}
         </div>
       )}
@@ -146,8 +177,8 @@ export default function QueuePage() {
   );
 }
 
-function slaScore(h: string): number {
-  switch (h) {
+function slaScore(health: string): number {
+  switch (health) {
     case "breached":
       return 0;
     case "at_risk":
@@ -172,7 +203,7 @@ function PageHeader({
   isFetching: boolean;
   onRefresh: () => void;
   sort: SortKey;
-  onSortChange: (s: SortKey) => void;
+  onSortChange: (sort: SortKey) => void;
 }) {
   return (
     <div className="flex flex-wrap items-end justify-between gap-3">
@@ -188,22 +219,34 @@ function PageHeader({
           they can be shared.
         </p>
       </div>
-      <div className="flex items-center gap-2">
-        <Select
-          value={sort}
-          onValueChange={(v) => { if (v == null) return; onSortChange(v as SortKey) }}
-        >
-          <SelectTrigger className="w-44" data-icon>
-            <ArrowUpDown data-icon="inline-start" />
-            <SelectValue />
-          </SelectTrigger>
-          <SelectContent>
-            <SelectItem value="priority">By priority</SelectItem>
-            <SelectItem value="created">Newest first</SelectItem>
-            <SelectItem value="updated">Recently updated</SelectItem>
-            <SelectItem value="sla">SLA at risk first</SelectItem>
-          </SelectContent>
-        </Select>
+      <div className="flex w-full items-center gap-2 sm:w-auto">
+        <Field className="min-w-0 flex-1 sm:w-44 sm:flex-none">
+          <FieldLabel htmlFor="queue-sort" className="sr-only">
+            Sort tickets
+          </FieldLabel>
+          <Select
+            items={SORT_OPTIONS}
+            value={sort}
+            onValueChange={(value) => {
+              if (value == null) return;
+              onSortChange(value as SortKey);
+            }}
+          >
+            <SelectTrigger id="queue-sort" className="w-full" data-icon>
+              <ArrowUpDown data-icon="inline-start" />
+              <SelectValue />
+            </SelectTrigger>
+            <SelectContent>
+              <SelectGroup>
+                {SORT_OPTIONS.map((option) => (
+                  <SelectItem key={option.value} value={option.value}>
+                    {option.label}
+                  </SelectItem>
+                ))}
+              </SelectGroup>
+            </SelectContent>
+          </Select>
+        </Field>
         <Button
           variant="outline"
           onClick={onRefresh}
@@ -232,88 +275,118 @@ function FilterBar({
   onClear,
 }: {
   search: string;
-  onSearch: (v: string) => void;
+  onSearch: (value: string) => void;
   status: string;
-  onStatus: (v: string) => void;
+  onStatus: (value: string) => void;
   priority: string;
-  onPriority: (v: string) => void;
+  onPriority: (value: string) => void;
   activeFilters: number;
   onClear: () => void;
 }) {
   return (
-    <Card data-size="sm">
-      <CardContent className="flex flex-col gap-3 p-3 sm:flex-row sm:items-center">
-        <div className="relative flex-1">
+    <FieldGroup className="grid gap-3 rounded-xl bg-card p-3 ring-1 ring-foreground/10 sm:grid-cols-[minmax(12rem,1fr)_12rem_9rem_auto] sm:items-center">
+      <Field>
+        <FieldLabel htmlFor="queue-search" className="sr-only">
+          Search tickets
+        </FieldLabel>
+        <div className="relative">
           <Search
-            className="pointer-events-none absolute left-2.5 top-1/2 size-4 -translate-y-1/2 text-muted-foreground"
+            className="pointer-events-none absolute left-3 top-1/2 size-4 -translate-y-1/2 text-muted-foreground"
             aria-hidden
           />
           <Input
+            id="queue-search"
             placeholder="Search by number, title, matter reference…"
             value={search}
-            onChange={(e) => onSearch(e.target.value)}
-            className="pl-8"
+            onChange={(event) => onSearch(event.target.value)}
+            className="pl-9"
           />
         </div>
+      </Field>
+      <Field>
+        <FieldLabel htmlFor="queue-status" className="sr-only">
+          Filter by status
+        </FieldLabel>
         <Select
+          items={STATUS_SELECT_ITEMS}
           value={status || "all"}
-          onValueChange={(v) => { if (v == null) return; onStatus(v === "all" ? "" : v) }}
+          onValueChange={(value) => {
+            if (value == null) return;
+            onStatus(value === "all" ? "" : value);
+          }}
         >
-          <SelectTrigger className="sm:w-48" data-icon>
+          <SelectTrigger id="queue-status" className="w-full" data-icon>
             <Filter data-icon="inline-start" />
-            <SelectValue placeholder="All statuses" />
+            <SelectValue />
           </SelectTrigger>
           <SelectContent>
-            <SelectItem value="all">All statuses</SelectItem>
-            <Separator />
-            {STATUS_OPTIONS.map((s) => (
-              <SelectItem key={s.value} value={s.value}>
-                {s.label}
-              </SelectItem>
-            ))}
+            <SelectGroup>
+              <SelectItem value="all">All statuses</SelectItem>
+            </SelectGroup>
+            <SelectSeparator />
+            <SelectGroup>
+              {STATUS_OPTIONS.map((option) => (
+                <SelectItem key={option.value} value={option.value}>
+                  {option.label}
+                </SelectItem>
+              ))}
+            </SelectGroup>
           </SelectContent>
         </Select>
+      </Field>
+      <Field>
+        <FieldLabel htmlFor="queue-priority" className="sr-only">
+          Filter by priority
+        </FieldLabel>
         <Select
+          items={PRIORITY_SELECT_ITEMS}
           value={priority || "all"}
-          onValueChange={(v) => { if (v == null) return; onPriority(v === "all" ? "" : v) }}
+          onValueChange={(value) => {
+            if (value == null) return;
+            onPriority(value === "all" ? "" : value);
+          }}
         >
-          <SelectTrigger className="sm:w-36" data-icon>
+          <SelectTrigger id="queue-priority" className="w-full" data-icon>
             <Filter data-icon="inline-start" />
-            <SelectValue placeholder="All priorities" />
+            <SelectValue />
           </SelectTrigger>
           <SelectContent>
-            <SelectItem value="all">All priorities</SelectItem>
-            <Separator />
-            {PRIORITY_OPTIONS.map((p) => (
-              <SelectItem key={p} value={p}>
-                {p}
-              </SelectItem>
-            ))}
+            <SelectGroup>
+              <SelectItem value="all">All priorities</SelectItem>
+            </SelectGroup>
+            <SelectSeparator />
+            <SelectGroup>
+              {PRIORITY_OPTIONS.map((option) => (
+                <SelectItem key={option} value={option}>
+                  {option}
+                </SelectItem>
+              ))}
+            </SelectGroup>
           </SelectContent>
         </Select>
-        {activeFilters > 0 ? (
-          <Button variant="ghost" size="sm" onClick={onClear} data-icon>
-            <X data-icon="inline-start" />
-            Clear ({activeFilters})
-          </Button>
-        ) : null}
-      </CardContent>
-    </Card>
+      </Field>
+      {activeFilters > 0 ? (
+        <Button variant="ghost" size="sm" onClick={onClear} data-icon>
+          <X data-icon="inline-start" />
+          Clear ({activeFilters})
+        </Button>
+      ) : null}
+    </FieldGroup>
   );
 }
 
 function QueueSkeleton() {
   return (
-    <div className="grid grid-cols-tickets gap-3">
-      {Array.from({ length: 6 }).map((_, i) => (
-        <Card key={i}>
+    <div className="grid grid-cols-tickets gap-3" aria-label="Loading tickets">
+      {Array.from({ length: 6 }).map((_, index) => (
+        <Card key={index} size="sm">
           <CardHeader>
             <Skeleton className="h-4 w-3/4" />
             <Skeleton className="h-3 w-1/3" />
           </CardHeader>
-          <CardContent>
+          <CardContent className="flex flex-col gap-2">
             <Skeleton className="h-3 w-full" />
-            <Skeleton className="mt-2 h-3 w-2/3" />
+            <Skeleton className="h-3 w-2/3" />
           </CardContent>
         </Card>
       ))}
@@ -329,21 +402,17 @@ function ErrorState({
   onRetry: () => void;
 }) {
   return (
-    <Card>
-      <CardContent className="flex flex-col items-start gap-3 p-6 sm:flex-row sm:items-center">
-        <div className="grid size-10 shrink-0 place-items-center rounded-full bg-destructive/10 text-destructive ring-1 ring-inset ring-destructive/30">
-          <AlertCircle className="size-5" />
-        </div>
-        <div className="flex-1">
-          <p className="text-sm font-medium">Could not load tickets</p>
-          <p className="text-xs text-muted-foreground">{message}</p>
-        </div>
-        <Button variant="outline" onClick={onRetry} data-icon>
+    <Alert variant="destructive">
+      <AlertCircle aria-hidden />
+      <AlertTitle>Could not load tickets</AlertTitle>
+      <AlertDescription>{message}</AlertDescription>
+      <AlertAction>
+        <Button variant="outline" size="sm" onClick={onRetry} data-icon>
           <RefreshCw data-icon="inline-start" />
           Retry
         </Button>
-      </CardContent>
-    </Card>
+      </AlertAction>
+    </Alert>
   );
 }
 
@@ -355,33 +424,37 @@ function EmptyState({
   onClear: () => void;
 }) {
   return (
-    <Card>
-      <CardContent className="flex flex-col items-center gap-3 py-12 text-center">
-        <div className="grid size-12 place-items-center rounded-full bg-muted text-muted-foreground">
-          <Inbox className="size-5" />
-        </div>
-        <div className="flex flex-col gap-1">
-          <p className="text-sm font-medium">
-            {hasFilters ? "No tickets match your filters" : "Queue is empty"}
-          </p>
-          <p className="max-w-sm text-xs text-muted-foreground">
-            {hasFilters
-              ? "Try clearing one or more filters, or capture a new request via the intake pages."
-              : "Capture a call, walk-in, or web submission to get started."}
-          </p>
-        </div>
+    <Empty className="border py-12">
+      <EmptyHeader>
+        <EmptyMedia variant="icon">
+          <Inbox aria-hidden />
+        </EmptyMedia>
+        <EmptyTitle>
+          {hasFilters ? "No tickets match your filters" : "Queue is empty"}
+        </EmptyTitle>
+        <EmptyDescription>
+          {hasFilters
+            ? "Try clearing one or more filters, or capture a new request via the intake pages."
+            : "Capture a call, walk-in, or web submission to get started."}
+        </EmptyDescription>
+      </EmptyHeader>
+      <EmptyContent>
         {hasFilters ? (
           <Button variant="outline" onClick={onClear} data-icon>
             <X data-icon="inline-start" />
             Clear filters
           </Button>
         ) : (
-          <Button render={<Link to="/intake/call" />} variant="outline" data-icon>
+          <Button
+            render={<Link to="/intake/call" />}
+            variant="outline"
+            data-icon
+          >
             <ListChecks data-icon="inline-start" />
             Capture a call
           </Button>
         )}
-      </CardContent>
-    </Card>
+      </EmptyContent>
+    </Empty>
   );
 }
