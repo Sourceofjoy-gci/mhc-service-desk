@@ -17,7 +17,7 @@ import {
 import { Link } from "react-router-dom";
 import { BrandLockup } from "@/components/brand";
 import { Badge } from "@/components/ui/badge";
-import { buttonVariants } from "@/components/ui/button";
+import { Button } from "@/components/ui/button";
 import {
   Card,
   CardContent,
@@ -97,36 +97,33 @@ function Hero({
             </p>
           </div>
           <div className="flex flex-wrap items-center gap-2">
-            <Link
-              to="/tickets"
-              className={cn(
-                buttonVariants({ variant: "secondary" }),
-                "no-underline hover:no-underline",
-              )}
+            <Button
+              render={<Link to="/tickets" />}
+              nativeButton={false}
+              variant="secondary"
+              className="no-underline hover:no-underline"
             >
               Open the queue
               <ArrowRight data-icon="inline-end" />
-            </Link>
-            <Link
-              to="/kanban"
-              className={cn(
-                buttonVariants({ variant: "outline" }),
-                "no-underline hover:no-underline",
-              )}
+            </Button>
+            <Button
+              render={<Link to="/kanban" />}
+              nativeButton={false}
+              variant="outline"
+              className="no-underline hover:no-underline"
             >
               <KanbanSquare data-icon="inline-start" />
               Kanban board
-            </Link>
-            <Link
-              to="/public"
-              className={cn(
-                buttonVariants({ variant: "ghost" }),
-                "text-primary-foreground no-underline hover:bg-primary-foreground/10 hover:text-primary-foreground hover:no-underline",
-              )}
+            </Button>
+            <Button
+              render={<Link to="/public" />}
+              nativeButton={false}
+              variant="ghost"
+              className="text-primary-foreground no-underline hover:bg-primary-foreground/10 hover:text-primary-foreground hover:no-underline"
             >
               <Globe data-icon="inline-start" />
               Public form
-            </Link>
+            </Button>
           </div>
         </div>
 
@@ -155,9 +152,11 @@ function PlatformStatus({
     <Card size="sm" className="self-start lg:self-center">
       <CardHeader>
         <div className="flex items-center justify-between gap-4">
-          <CardTitle className="flex items-center gap-2">
-            <Activity className="size-4 text-primary" aria-hidden />
-            Platform status
+          <CardTitle>
+            <h2 className="flex items-center gap-2">
+              <Activity className="size-4 text-primary" aria-hidden />
+              Platform status
+            </h2>
           </CardTitle>
           {data ? (
             <Badge
@@ -165,7 +164,7 @@ function PlatformStatus({
               className={cn(
                 data.status === "ok"
                   ? "bg-success/15 text-success-foreground ring-1 ring-inset ring-success/30"
-                  : "bg-destructive/10 text-destructive ring-1 ring-inset ring-destructive/30",
+                  : "bg-warning/20 text-warning-foreground ring-1 ring-inset ring-warning/30",
               )}
             >
               {data.status === "ok" ? "Healthy" : data.status}
@@ -287,17 +286,16 @@ function Channels() {
       />
       <div className="grid grid-cols-2 gap-2 sm:grid-cols-3 md:grid-cols-6">
         {channels.map((channel) => (
-          <Link
+          <Button
             key={channel.label}
-            to={channel.to}
-            className={cn(
-              buttonVariants({ variant: "outline" }),
-              "h-auto min-h-16 flex-col items-start gap-1 py-3 text-left no-underline hover:no-underline",
-            )}
+            render={<Link to={channel.to} />}
+            nativeButton={false}
+            variant="outline"
+            className="h-auto min-h-16 flex-col items-start gap-1 py-3 text-left no-underline hover:no-underline"
           >
             <channel.icon data-icon="inline-start" />
             <span>{channel.label}</span>
-          </Link>
+          </Button>
         ))}
       </div>
     </section>
@@ -397,26 +395,23 @@ function Cta() {
             </p>
           </div>
           <div className="flex flex-wrap gap-2">
-            <Link
-              to="/login"
-              className={cn(
-                buttonVariants(),
-                "no-underline hover:no-underline",
-              )}
+            <Button
+              render={<Link to="/login" />}
+              nativeButton={false}
+              className="no-underline hover:no-underline"
             >
               <Shield data-icon="inline-start" />
               Sign in
-            </Link>
-            <Link
-              to="/health"
-              className={cn(
-                buttonVariants({ variant: "outline" }),
-                "no-underline hover:no-underline",
-              )}
+            </Button>
+            <Button
+              render={<Link to="/health" />}
+              nativeButton={false}
+              variant="outline"
+              className="no-underline hover:no-underline"
             >
               <Activity data-icon="inline-start" />
               Health
-            </Link>
+            </Button>
           </div>
         </div>
       </section>

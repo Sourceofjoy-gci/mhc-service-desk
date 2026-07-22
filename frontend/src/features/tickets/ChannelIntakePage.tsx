@@ -104,6 +104,7 @@ export default function ChannelIntakePage({
 }: ChannelIntakeProps) {
   const location = useLocation();
   const [form, setForm] = useState<FormState>(EMPTY);
+  const [submitAttempted, setSubmitAttempted] = useState(false);
   const [submitted, setSubmitted] = useState<{
     number: string;
     priority: string;
@@ -163,6 +164,7 @@ export default function ChannelIntakePage({
               onClick={() => {
                 setSubmitted(null);
                 setForm(EMPTY);
+                setSubmitAttempted(false);
               }}
             >
               <RotateCcw data-icon="inline-start" />
@@ -195,8 +197,10 @@ export default function ChannelIntakePage({
           <CardDescription>{description}</CardDescription>
         </CardHeader>
         <form
+          onInvalid={() => setSubmitAttempted(true)}
           onSubmit={(e) => {
             e.preventDefault();
+            setSubmitAttempted(true);
             submit.mutate(form);
           }}
         >
@@ -301,7 +305,7 @@ export default function ChannelIntakePage({
                 </Field>
               </FieldGroup>
 
-              <Field data-invalid={!form.title}>
+              <Field data-invalid={submitAttempted && !form.title}>
                 <FieldLabel htmlFor="intake-title">Title *</FieldLabel>
                 <Input
                   id="intake-title"
@@ -309,10 +313,10 @@ export default function ChannelIntakePage({
                   onChange={(e) => update("title")(e.target.value)}
                   maxLength={255}
                   required
-                  aria-invalid={!form.title}
+                  aria-invalid={submitAttempted && !form.title}
                 />
               </Field>
-              <Field data-invalid={!form.description}>
+              <Field data-invalid={submitAttempted && !form.description}>
                 <FieldLabel htmlFor="intake-description">Notes *</FieldLabel>
                 <Textarea
                   id="intake-description"
@@ -320,12 +324,12 @@ export default function ChannelIntakePage({
                   onChange={(e) => update("description")(e.target.value)}
                   rows={4}
                   required
-                  aria-invalid={!form.description}
+                  aria-invalid={submitAttempted && !form.description}
                 />
               </Field>
 
               <FieldGroup className="grid grid-cols-1 gap-4 md:grid-cols-3">
-                <Field data-invalid={!form.requester_name}>
+                <Field data-invalid={submitAttempted && !form.requester_name}>
                   <FieldLabel htmlFor="intake-requester-name">
                     Requester name *
                   </FieldLabel>
@@ -335,7 +339,7 @@ export default function ChannelIntakePage({
                     onChange={(e) => update("requester_name")(e.target.value)}
                     maxLength={255}
                     required
-                    aria-invalid={!form.requester_name}
+                    aria-invalid={submitAttempted && !form.requester_name}
                   />
                 </Field>
                 <Field>
@@ -365,15 +369,7 @@ export default function ChannelIntakePage({
             </FieldGroup>
           </CardContent>
           <CardFooter className="justify-end">
-            <Button
-              type="submit"
-              disabled={
-                submit.isPending ||
-                !form.title ||
-                !form.description ||
-                !form.requester_name
-              }
-            >
+            <Button type="submit" disabled={submit.isPending}>
               {submit.isPending ? <Spinner data-icon="inline-start" /> : null}
               {submit.isPending ? "Saving…" : "Capture ticket"}
               {!submit.isPending ? <ArrowRight data-icon="inline-end" /> : null}

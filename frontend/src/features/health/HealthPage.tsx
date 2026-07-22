@@ -24,6 +24,10 @@ import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
 import { Skeleton } from "@/components/ui/skeleton";
 import { Spinner } from "@/components/ui/spinner";
+import { cn } from "@/lib/utils";
+
+const SUCCESS_BADGE_CLASS = "bg-success text-success-foreground";
+const WARNING_BADGE_CLASS = "bg-warning text-warning-foreground";
 
 interface CheckResult {
   ok: boolean;
@@ -163,7 +167,9 @@ function SummaryCard({ data }: { data: HealthResponse }) {
             <Activity />
           </div>
           <div>
-            <CardTitle>Platform status</CardTitle>
+            <CardTitle>
+              <h2>Platform status</h2>
+            </CardTitle>
             <CardDescription>
               {Object.values(data.checks).filter((check) => check.ok).length}/
               {Object.keys(data.checks).length} checks passing
@@ -171,7 +177,10 @@ function SummaryCard({ data }: { data: HealthResponse }) {
           </div>
         </div>
         <CardAction>
-          <Badge variant={isOk ? "default" : "destructive"}>
+          <Badge
+            variant="secondary"
+            className={cn(isOk ? SUCCESS_BADGE_CLASS : WARNING_BADGE_CLASS)}
+          >
             {isOk ? "Operational" : "Degraded"}
           </Badge>
         </CardAction>
@@ -223,15 +232,20 @@ function CheckCard({ name, check }: { name: string; check: CheckResult }) {
             <meta.icon />
           </span>
           <div>
-            <CardTitle>{meta.label}</CardTitle>
+            <CardTitle>
+              <h2>{meta.label}</h2>
+            </CardTitle>
             {meta.description ? (
               <CardDescription>{meta.description}</CardDescription>
             ) : null}
           </div>
         </div>
         <CardAction>
-          <Badge variant={isOk ? "default" : "destructive"}>
-            {isOk ? <CheckCircle2 /> : <XCircle />}
+          <Badge
+            variant={isOk ? "secondary" : "destructive"}
+            className={cn(isOk && SUCCESS_BADGE_CLASS)}
+          >
+            {isOk ? <CheckCircle2 aria-hidden /> : <XCircle aria-hidden />}
             {isOk ? "OK" : "FAIL"}
           </Badge>
         </CardAction>

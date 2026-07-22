@@ -92,6 +92,7 @@ const EMPTY_FORM: FormState = {
 
 export default function PublicFormPage() {
   const [form, setForm] = useState<FormState>(EMPTY_FORM);
+  const [submitAttempted, setSubmitAttempted] = useState(false);
   const [submitted, setSubmitted] = useState<{
     number: string;
     priority: string;
@@ -111,6 +112,7 @@ export default function PublicFormPage() {
         onReset={() => {
           setSubmitted(null);
           setForm(EMPTY_FORM);
+          setSubmitAttempted(false);
         }}
       />
     );
@@ -144,8 +146,10 @@ export default function PublicFormPage() {
           </CardDescription>
         </CardHeader>
         <form
+          onInvalid={() => setSubmitAttempted(true)}
           onSubmit={(e) => {
             e.preventDefault();
+            setSubmitAttempted(true);
             if (!canSubmit) return;
             submit.mutate(form);
           }}
@@ -249,7 +253,7 @@ export default function PublicFormPage() {
             <FieldSet>
               <FieldLegend>Your request</FieldLegend>
               <FieldGroup className="grid grid-cols-1 gap-4 md:grid-cols-2">
-                <Field data-invalid={!form.title}>
+                <Field data-invalid={submitAttempted && !form.title}>
                   <FieldLabel htmlFor="public-title">Title *</FieldLabel>
                   <Input
                     id="public-title"
@@ -257,11 +261,11 @@ export default function PublicFormPage() {
                     onChange={(e) => update("title")(e.target.value)}
                     maxLength={255}
                     required
-                    aria-invalid={!form.title}
+                    aria-invalid={submitAttempted && !form.title}
                     placeholder="A short summary"
                   />
                 </Field>
-                <Field data-invalid={!form.description}>
+                <Field data-invalid={submitAttempted && !form.description}>
                   <FieldLabel htmlFor="public-desc">
                     Describe your request *
                   </FieldLabel>
@@ -271,7 +275,7 @@ export default function PublicFormPage() {
                     value={form.description}
                     onChange={(e) => update("description")(e.target.value)}
                     required
-                    aria-invalid={!form.description}
+                    aria-invalid={submitAttempted && !form.description}
                     placeholder="What is the request about? Include dates, people, and any context that helps us respond."
                   />
                 </Field>
@@ -281,7 +285,7 @@ export default function PublicFormPage() {
             <FieldSet>
               <FieldLegend>Your details</FieldLegend>
               <FieldGroup className="grid grid-cols-1 gap-4 md:grid-cols-2">
-                <Field data-invalid={!form.requester_name}>
+                <Field data-invalid={submitAttempted && !form.requester_name}>
                   <FieldLabel htmlFor="public-name">Your name *</FieldLabel>
                   <Input
                     id="public-name"
@@ -289,7 +293,7 @@ export default function PublicFormPage() {
                     onChange={(e) => update("requester_name")(e.target.value)}
                     maxLength={255}
                     required
-                    aria-invalid={!form.requester_name}
+                    aria-invalid={submitAttempted && !form.requester_name}
                   />
                 </Field>
                 <Field>
@@ -319,13 +323,16 @@ export default function PublicFormPage() {
             <FieldSet>
               <FieldLegend variant="label">Consent</FieldLegend>
               <FieldGroup className="gap-4">
-                <Field orientation="horizontal" data-invalid={!form.consent}>
+                <Field
+                  orientation="horizontal"
+                  data-invalid={submitAttempted && !form.consent}
+                >
                   <Checkbox
                     id="public-consent"
                     checked={form.consent}
                     onCheckedChange={(v) => update("consent")(v === true)}
                     required
-                    aria-invalid={!form.consent}
+                    aria-invalid={submitAttempted && !form.consent}
                   />
                   <FieldContent>
                     <FieldLabel htmlFor="public-consent">
@@ -356,7 +363,7 @@ export default function PublicFormPage() {
             <p className="text-xs text-muted-foreground">
               Submitting creates a ticket in the operational queue.
             </p>
-            <Button type="submit" disabled={!canSubmit || submit.isPending}>
+            <Button type="submit" disabled={submit.isPending}>
               {submit.isPending ? (
                 <Spinner data-icon="inline-start" />
               ) : (

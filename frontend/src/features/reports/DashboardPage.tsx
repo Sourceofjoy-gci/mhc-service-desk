@@ -130,7 +130,9 @@ export default function DashboardPage() {
         <div className="grid grid-cols-1 gap-4 lg:grid-cols-2">
           <Card className="rounded-lg!">
             <CardHeader>
-              <CardTitle>By priority</CardTitle>
+              <CardTitle>
+                <h2>By priority</h2>
+              </CardTitle>
               <CardDescription>
                 Current ticket volume by priority.
               </CardDescription>
@@ -165,7 +167,9 @@ export default function DashboardPage() {
 
           <Card className="rounded-lg!">
             <CardHeader>
-              <CardTitle>By status</CardTitle>
+              <CardTitle>
+                <h2>By status</h2>
+              </CardTitle>
               <CardDescription>
                 Current ticket volume by workflow status.
               </CardDescription>
@@ -263,7 +267,9 @@ function MetricCard({
   return (
     <Card className="rounded-lg!">
       <CardHeader>
-        <CardTitle>{label}</CardTitle>
+        <CardTitle>
+          <h2>{label}</h2>
+        </CardTitle>
         <CardDescription>{description}</CardDescription>
       </CardHeader>
       <CardContent>
