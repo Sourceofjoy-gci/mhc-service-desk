@@ -4,9 +4,9 @@ import { Button } from "./ui/button";
 import {
   DropdownMenu,
   DropdownMenuContent,
-  DropdownMenuGroup,
-  DropdownMenuItem,
   DropdownMenuLabel,
+  DropdownMenuRadioGroup,
+  DropdownMenuRadioItem,
   DropdownMenuSeparator,
   DropdownMenuTrigger,
 } from "./ui/dropdown-menu";
@@ -33,33 +33,25 @@ export function ThemeToggle() {
         }
       />
       <DropdownMenuContent align="end" className="min-w-36">
-        <DropdownMenuGroup>
+        <DropdownMenuRadioGroup
+          value={theme}
+          onValueChange={(value) => setTheme(value)}
+        >
           <DropdownMenuLabel>Theme</DropdownMenuLabel>
-        </DropdownMenuGroup>
-        <DropdownMenuSeparator />
-        <DropdownMenuGroup>
-          <DropdownMenuItem onClick={() => setTheme("light")}>
+          <DropdownMenuSeparator />
+          <DropdownMenuRadioItem value="light" closeOnClick>
             <Sun />
             Light
-            {theme === "light" ? (
-              <span className="ml-auto text-primary">•</span>
-            ) : null}
-          </DropdownMenuItem>
-          <DropdownMenuItem onClick={() => setTheme("dark")}>
+          </DropdownMenuRadioItem>
+          <DropdownMenuRadioItem value="dark" closeOnClick>
             <Moon />
             Dark
-            {theme === "dark" ? (
-              <span className="ml-auto text-primary">•</span>
-            ) : null}
-          </DropdownMenuItem>
-          <DropdownMenuItem onClick={() => setTheme("system")}>
+          </DropdownMenuRadioItem>
+          <DropdownMenuRadioItem value="system" closeOnClick>
             <Monitor />
             System
-            {theme === "system" ? (
-              <span className="ml-auto text-primary">•</span>
-            ) : null}
-          </DropdownMenuItem>
-        </DropdownMenuGroup>
+          </DropdownMenuRadioItem>
+        </DropdownMenuRadioGroup>
       </DropdownMenuContent>
     </DropdownMenu>
   );
