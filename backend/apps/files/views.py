@@ -70,7 +70,7 @@ def upload(request, ticket_number):
             checksum_sha256=checksum,
             scan_status=scan_status,
             scan_signature=signature or "",
-            uploaded_by_subject=actor,
+            actor_subject=actor,
         )
         created.append({
             "id": str(att.id),

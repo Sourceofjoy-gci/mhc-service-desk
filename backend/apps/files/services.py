@@ -12,7 +12,10 @@ import boto3
 from botocore.client import Config
 from botocore.exceptions import ClientError
 from django.conf import settings
+from django.db import transaction
 from django.utils import timezone
+
+from apps.tickets.events import record_ticket_event
 
 from .models import Attachment, AttachmentAccessLog
 
@@ -81,7 +84,6 @@ def upload_to_minio(
 
 def generate_signed_url(*, key: str, expires: int = 60) -> str:
     bucket = settings.AWS_STORAGE_BUCKET_NAME
-    public = settings.AWS_S3_PUBLIC_URL
     client = _s3_client()
     return client.generate_presigned_url(
         "get_object",
@@ -90,6 +92,7 @@ def generate_signed_url(*, key: str, expires: int = 60) -> str:
     )
 
 
+@transaction.atomic
 def record_attachment(
     *,
     ticket,
@@ -101,9 +104,9 @@ def record_attachment(
     checksum_sha256: str,
     scan_status: str,
     scan_signature: str,
-    uploaded_by_subject: str,
+    actor_subject: str,
 ) -> Attachment:
-    return Attachment.objects.create(
+    attachment = Attachment.objects.create(
         ticket=ticket,
         message=message,
         object_key=object_key,
@@ -113,12 +116,33 @@ def record_attachment(
         checksum_sha256=checksum_sha256,
         scan_status=scan_status,
         scan_signature=scan_signature or "",
-        uploaded_by_subject=uploaded_by_subject,
+        uploaded_by_subject=actor_subject,
         scanned_at=timezone.now() if scan_status != "pending" else None,
     )
+    record_ticket_event(
+        ticket=ticket,
+        actor_subject=actor_subject,
+        action="ticket.attachment.created",
+        before={},
+        after={
+            "attachment_id": str(attachment.id),
+            "filename": filename,
+            "content_type": content_type,
+            "size_bytes": size_bytes,
+            "scan_status": scan_status,
+        },
+        metadata={"message_id": str(message.id) if message else None},
+    )
+    return attachment
 
 
-def log_attachment_access(*, attachment: Attachment, actor_subject: str, ip: str | None, user_agent: str) -> None:
+def log_attachment_access(
+    *,
+    attachment: Attachment,
+    actor_subject: str,
+    ip: str | None,
+    user_agent: str,
+) -> None:
     AttachmentAccessLog.objects.create(
         attachment=attachment,
         actor_subject=actor_subject,

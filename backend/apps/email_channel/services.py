@@ -45,7 +45,13 @@ def _thread_token_in_subject(subject: str) -> str | None:
     return m.group(1) if m else None
 
 
-def find_target_ticket(*, message_id: str, in_reply_to: str, references: str, subject: str) -> Ticket | None:
+def find_target_ticket(
+    *,
+    message_id: str,
+    in_reply_to: str,
+    references: str,
+    subject: str,
+) -> Ticket | None:
     """Match an inbound email to an existing ticket by:
       1. A previous outbound TicketMessage with the same Message-ID
       2. The In-Reply-To / References chain
@@ -142,7 +148,12 @@ def process_inbound_email(
         office = Office.objects.filter(is_active=True).first()
         if not office:
             return {"status": "error", "detail": "no office configured"}
-        clean_html = bleach.clean(body_html or "", tags=ALLOWED_TAGS, attributes=ALLOWED_ATTRS, strip=True)
+        clean_html = bleach.clean(
+            body_html or "",
+            tags=ALLOWED_TAGS,
+            attributes=ALLOWED_ATTRS,
+            strip=True,
+        )
         clean_text = bleach.clean(body_text or "", tags=[], strip=True)
         target = ticket_services.create_ticket(
             domain=mailbox_domain,
@@ -162,10 +173,16 @@ def process_inbound_email(
     else:
         new_or_existing = "updated"
 
-    clean_html = bleach.clean(body_html or "", tags=ALLOWED_TAGS, attributes=ALLOWED_ATTRS, strip=True)
-    TicketMessage.objects.create(
+    clean_html = bleach.clean(
+        body_html or "",
+        tags=ALLOWED_TAGS,
+        attributes=ALLOWED_ATTRS,
+        strip=True,
+    )
+    ticket_services.add_message(
         ticket=target,
         direction="inbound",
+        actor_subject=from_email,
         author_subject=from_email,
         author_label=from_name or from_email,
         body_text=bleach.clean(body_text or "", tags=[], strip=True),
@@ -173,18 +190,9 @@ def process_inbound_email(
         body_html_sanitized=clean_html,
         external_message_id=message_id,
         delivery_status="received",
-    )
-
-    OutboxEvent.objects.create(
-        aggregate="ticket",
-        aggregate_id=str(target.id),
-        event_type="ticket.email_inbound",
-        payload={
-            "ticket_number": target.number,
-            "from": from_email,
-            "to": to_email,
-            "message_id": message_id,
-            "subject": subject,
+        event_metadata={
+            "channel": "email",
+            "provider_message_id": message_id,
         },
     )
 

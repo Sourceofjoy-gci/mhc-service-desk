@@ -134,6 +134,7 @@ class TicketViewSet(viewsets.ModelViewSet):
         msg = services.add_message(
             ticket=ticket,
             direction="outbound",
+            actor_subject=request.user.keycloak_subject,
             author_subject=request.user.keycloak_subject,
             author_label=request.user.display_name or request.user.username,
             body_text=ser.validated_data["body_text"],

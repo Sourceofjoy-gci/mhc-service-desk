@@ -19,6 +19,7 @@ from apps.contacts.models import Contact, VerificationToken
 from apps.organisations.models import Office
 from apps.workflow.models import Status, Transition, TransitionHistory
 
+from .events import record_ticket_event
 from .models import OutboxEvent, Ticket, TicketLink, TicketMessage, TicketNote, Watcher
 
 logger = logging.getLogger(__name__)
@@ -110,18 +111,18 @@ def create_ticket(
         actor_subject=actor_subject,
         reason="Ticket created",
     )
-    OutboxEvent.objects.create(
-        aggregate="ticket",
-        aggregate_id=str(ticket.id),
-        event_type="ticket.created",
-        payload={
-            "ticket_number": ticket.number,
+    record_ticket_event(
+        ticket=ticket,
+        actor_subject=actor_subject,
+        action="ticket.created",
+        before={},
+        after={
             "domain": domain,
             "channel": channel,
             "requester_id": str(requester.id),
             "title": title,
-            "ip_address": ip_address,
         },
+        ip_address=ip_address,
     )
     logger.info("ticket_created", extra={"correlation_id": number})
     return ticket
@@ -175,7 +176,15 @@ def transition_ticket(
         ticket.resolution_code = resolution_code
         ticket.resolution_summary = resolution_summary
         ticket.resolved_at = timezone.now()
-    ticket.save(update_fields=["status", "resolution_code", "resolution_summary", "resolved_at", "updated_at"])
+    ticket.save(
+        update_fields=[
+            "status",
+            "resolution_code",
+            "resolution_summary",
+            "resolved_at",
+            "updated_at",
+        ]
+    )
 
     TransitionHistory.objects.create(
         ticket=ticket,
@@ -204,33 +213,70 @@ def transition_ticket(
 # Messages, notes, watchers, links
 # -----------------------------------------------------------------------------
 
+@transaction.atomic
 def add_message(
     *,
     ticket: Ticket,
     direction: str,
     body_text: str,
+    actor_subject: str,
     body_html: str = "",
+    body_html_sanitized: str = "",
     author_subject: str = "",
     author_label: str = "",
     template_key: str = "",
     template_version: str = "",
     external_message_id: str = "",
+    delivery_status: str = "",
+    event_metadata: dict[str, Any] | None = None,
 ) -> TicketMessage:
-    return TicketMessage.objects.create(
+    message = TicketMessage.objects.create(
         ticket=ticket,
         direction=direction,
         body_text=body_text,
         body_html=body_html,
-        author_subject=author_subject,
+        body_html_sanitized=body_html_sanitized,
+        author_subject=author_subject or actor_subject,
         author_label=author_label,
         template_key=template_key,
         template_version=template_version,
         external_message_id=external_message_id,
+        delivery_status=delivery_status,
     )
+    record_ticket_event(
+        ticket=ticket,
+        actor_subject=actor_subject,
+        action="ticket.message.created",
+        before={},
+        after={
+            "message_id": str(message.id),
+            "direction": direction,
+            "character_count": len(body_text),
+        },
+        metadata=event_metadata,
+    )
+    return message
 
 
+@transaction.atomic
 def add_internal_note(*, ticket: Ticket, body: str, author_subject: str) -> TicketNote:
-    return TicketNote.objects.create(ticket=ticket, body=body, author_subject=author_subject)
+    note = TicketNote.objects.create(
+        ticket=ticket,
+        body=body,
+        author_subject=author_subject,
+    )
+    record_ticket_event(
+        ticket=ticket,
+        actor_subject=author_subject,
+        action="ticket.note.created",
+        before={},
+        after={
+            "note_id": str(note.id),
+            "type": "internal",
+            "character_count": len(body),
+        },
+    )
+    return note
 
 
 def add_watcher(*, ticket: Ticket, user) -> Watcher:
@@ -238,15 +284,40 @@ def add_watcher(*, ticket: Ticket, user) -> Watcher:
     return watcher
 
 
-def link_tickets(*, source: Ticket, target: Ticket, kind: str) -> TicketLink:
-    return TicketLink.objects.create(from_ticket=source, to_ticket=target, kind=kind)
+@transaction.atomic
+def link_tickets(
+    *,
+    source: Ticket,
+    target: Ticket,
+    kind: str,
+    actor_subject: str,
+    metadata: dict[str, Any] | None = None,
+) -> TicketLink:
+    link = TicketLink.objects.create(from_ticket=source, to_ticket=target, kind=kind)
+    record_ticket_event(
+        ticket=source,
+        actor_subject=actor_subject,
+        action="ticket.relationship.created",
+        before={},
+        after={
+            "relationship_id": str(link.id),
+            "kind": kind,
+            "target_ticket_number": target.number,
+        },
+        metadata=metadata,
+    )
+    return link
 
 
 # -----------------------------------------------------------------------------
 # Requester access
 # -----------------------------------------------------------------------------
 
-def issue_requester_token(*, ticket: Ticket, ttl_minutes: int = 60) -> tuple[VerificationToken, str]:
+def issue_requester_token(
+    *,
+    ticket: Ticket,
+    ttl_minutes: int = 60,
+) -> tuple[VerificationToken, str]:
     """Return (db_record, raw_token). The raw token is shown once to the user
     and never stored — only its SHA-256 hash lives in the DB."""
     raw = secrets.token_urlsafe(32)

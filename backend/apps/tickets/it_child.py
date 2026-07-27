@@ -17,7 +17,9 @@ from apps.contacts.models import Contact
 from apps.organisations.models import Office
 from apps.workflow.models import Status, TransitionHistory
 
-from .models import OutboxEvent, Ticket, TicketLink
+from .events import record_ticket_event
+from .models import Ticket, TicketLink
+from .services import link_tickets
 
 logger = logging.getLogger(__name__)
 
@@ -98,19 +100,27 @@ def create_it_child_ticket(
         confidentiality="sensitive",
     )
 
-    TicketLink.objects.create(
-        from_ticket=child, to_ticket=parent, kind="it_child",
-    )
-
-    OutboxEvent.objects.create(
-        aggregate="ticket",
-        aggregate_id=str(child.id),
-        event_type="ticket.it_child_created",
-        payload={
-            "parent_number": parent.number,
-            "child_number": child.number,
-            "actor": actor_subject,
+    event_actor = actor_subject or "system"
+    record_ticket_event(
+        ticket=child,
+        actor_subject=event_actor,
+        action="ticket.created",
+        before={},
+        after={
+            "domain": "it",
+            "channel": "internal",
+            "priority": technical_priority,
+            "requester_id": str(requester.id),
+            "title": child.title,
         },
+        metadata={"source": "it-child", "parent_ticket_number": parent.number},
+    )
+    link_tickets(
+        source=child,
+        target=parent,
+        kind="it_child",
+        actor_subject=event_actor,
+        metadata={"source": "it-child"},
     )
 
     # Mark the operational parent as Waiting for IT
@@ -127,9 +137,27 @@ def create_it_child_ticket(
             actor_subject=actor_subject or "system",
             reason=f"IT child ticket {child.number} created",
         )
+        record_ticket_event(
+            ticket=parent,
+            actor_subject=event_actor,
+            action="ticket.transitioned",
+            before={
+                "status": previous.code,
+                "waiting_reason": "",
+            },
+            after={
+                "status": waiting_it.code,
+                "waiting_reason": "Waiting for IT",
+            },
+            metadata={
+                "source": "it-child",
+                "child_ticket_number": child.number,
+            },
+        )
     return child
 
 
+@transaction.atomic
 def sync_child_status_to_parent(*, child: Ticket, actor_subject: str = "") -> None:
     """Push a safe status summary from the IT child to the operational parent.
 
@@ -159,4 +187,19 @@ def sync_child_status_to_parent(*, child: Ticket, actor_subject: str = "") -> No
         to_status=target,
         actor_subject=actor_subject or "it-child-sync",
         reason=f"IT child {child.number} returned: {child.status.name}",
+    )
+    record_ticket_event(
+        ticket=parent,
+        actor_subject=actor_subject or "it-child-sync",
+        action="ticket.transitioned",
+        before={
+            "status": previous.code,
+            "waiting_reason": "Waiting for IT",
+        },
+        after={"status": target.code, "waiting_reason": ""},
+        metadata={
+            "source": "it-child-sync",
+            "child_ticket_number": child.number,
+            "child_status": child.status.code,
+        },
     )

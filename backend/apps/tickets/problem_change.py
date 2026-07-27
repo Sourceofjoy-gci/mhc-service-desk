@@ -19,17 +19,27 @@ class ProblemManager:
     """Operations for problem records and their incident links."""
 
     @staticmethod
-    def open_problem(*, title: str, description: str, opened_by: str, related_incident_ids: list[str] | None = None) -> Ticket:
+    def open_problem(
+        *,
+        title: str,
+        description: str,
+        opened_by: str,
+        related_incident_ids: list[str] | None = None,
+    ) -> Ticket:
         from apps.catalogue.models import RequestType, Service
         from apps.contacts.models import Contact
         from apps.organisations.models import Office
 
-        from .models import Ticket, TicketLink
-        from .services import create_ticket
+        from .models import Ticket
+        from .services import create_ticket, link_tickets
 
         # Open problems in IT domain
         service = Service.objects.filter(domain="it", code="IT-INC").first()
-        request_type = RequestType.objects.filter(service=service, code="OUTAGE").first() if service else None
+        request_type = (
+            RequestType.objects.filter(service=service, code="OUTAGE").first()
+            if service
+            else None
+        )
         office = Office.objects.filter(is_active=True).first()
         requester, _ = Contact.objects.get_or_create(
             email="problems@mhc.local",
@@ -55,8 +65,12 @@ class ProblemManager:
                     inc = Ticket.objects.get(id=incident_id)
                 except Ticket.DoesNotExist:
                     continue
-                TicketLink.objects.create(
-                    from_ticket=inc, to_ticket=ticket, kind="blocks",
+                link_tickets(
+                    source=inc,
+                    target=ticket,
+                    kind="blocks",
+                    actor_subject=opened_by,
+                    metadata={"source": "problem-management"},
                 )
         return ticket
 
@@ -65,7 +79,14 @@ class ChangeManager:
     """Planned change windows with risk and approval status."""
 
     @staticmethod
-    def open_change(*, title: str, description: str, scheduled_at, risk: str, opened_by: str) -> Ticket:
+    def open_change(
+        *,
+        title: str,
+        description: str,
+        scheduled_at,
+        risk: str,
+        opened_by: str,
+    ) -> Ticket:
         from apps.catalogue.models import RequestType, Service
         from apps.contacts.models import Contact
         from apps.organisations.models import Office
@@ -73,7 +94,11 @@ class ChangeManager:
         from .services import create_ticket
 
         service = Service.objects.filter(domain="it", code="IT-INC").first()
-        request_type = RequestType.objects.filter(service=service, code="OUTAGE").first() if service else None
+        request_type = (
+            RequestType.objects.filter(service=service, code="OUTAGE").first()
+            if service
+            else None
+        )
         office = Office.objects.filter(is_active=True).first()
         requester, _ = Contact.objects.get_or_create(
             email="changes@mhc.local",
@@ -90,7 +115,11 @@ class ChangeManager:
             channel="internal",
             actor_subject=opened_by,
         )
-        ticket.custom_fields = {**ticket.custom_fields, "scheduled_at": scheduled_at.isoformat(), "risk": risk}
+        ticket.custom_fields = {
+            **ticket.custom_fields,
+            "scheduled_at": scheduled_at.isoformat(),
+            "risk": risk,
+        }
         ticket.tags = list(ticket.tags) + ["change", f"risk:{risk}"]
         ticket.save(update_fields=["custom_fields", "tags", "updated_at"])
         return ticket

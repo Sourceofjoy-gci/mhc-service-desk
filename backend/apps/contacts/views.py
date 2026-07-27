@@ -125,6 +125,7 @@ def requester_reply(request, token: str):
     msg = add_message(
         ticket=ticket,
         direction="inbound",
+        actor_subject=vt.contact.email or "requester",
         author_subject=vt.contact.email or "requester",
         author_label=vt.contact.full_name,
         body_text=body,

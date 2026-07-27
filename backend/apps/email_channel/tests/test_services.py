@@ -100,3 +100,40 @@ def test_html_is_sanitised(basic_world, mailbox):
     msg = TicketMessage.objects.get(external_message_id="<xss@example.com>")
     assert "<script>" not in msg.body_html_sanitized
     assert "javascript:" not in msg.body_html_sanitized
+
+
+def test_inbound_email_uses_canonical_message_event_without_body_or_duplicate_outbox(
+    basic_world,
+    mailbox,
+):
+    from apps.audit.models import AuditEvent
+    from apps.tickets.models import OutboxEvent
+
+    body = "Requester secret details"
+    message_id = "<event@example.com>"
+    result = process_inbound_email(
+        from_header="Visitor <visitor@example.com>",
+        to_header="ops@mhc.local",
+        subject="Sensitive subject",
+        body_text=body,
+        body_html=f"<p>{body}</p><script>bad()</script>",
+        message_id=message_id,
+    )
+    message = TicketMessage.objects.get(external_message_id=message_id)
+    event = AuditEvent.objects.get(
+        object_id=str(message.ticket_id),
+        action="ticket.message.created",
+    )
+
+    assert message.body_html_sanitized == f"<p>{body}</p>bad()"
+    assert event.payload["metadata"] == {
+        "channel": "email",
+        "provider_message_id": message_id,
+    }
+    assert body not in str(event.payload)
+    assert "Sensitive subject" not in str(event.payload)
+    assert OutboxEvent.objects.filter(
+        aggregate_id=str(message.ticket_id),
+        event_type="ticket.message.created",
+    ).count() == 1
+    assert result["status"] == "created"

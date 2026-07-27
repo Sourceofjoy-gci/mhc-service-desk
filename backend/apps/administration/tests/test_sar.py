@@ -29,7 +29,12 @@ def test_sar_export_includes_ticket_and_messages(basic_world, tmp_path, monkeypa
         office=basic_world["office"],
         channel="web",
     )
-    services.add_message(ticket=ticket, direction="outbound", body_text="Reply here")
+    services.add_message(
+        ticket=ticket,
+        direction="outbound",
+        body_text="Reply here",
+        actor_subject="sar-test",
+    )
     monkeypatch.setenv("DJANGO_SETTINGS_MODULE", "config.settings.dev")
     out_dir = tmp_path
     call_command("sar_export", "--email", "sar@example.com", "--out", str(out_dir))

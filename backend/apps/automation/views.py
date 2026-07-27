@@ -8,6 +8,7 @@ from __future__ import annotations
 
 import logging
 
+from django.db import transaction
 from rest_framework import serializers, viewsets
 from rest_framework.permissions import IsAuthenticated
 
@@ -44,7 +45,10 @@ def evaluate_rules(*, trigger: str, ticket) -> int:
     the rule name and never roll back the triggering event.
     """
     count = 0
-    rules = AutomationRule.objects.filter(trigger=trigger, is_active=True).order_by("priority", "name")
+    rules = AutomationRule.objects.filter(
+        trigger=trigger,
+        is_active=True,
+    ).order_by("priority", "name")
     for rule in rules:
         try:
             ok = _apply_action(rule, ticket)
@@ -69,7 +73,11 @@ def evaluate_rules(*, trigger: str, ticket) -> int:
     return count
 
 
+@transaction.atomic
 def _apply_action(rule: AutomationRule, ticket) -> bool:
+    from apps.tickets.events import record_ticket_event
+
+    actor_subject = f"automation:{rule.name}"
     if rule.action == AutomationRule.Action.ASSIGN_USER:
         username = rule.action_params.get("username")
         if not username:
@@ -79,15 +87,33 @@ def _apply_action(rule: AutomationRule, ticket) -> bool:
             user = User.objects.get(username=username)
         except User.DoesNotExist:
             return False
+        previous_assignee = ticket.assignee.username if ticket.assignee else None
         ticket.assignee = user
         ticket.save(update_fields=["assignee", "updated_at"])
+        record_ticket_event(
+            ticket=ticket,
+            actor_subject=actor_subject,
+            action="ticket.assignment.changed",
+            before={"assignee": previous_assignee},
+            after={"assignee": user.username},
+            metadata={"rule": rule.name},
+        )
         return True
     if rule.action == AutomationRule.Action.SET_PRIORITY:
         p = rule.action_params.get("priority")
         if p not in ("P1", "P2", "P3", "P4"):
             return False
+        previous_priority = ticket.priority
         ticket.priority = p
         ticket.save(update_fields=["priority", "updated_at"])
+        record_ticket_event(
+            ticket=ticket,
+            actor_subject=actor_subject,
+            action="ticket.priority.changed",
+            before={"priority": previous_priority},
+            after={"priority": p},
+            metadata={"rule": rule.name},
+        )
         return True
     if rule.action == AutomationRule.Action.ADD_NOTE:
         body = rule.action_params.get("body", "")
