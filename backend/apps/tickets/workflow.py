@@ -3,40 +3,15 @@ from __future__ import annotations
 
 from django.db.models import Q, QuerySet
 
-from apps.identity_access.scope import AuthoritySnapshot, get_authority_snapshot
+from apps.identity_access.scope import (
+    AuthoritySnapshot,
+    get_authority_snapshot,
+    scope_ticket_queryset,
+)
 from apps.workflow.models import Transition
 
 from .models import Ticket
 from .permissions import user_groups
-
-
-def _scope_key(scope) -> tuple[str, str | None, str | None, str | None]:
-    return (scope.domain, scope.office_id, scope.service_id, scope.queue_id)
-
-
-def _ticket_is_in_scope(ticket: Ticket, authority: AuthoritySnapshot) -> bool:
-    for scope in authority.scopes:
-        if scope.domain == "admin":
-            return True
-        if scope.domain != ticket.domain:
-            continue
-        if scope.office_id and scope.office_id != str(ticket.office_id):
-            continue
-        if scope.service_id and scope.service_id != str(ticket.service_id):
-            continue
-        if scope.queue_id and scope.queue_id != str(ticket.queue_id):
-            continue
-        if scope.restricted_only:
-            if ticket.confidentiality == Ticket.Confidentiality.RESTRICTED:
-                return True
-            continue
-        if (
-            ticket.confidentiality == Ticket.Confidentiality.RESTRICTED
-            and _scope_key(scope) not in authority.restricted_scope_keys
-        ):
-            continue
-        return True
-    return False
 
 
 def available_transitions(
@@ -55,10 +30,15 @@ def available_transitions(
     if actor is None or not getattr(actor, "is_authenticated", False):
         return transitions.none()
     authority = snapshot or get_authority_snapshot(actor, request=request)
+    ticket_is_in_scope = scope_ticket_queryset(
+        actor,
+        Ticket.objects.filter(pk=ticket.pk),
+        snapshot=authority,
+    ).exists()
     if (
         not actor.is_active
         or "auditor" in authority.capabilities
-        or not _ticket_is_in_scope(ticket, authority)
+        or not ticket_is_in_scope
     ):
         return transitions.none()
 

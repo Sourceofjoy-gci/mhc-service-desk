@@ -8,6 +8,7 @@ import pytest
 from apps.audit.models import AuditEvent
 from apps.identity_access.models import Role, User, UserRole
 from apps.identity_access.scope import get_authority_snapshot
+from apps.organisations.models import ServiceLocation
 from apps.tickets import services
 from apps.tickets.api import TicketDetailSerializer, TicketListSerializer
 from apps.tickets.models import OutboxEvent, Ticket
@@ -45,6 +46,28 @@ def _ticket(basic_world, *, domain: str = "operational", status_code: str = "new
 
 def _context(user: User):
     return {"request": SimpleNamespace(user=user)}
+
+
+def _assert_denied_without_side_effects(ticket: Ticket, actor: User) -> None:
+    previous_updated_at = ticket.updated_at
+    history_count = TransitionHistory.objects.filter(ticket=ticket).count()
+    audit_count = AuditEvent.objects.filter(object_id=str(ticket.id)).count()
+    outbox_count = OutboxEvent.objects.filter(aggregate_id=str(ticket.id)).count()
+
+    with pytest.raises(services.TicketPermissionError):
+        services.transition_ticket(
+            ticket_id=ticket.id,
+            actor=actor,
+            expected_updated_at=ticket.updated_at,
+            to_status_code="triage",
+        )
+
+    ticket.refresh_from_db()
+    assert ticket.status.code == "new"
+    assert ticket.updated_at == previous_updated_at
+    assert TransitionHistory.objects.filter(ticket=ticket).count() == history_count
+    assert AuditEvent.objects.filter(object_id=str(ticket.id)).count() == audit_count
+    assert OutboxEvent.objects.filter(aggregate_id=str(ticket.id)).count() == outbox_count
 
 
 @pytest.mark.parametrize("domain", ["operational", "it"])
@@ -305,3 +328,94 @@ def test_cached_operator_snapshot_stays_allowed_after_auditor_assignment_is_adde
         to_status_code="triage",
     )
     assert updated.status.code == "triage"
+
+
+@pytest.mark.parametrize("dimension", ["office", "service", "queue"])
+def test_persisted_admin_scope_honors_matching_and_nonmatching_dimensions(
+    basic_world,
+    dimension,
+):
+    ticket = _ticket(basic_world)
+    if dimension == "queue":
+        ticket.queue = ServiceLocation.objects.create(
+            office=ticket.office,
+            name="Workflow queue",
+        )
+        ticket.save(update_fields=["queue"])
+    matching_id = str(getattr(ticket, f"{dimension}_id"))
+    transition = Transition.objects.get(
+        domain=ticket.domain,
+        from_status=ticket.status,
+        to_status__code="triage",
+    )
+    transition.required_role = "it-leads"
+    transition.save(update_fields=["required_role"])
+
+    matching_actor = _user(["ops-agents"])
+    matching_role = Role.objects.create(
+        keycloak_role=f"admin-matching-{dimension}",
+        name=f"Matching admin {dimension}",
+        scopes=[{"domain": "admin", dimension: matching_id}],
+    )
+    UserRole.objects.create(user=matching_actor, role=matching_role)
+    assert available_transitions(ticket, matching_actor).exists()
+
+    denied_actor = _user(["ops-agents"])
+    denied_role = Role.objects.create(
+        keycloak_role=f"admin-other-{dimension}",
+        name=f"Other admin {dimension}",
+        scopes=[{"domain": "admin", dimension: str(uuid4())}],
+    )
+    UserRole.objects.create(user=denied_actor, role=denied_role)
+    assert not available_transitions(ticket, denied_actor).exists()
+    _assert_denied_without_side_effects(ticket, denied_actor)
+
+
+def test_restricted_only_admin_scope_denies_normal_and_allows_restricted_ticket(
+    basic_world,
+):
+    actor = _user(["ops-agents"])
+    role = Role.objects.create(
+        keycloak_role="restricted-only-admin",
+        name="Restricted-only admin",
+        scopes=[{"domain": "admin", "restricted_only": True}],
+    )
+    UserRole.objects.create(user=actor, role=role)
+    normal = _ticket(basic_world)
+    restricted = _ticket(basic_world)
+    restricted.confidentiality = Ticket.Confidentiality.RESTRICTED
+    restricted.save(update_fields=["confidentiality"])
+
+    assert not available_transitions(normal, actor).exists()
+    _assert_denied_without_side_effects(normal, actor)
+    assert available_transitions(restricted, actor).exists()
+
+
+def test_restricted_admin_ticket_requires_exact_branch_restricted_grant(basic_world):
+    ticket = _ticket(basic_world)
+    ticket.confidentiality = Ticket.Confidentiality.RESTRICTED
+    ticket.save(update_fields=["confidentiality"])
+    scope = {
+        "domain": "admin",
+        "office": str(ticket.office_id),
+        "service": str(ticket.service_id),
+    }
+
+    denied_actor = _user(["ops-agents"])
+    denied_role = Role.objects.create(
+        keycloak_role="unprivileged-scoped-admin",
+        name="Unprivileged scoped admin",
+        scopes=[scope],
+    )
+    UserRole.objects.create(user=denied_actor, role=denied_role)
+    assert not available_transitions(ticket, denied_actor).exists()
+    _assert_denied_without_side_effects(ticket, denied_actor)
+
+    allowed_actor = _user(["ops-agents"])
+    allowed_role = Role.objects.create(
+        keycloak_role="admin",
+        name="Canonical admin",
+        scopes=[scope],
+    )
+    UserRole.objects.create(user=allowed_actor, role=allowed_role)
+    assert available_transitions(ticket, allowed_actor).exists()
