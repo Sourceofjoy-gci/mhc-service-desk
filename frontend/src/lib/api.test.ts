@@ -1,8 +1,9 @@
-import { beforeEach, describe, expect, it, vi } from "vitest";
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import {
   ApiError,
   api,
   configureApiAuth,
+  ticketsApi,
   type ApiAuthAdapter,
 } from "./api";
 
@@ -20,6 +21,7 @@ function requestHeaders(call: unknown[]): Headers {
 
 describe("API authentication", () => {
   let adapter: ApiAuthAdapter;
+  let disposeAuth: unknown;
 
   beforeEach(() => {
     window.history.replaceState({}, "", "/tickets?priority=P1");
@@ -31,7 +33,11 @@ describe("API authentication", () => {
       refresh: vi.fn().mockResolvedValue(true),
       login: vi.fn().mockResolvedValue(undefined),
     };
-    configureApiAuth(adapter);
+    disposeAuth = configureApiAuth(adapter);
+  });
+
+  afterEach(() => {
+    if (typeof disposeAuth === "function") disposeAuth();
   });
 
   it("retries one authenticated 401 with the refreshed token", async () => {
@@ -112,5 +118,98 @@ describe("API authentication", () => {
     expect(requestHeaders(fetchMock.mock.calls[0]).has("Content-Type")).toBe(
       false,
     );
+  });
+
+  it("uploads attachments through the protected helper with browser-owned multipart headers", async () => {
+    const fetchMock = vi
+      .spyOn(globalThis, "fetch")
+      .mockResolvedValueOnce(jsonResponse(200, { results: [] }));
+    const first = new File(["first"], "first.txt", { type: "text/plain" });
+    const second = new File(["second"], "second.txt", { type: "text/plain" });
+
+    await ticketsApi.uploadAttachments("MHC-1", [first, second]);
+
+    expect(fetchMock.mock.calls[0][0]).toBe(
+      "/api/v1/tickets/MHC-1/attachments/",
+    );
+    const init = fetchMock.mock.calls[0][1] as RequestInit;
+    expect(init.body).toBeInstanceOf(FormData);
+    expect(Array.from((init.body as FormData).getAll("files"))).toEqual([
+      first,
+      second,
+    ]);
+    expect(requestHeaders(fetchMock.mock.calls[0]).get("Authorization")).toBe(
+      "Bearer old-token",
+    );
+    expect(requestHeaders(fetchMock.mock.calls[0]).has("Content-Type")).toBe(
+      false,
+    );
+  });
+
+  it("refreshes and retries an attachment upload only once", async () => {
+    const fetchMock = vi
+      .spyOn(globalThis, "fetch")
+      .mockResolvedValueOnce(jsonResponse(401, { detail: "expired" }))
+      .mockResolvedValueOnce(jsonResponse(200, { results: [] }));
+
+    await ticketsApi.uploadAttachments("MHC-2", [
+      new File(["proof"], "proof.txt"),
+    ]);
+
+    expect(fetchMock).toHaveBeenCalledTimes(2);
+    expect(requestHeaders(fetchMock.mock.calls[1]).get("Authorization")).toBe(
+      "Bearer new-token",
+    );
+    expect(adapter.refresh).toHaveBeenCalledOnce();
+  });
+});
+
+describe("API adapter lifecycle", () => {
+  it("an old disposer cannot clear a newer adapter", async () => {
+    const oldAdapter: ApiAuthAdapter = {
+      getAccessToken: vi.fn().mockResolvedValue("old-token"),
+      refresh: vi.fn().mockResolvedValue(true),
+      login: vi.fn().mockResolvedValue(undefined),
+    };
+    const newAdapter: ApiAuthAdapter = {
+      getAccessToken: vi.fn().mockResolvedValue("new-token"),
+      refresh: vi.fn().mockResolvedValue(true),
+      login: vi.fn().mockResolvedValue(undefined),
+    };
+    const disposeOld = configureApiAuth(oldAdapter) as unknown as () => void;
+    const disposeNew = configureApiAuth(newAdapter) as unknown as () => void;
+    const fetchMock = vi
+      .spyOn(globalThis, "fetch")
+      .mockResolvedValueOnce(jsonResponse(200, { ok: true }));
+
+    disposeOld();
+    await api("/tickets/");
+
+    expect(requestHeaders(fetchMock.mock.calls[0]).get("Authorization")).toBe(
+      "Bearer new-token",
+    );
+    disposeNew();
+  });
+
+  it("fails protected requests closed after disposal while public calls remain usable", async () => {
+    const adapter: ApiAuthAdapter = {
+      getAccessToken: vi.fn().mockResolvedValue("token"),
+      refresh: vi.fn().mockResolvedValue(true),
+      login: vi.fn().mockResolvedValue(undefined),
+    };
+    const dispose = configureApiAuth(adapter) as unknown as () => void;
+    const fetchMock = vi
+      .spyOn(globalThis, "fetch")
+      .mockResolvedValueOnce(jsonResponse(200, { status: "ok" }));
+
+    dispose();
+
+    await expect(api("/tickets/")).rejects.toThrow(/authentication/i);
+    expect(fetchMock).not.toHaveBeenCalled();
+
+    await expect(api("/health", { auth: false })).resolves.toEqual({
+      status: "ok",
+    });
+    expect(fetchMock).toHaveBeenCalledOnce();
   });
 });

@@ -55,6 +55,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
   const navigate = useNavigate();
   const isDevAuth = isDevAuthEnabled();
   const initializationRef = useRef<Promise<AuthSnapshot> | null>(null);
+  const refreshRef = useRef<Promise<string | null> | null>(null);
   const [snapshot, setSnapshot] = useState<AuthSnapshot>({
     state: "loading",
     user: null,
@@ -62,20 +63,41 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     expiresAt: null,
   });
 
+  const getInitialization = useCallback((): Promise<AuthSnapshot> => {
+    if (!initializationRef.current) {
+      initializationRef.current = initializeSession(isDevAuth);
+    }
+    return initializationRef.current;
+  }, [isDevAuth]);
+
   const getAccessToken = useCallback(
     async (forceRefresh = false): Promise<string | null> => {
       if (isDevAuth) return DEV_TOKEN;
+      const initialized = await getInitialization();
+      if (initialized.state !== "authenticated") return null;
       const keycloak = getKeycloak();
-      if (forceRefresh) await keycloak.updateToken(30);
+      if (forceRefresh) {
+        if (!refreshRef.current) {
+          refreshRef.current = keycloak
+            .updateToken(30)
+            .then(() => keycloak.token ?? null)
+            .finally(() => {
+              refreshRef.current = null;
+            });
+        }
+        return refreshRef.current;
+      }
       return keycloak.token ?? null;
     },
-    [isDevAuth],
+    [getInitialization, isDevAuth],
   );
 
   const login = useCallback(
     async (returnTo?: string): Promise<void> => {
-      if (returnTo && isLocalReturnPath(returnTo)) {
-        sessionStorage.setItem(RETURN_TO_KEY, returnTo);
+      if (returnTo !== undefined) {
+        const normalized = normalizeReturnPath(returnTo);
+        if (normalized) sessionStorage.setItem(RETURN_TO_KEY, normalized);
+        else sessionStorage.removeItem(RETURN_TO_KEY);
       }
       if (isDevAuth) return;
       await getKeycloak().login({
@@ -102,16 +124,12 @@ export function AuthProvider({ children }: { children: ReactNode }) {
   }, [getAccessToken]);
 
   useLayoutEffect(() => {
-    configureApiAuth({ getAccessToken, refresh, login });
+    return configureApiAuth({ getAccessToken, refresh, login });
   }, [getAccessToken, login, refresh]);
 
   useEffect(() => {
     let active = true;
-    if (!initializationRef.current) {
-      initializationRef.current = initializeSession(isDevAuth);
-    }
-
-    void initializationRef.current.then((nextSnapshot) => {
+    void getInitialization().then((nextSnapshot) => {
       if (!active) return;
       setSnapshot(nextSnapshot);
       if (nextSnapshot.state === "authenticated") {
@@ -123,7 +141,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     return () => {
       active = false;
     };
-  }, [isDevAuth, navigate]);
+  }, [getInitialization, navigate]);
 
   const value = useMemo<AuthContextValue>(
     () => ({
@@ -215,12 +233,21 @@ function stringArrayClaim(value: unknown): string[] {
     : [];
 }
 
-function isLocalReturnPath(path: string): boolean {
-  return path.startsWith("/") && !path.startsWith("//");
+function normalizeReturnPath(path: string): string | null {
+  if (!path.startsWith("/")) return null;
+  try {
+    const url = new URL(path, window.location.origin);
+    if (url.origin !== window.location.origin || !url.pathname.startsWith("/")) {
+      return null;
+    }
+    return `${url.pathname}${url.search}${url.hash}`;
+  } catch {
+    return null;
+  }
 }
 
 function consumeReturnPath(): string | null {
   const path = sessionStorage.getItem(RETURN_TO_KEY);
   sessionStorage.removeItem(RETURN_TO_KEY);
-  return path && isLocalReturnPath(path) ? path : null;
+  return path ? normalizeReturnPath(path) : null;
 }

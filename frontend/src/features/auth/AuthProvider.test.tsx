@@ -1,10 +1,12 @@
 import { useState } from "react";
 import { screen, waitFor } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
+import { useQuery } from "@tanstack/react-query";
 import type { KeycloakProfile, KeycloakTokenParsed } from "keycloak-js";
 import { useLocation } from "react-router-dom";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { renderWithProviders } from "@/test/render";
+import { api } from "@/lib/api";
 import { AuthProvider, useAuth } from "./AuthProvider";
 import { getKeycloak, initKeycloak, isDevAuthEnabled } from "./keycloak";
 
@@ -68,8 +70,32 @@ function AuthProbe() {
       <button onClick={() => void auth.getAccessToken(true).then(setToken)}>
         refresh token
       </button>
+      <button
+        onClick={() =>
+          void Promise.all([
+            auth.getAccessToken(true),
+            auth.getAccessToken(true),
+          ]).then((tokens) => setToken(tokens.join(",")))
+        }
+      >
+        refresh twice
+      </button>
     </div>
   );
+}
+
+function ProtectedQueryProbe() {
+  const query = useQuery({
+    queryKey: ["protected-probe"],
+    queryFn: () => api<{ ok: boolean }>("/tickets/"),
+    retry: false,
+  });
+  return <output>{query.data?.ok ? "protected ready" : "protected waiting"}</output>;
+}
+
+function LoginPathProbe({ returnTo }: { returnTo: string }) {
+  const auth = useAuth();
+  return <button onClick={() => void auth.login(returnTo)}>login path</button>;
 }
 
 function LocationProbe() {
@@ -188,6 +214,95 @@ describe("AuthProvider", () => {
     expect(screen.getByLabelText("token")).toHaveTextContent("fresh-token");
   });
 
+  it("coalesces concurrent forced token refreshes", async () => {
+    const user = userEvent.setup();
+    vi.mocked(initKeycloak).mockResolvedValue({
+      status: "authenticated",
+      token: "access-token",
+    });
+    keycloak.updateToken.mockImplementation(async () => {
+      keycloak.token = "fresh-token";
+      return true;
+    });
+    renderWithProviders(
+      <AuthProvider>
+        <AuthProbe />
+      </AuthProvider>,
+    );
+    await waitFor(() =>
+      expect(screen.getByLabelText("state")).toHaveTextContent("authenticated"),
+    );
+
+    await user.click(screen.getByRole("button", { name: "refresh twice" }));
+
+    expect(keycloak.updateToken).toHaveBeenCalledOnce();
+    expect(screen.getByLabelText("token")).toHaveTextContent(
+      "fresh-token,fresh-token",
+    );
+  });
+
+  it("does not start a protected query before deferred initialization settles", async () => {
+    let finishInitialization!: (value: {
+      status: "authenticated";
+      token: string;
+    }) => void;
+    vi.mocked(initKeycloak).mockReturnValue(
+      new Promise((resolve) => {
+        finishInitialization = resolve;
+      }),
+    );
+    const fetchMock = vi
+      .spyOn(globalThis, "fetch")
+      .mockResolvedValue(new Response(JSON.stringify({ ok: true }), { status: 200 }));
+    renderWithProviders(
+      <AuthProvider>
+        <ProtectedQueryProbe />
+      </AuthProvider>,
+    );
+
+    await waitFor(() => expect(initKeycloak).toHaveBeenCalledOnce());
+    expect(fetchMock).not.toHaveBeenCalled();
+    expect(keycloak.updateToken).not.toHaveBeenCalled();
+    expect(keycloak.login).not.toHaveBeenCalled();
+
+    finishInitialization({ status: "authenticated", token: "access-token" });
+    expect(await screen.findByText("protected ready")).toBeInTheDocument();
+    expect(fetchMock).toHaveBeenCalledOnce();
+  });
+
+  it("clears its API adapter on unmount and registers a fresh one on remount", async () => {
+    vi.mocked(initKeycloak).mockResolvedValue({
+      status: "authenticated",
+      token: "access-token",
+    });
+    const fetchMock = vi
+      .spyOn(globalThis, "fetch")
+      .mockResolvedValue(new Response(JSON.stringify({ ok: true }), { status: 200 }));
+    const first = renderWithProviders(
+      <AuthProvider>
+        <AuthProbe />
+      </AuthProvider>,
+    );
+    await waitFor(() =>
+      expect(screen.getByLabelText("state")).toHaveTextContent("authenticated"),
+    );
+
+    first.unmount();
+    await expect(api("/tickets/")).rejects.toThrow(/authentication/i);
+    expect(fetchMock).not.toHaveBeenCalled();
+
+    renderWithProviders(
+      <AuthProvider>
+        <AuthProbe />
+      </AuthProvider>,
+    );
+    await waitFor(() =>
+      expect(screen.getByLabelText("state")).toHaveTextContent("authenticated"),
+    );
+    await expect(api("/tickets/")).resolves.toEqual({ ok: true });
+    expect(fetchMock).toHaveBeenCalledOnce();
+  });
+
   it("returns the explicit development identity and raw token only when enabled", async () => {
     const user = userEvent.setup();
     vi.mocked(isDevAuthEnabled).mockReturnValue(true);
@@ -243,6 +358,47 @@ describe("AuthProvider", () => {
     expect(keycloak.login).toHaveBeenCalledWith({
       redirectUri: `${window.location.origin}/login`,
     });
+  });
+
+  it.each([
+    "//evil.example/path",
+    "/\\evil.example/path",
+    "https://evil.example/path",
+    "tickets without a leading slash",
+    "http://[malformed",
+  ])("clears a previous return path for invalid input %s", async (returnTo) => {
+    const user = userEvent.setup();
+    sessionStorage.setItem(RETURN_TO_KEY, "/previous");
+    renderWithProviders(
+      <AuthProvider>
+        <LoginPathProbe returnTo={returnTo} />
+      </AuthProvider>,
+    );
+    await waitFor(() =>
+      expect(initKeycloak).toHaveBeenCalledOnce(),
+    );
+
+    await user.click(screen.getByRole("button", { name: "login path" }));
+
+    expect(sessionStorage.getItem(RETURN_TO_KEY)).toBeNull();
+  });
+
+  it("stores a normalized local pathname, encoded query, and hash", async () => {
+    const user = userEvent.setup();
+    renderWithProviders(
+      <AuthProvider>
+        <LoginPathProbe
+          returnTo="/tickets/../queue?return=%2Ftickets%3Fpriority%3DP1#summary"
+        />
+      </AuthProvider>,
+    );
+    await waitFor(() => expect(initKeycloak).toHaveBeenCalledOnce());
+
+    await user.click(screen.getByRole("button", { name: "login path" }));
+
+    expect(sessionStorage.getItem(RETURN_TO_KEY)).toBe(
+      "/queue?return=%2Ftickets%3Fpriority%3DP1#summary",
+    );
   });
 
   it("consumes a stored local return path once after authentication", async () => {

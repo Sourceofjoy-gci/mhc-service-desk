@@ -7,13 +7,6 @@
 
 const API_BASE = (import.meta.env.VITE_API_BASE_URL ?? "") + "/api/v1";
 
-// Kept for the legacy attachment uploader until it is migrated to api().
-export const DEV_AUTH_TOKEN =
-  import.meta.env.VITE_DEV_AUTH === "1" &&
-  import.meta.env.MODE === "development"
-    ? "Bearer dev:demo:ops-agents"
-    : null;
-
 export interface ApiAuthAdapter {
   getAccessToken(forceRefresh?: boolean): Promise<string | null>;
   refresh(): Promise<boolean>;
@@ -31,8 +24,11 @@ export interface RequestOptions {
 
 let authAdapter: ApiAuthAdapter | null = null;
 
-export function configureApiAuth(adapter: ApiAuthAdapter): void {
+export function configureApiAuth(adapter: ApiAuthAdapter): () => void {
   authAdapter = adapter;
+  return () => {
+    if (authAdapter === adapter) authAdapter = null;
+  };
 }
 
 export type Domain = "operational" | "it";
@@ -107,6 +103,18 @@ export interface DashboardData {
   breached_sla: number;
 }
 
+export interface AttachmentUploadResult {
+  id: string;
+  filename: string;
+  size_bytes: number;
+  scan_status: "pending" | "clean" | "infected" | "error";
+  scan_signature: string;
+}
+
+export interface AttachmentUploadResponse {
+  results: AttachmentUploadResult[];
+}
+
 export class ApiError extends Error {
   status: number;
   body: unknown;
@@ -117,17 +125,26 @@ export class ApiError extends Error {
   }
 }
 
+export class ApiAuthUnavailableError extends Error {
+  constructor() {
+    super("Authentication is not ready for protected API requests");
+  }
+}
+
 export async function api<T>(path: string, opts: RequestOptions = {}): Promise<T> {
   const usesAuth = opts.auth !== false;
+  const requestAuth = authAdapter;
   const isFormData =
     typeof FormData !== "undefined" && opts.body instanceof FormData;
   const headers: Record<string, string> = { ...opts.headers };
   if (!isFormData && !hasHeader(headers, "Content-Type")) {
     headers["Content-Type"] = "application/json";
   }
-  if (usesAuth && authAdapter) {
-    const token = await authAdapter.getAccessToken();
-    if (token) headers.Authorization = asBearerToken(token);
+  if (usesAuth) {
+    if (!requestAuth) throw new ApiAuthUnavailableError();
+    const token = await requestAuth.getAccessToken();
+    if (!token) throw new ApiAuthUnavailableError();
+    headers.Authorization = asBearerToken(token);
   }
 
   const r = await fetch(API_BASE + path, {
@@ -145,11 +162,11 @@ export async function api<T>(path: string, opts: RequestOptions = {}): Promise<T
     let body: unknown = null;
     try { body = await r.json(); } catch { /* non-JSON */ }
     const error = new ApiError(r.status, body);
-    if (r.status === 401 && usesAuth && authAdapter) {
+    if (r.status === 401 && usesAuth && requestAuth) {
       let refreshed = false;
       if (opts.retry401 !== false) {
         try {
-          refreshed = await authAdapter.refresh();
+          refreshed = await requestAuth.refresh();
         } catch {
           refreshed = false;
         }
@@ -165,7 +182,7 @@ export async function api<T>(path: string, opts: RequestOptions = {}): Promise<T
         }
       }
       try {
-        await authAdapter.login(
+        await requestAuth.login(
           window.location.pathname + window.location.search,
         );
       } catch {
@@ -210,6 +227,14 @@ export const ticketsApi = {
       body: { body },
     }),
   dashboard: () => api<DashboardData>(`/tickets/dashboard/operational/`),
+  uploadAttachments: (number: string, files: readonly File[]) => {
+    const form = new FormData();
+    for (const file of files) form.append("files", file);
+    return api<AttachmentUploadResponse>(`/tickets/${number}/attachments/`, {
+      method: "POST",
+      body: form,
+    });
+  },
   publicIntake: (data: {
     request_type_code: string;
     service_code: string;

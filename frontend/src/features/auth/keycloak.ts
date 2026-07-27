@@ -7,7 +7,21 @@ export type AuthState =
   | { status: "authenticated"; token: string; profile?: KeycloakProfile; expiresAt?: number }
   | { status: "error"; error: string };
 
-let keycloak: Keycloak | null = null;
+interface KeycloakLifecycle {
+  keycloak: Keycloak | null;
+  initialization: Promise<AuthState> | null;
+}
+
+const LIFECYCLE_KEY = Symbol.for("mhc-ticketing.keycloak-lifecycle");
+const globalLifecycle = globalThis as typeof globalThis & {
+  [key: symbol]: KeycloakLifecycle | undefined;
+};
+const lifecycle =
+  globalLifecycle[LIFECYCLE_KEY] ??
+  (globalLifecycle[LIFECYCLE_KEY] = {
+    keycloak: null,
+    initialization: null,
+  });
 
 export function isDevAuthEnabled(): boolean {
   return (
@@ -17,17 +31,33 @@ export function isDevAuthEnabled(): boolean {
 }
 
 export function getKeycloak(): Keycloak {
-  if (!keycloak) {
-    keycloak = new Keycloak({
+  if (!lifecycle.keycloak) {
+    lifecycle.keycloak = new Keycloak({
       url: import.meta.env.VITE_KEYCLOAK_URL,
       realm: import.meta.env.VITE_KEYCLOAK_REALM,
       clientId: import.meta.env.VITE_KEYCLOAK_CLIENT_ID,
     });
   }
-  return keycloak;
+  return lifecycle.keycloak;
 }
 
-export async function initKeycloak(): Promise<AuthState> {
+export function initKeycloak(): Promise<AuthState> {
+  if (!lifecycle.initialization) {
+    lifecycle.initialization = initializeKeycloak().then(
+      (state) => {
+        if (state.status === "error") lifecycle.initialization = null;
+        return state;
+      },
+      (error: unknown) => {
+        lifecycle.initialization = null;
+        throw error;
+      },
+    );
+  }
+  return lifecycle.initialization;
+}
+
+async function initializeKeycloak(): Promise<AuthState> {
   const kc = getKeycloak();
   try {
     const authenticated = await kc.init({
@@ -45,6 +75,7 @@ export async function initKeycloak(): Promise<AuthState> {
       expiresAt: kc.tokenParsed?.exp,
     };
   } catch (err) {
+    lifecycle.keycloak = null;
     return { status: "error", error: err instanceof Error ? err.message : String(err) };
   }
 }

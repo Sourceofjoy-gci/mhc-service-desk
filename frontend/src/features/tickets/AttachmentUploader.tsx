@@ -16,37 +16,7 @@ import { Field, FieldGroup, FieldLabel } from "@/components/ui/field";
 import { Input } from "@/components/ui/input";
 import { Separator } from "@/components/ui/separator";
 import { Spinner } from "@/components/ui/spinner";
-import { DEV_AUTH_TOKEN } from "../../lib/api";
-
-interface UploadResult {
-  id: string;
-  filename: string;
-  size_bytes: number;
-  scan_status: "pending" | "clean" | "infected" | "error";
-  scan_signature: string;
-}
-
-interface UploadResponse {
-  results: UploadResult[];
-}
-
-async function uploadFiles(
-  number: string,
-  files: File[],
-): Promise<UploadResponse> {
-  const form = new FormData();
-  for (const f of files) form.append("files", f);
-  const r = await fetch(`/api/v1/tickets/${number}/attachments/`, {
-    method: "POST",
-    body: form,
-    headers: DEV_AUTH_TOKEN ? { Authorization: DEV_AUTH_TOKEN } : {},
-  });
-  if (!r.ok) {
-    const body = await r.text();
-    throw new Error(`upload failed: ${r.status} ${body.slice(0, 200)}`);
-  }
-  return r.json();
-}
+import { ticketsApi } from "@/lib/api";
 
 export default function AttachmentUploader({
   ticketNumber,
@@ -55,7 +25,8 @@ export default function AttachmentUploader({
 }) {
   const [files, setFiles] = useState<File[]>([]);
   const upload = useMutation({
-    mutationFn: (fs: File[]) => uploadFiles(ticketNumber, fs),
+    mutationFn: (selectedFiles: File[]) =>
+      ticketsApi.uploadAttachments(ticketNumber, selectedFiles),
     onSuccess: () => {
       setFiles([]);
       toast.success("Attachments uploaded");
