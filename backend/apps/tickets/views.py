@@ -10,6 +10,7 @@ import logging
 from django.db.models import Q
 from rest_framework import serializers, status, viewsets
 from rest_framework.decorators import action, api_view, permission_classes, throttle_classes
+from rest_framework.exceptions import PermissionDenied
 from rest_framework.permissions import AllowAny, IsAuthenticated
 from rest_framework.response import Response
 from rest_framework.throttling import AnonRateThrottle
@@ -78,6 +79,14 @@ class TicketViewSet(viewsets.ModelViewSet):
     lookup_field = "number"
     lookup_value_regex = "[A-Z]{2}-\\d{6}-\\d{6}"
     pagination_class = TicketCursorPagination
+
+    def permission_denied(self, request, message=None, code=None):
+        if self.action == "work_state" and request.user.is_authenticated:
+            raise PermissionDenied(
+                detail="You cannot perform this ticket action.",
+                code="ticket_action_forbidden",
+            )
+        return super().permission_denied(request, message=message, code=code)
 
     def get_serializer_class(self):
         if self.action in (
@@ -155,7 +164,7 @@ class TicketViewSet(viewsets.ModelViewSet):
         detail=True,
         methods=["patch"],
         url_path="work-state",
-        permission_classes=[IsAuthenticated],
+        permission_classes=[IsAuthenticated, ScopePermission],
     )
     def work_state(self, request, number=None):
         ticket = self.get_object()

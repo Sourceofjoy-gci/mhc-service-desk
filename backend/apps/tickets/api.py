@@ -142,14 +142,18 @@ class TicketDetailSerializer(TicketListSerializer):
                 "can_change_confidentiality": False,
             }
 
-        can_update = can_update_work_state(user, obj)
+        can_update = can_update_work_state(user, obj, request=request)
         can_self_assign = can_update and obj.assignee_id is None
         return {
             "can_update_work_state": can_update,
             "can_self_assign": can_self_assign,
             "self_assignee_id": str(user.id) if can_self_assign else None,
-            "can_reassign": can_reassign(user),
-            "can_change_confidentiality": can_change_confidentiality(user),
+            "can_reassign": can_reassign(user, ticket=obj, request=request),
+            "can_change_confidentiality": can_change_confidentiality(
+                user,
+                ticket=obj,
+                request=request,
+            ),
         }
 
     class Meta(TicketListSerializer.Meta):

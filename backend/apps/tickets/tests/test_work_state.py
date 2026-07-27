@@ -6,7 +6,7 @@ import pytest
 from django.utils.dateparse import parse_datetime
 
 from apps.audit.models import AuditEvent
-from apps.identity_access.models import User
+from apps.identity_access.models import Role, User, UserRole
 from apps.tickets.models import OutboxEvent, Ticket
 from apps.tickets.services import (
     TicketConflictError,
@@ -187,6 +187,28 @@ def test_auditor_cannot_update_work_state(basic_world):
             expected_updated_at=_expected(ticket),
             changes={"team": "Audit"},
         )
+
+
+def test_persisted_auditor_cannot_update_with_mutable_token_groups(basic_world):
+    actor = _user(["ops-supervisors"])
+    auditor_role = Role.objects.create(keycloak_role="auditors", name="Auditor")
+    UserRole.objects.create(user=actor, role=auditor_role)
+    ticket = _ticket(basic_world)
+    previous_updated_at = ticket.updated_at
+
+    with pytest.raises(TicketPermissionError):
+        update_work_state(
+            ticket_id=ticket.id,
+            actor=actor,
+            expected_updated_at=_expected(ticket),
+            changes={"team": "Must not persist"},
+        )
+
+    ticket.refresh_from_db()
+    assert ticket.team == ""
+    assert ticket.updated_at == previous_updated_at
+    assert not AuditEvent.objects.filter(object_id=str(ticket.id)).exists()
+    assert not OutboxEvent.objects.filter(aggregate_id=str(ticket.id)).exists()
 
 
 def test_stale_update_returns_current_timestamp_and_changes_nothing(basic_world):

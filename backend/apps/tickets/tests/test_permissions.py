@@ -5,11 +5,12 @@ from uuid import uuid4
 import pytest
 from django.contrib.auth.models import Group
 
-from apps.identity_access.models import User
+from apps.identity_access.models import Role, User, UserRole
 from apps.tickets.models import Ticket
 from apps.tickets.permissions import (
     can_change_confidentiality,
     can_reassign,
+    can_update_work_state,
     eligible_assignee_queryset,
     user_groups,
 )
@@ -71,6 +72,9 @@ def test_eligible_assignees_are_active_and_match_ticket_domain(basic_world):
     _user(groups=["ops-agents"], active=False)
     _user(groups=["auditors"])
     _user(groups=["ops-agents", "auditors"])
+    persisted_auditor = _user(groups=["ops-agents"])
+    auditor_role = Role.objects.create(keycloak_role="auditors", name="Auditor")
+    UserRole.objects.create(user=persisted_auditor, role=auditor_role)
     status = Status.objects.get(domain="operational", code="new")
     ticket = Ticket.objects.create(
         number="OP-202607-900001",
@@ -91,3 +95,23 @@ def test_eligible_assignees_are_active_and_match_ticket_domain(basic_world):
         operational_supervisor.id,
         administrator.id,
     }
+
+
+def test_inactive_elevated_user_has_no_mutating_permissions(basic_world):
+    user = _user(groups=["ops-supervisors"], active=False)
+    status = Status.objects.get(domain="operational", code="new")
+    ticket = Ticket.objects.create(
+        number="OP-202607-900002",
+        domain="operational",
+        title="Inactive permissions",
+        status=status,
+        channel="web",
+        requester=basic_world["contact"],
+        service=basic_world["gen_info"],
+        request_type=basic_world["gen_info"].request_types.get(),
+        office=basic_world["office"],
+    )
+
+    assert can_reassign(user) is False
+    assert can_change_confidentiality(user) is False
+    assert can_update_work_state(user, ticket) is False

@@ -230,13 +230,13 @@ def update_work_state(
     if "assignee" in changes:
         target_id = changes["assignee"]
         if target_id is None:
-            if not can_reassign(actor):
+            if not can_reassign(actor, ticket=locked):
                 raise TicketPermissionError
         else:
             is_self_assignment = locked.assignee_id is None and target_id == actor.id
             if is_self_assignment:
                 pass
-            elif not can_reassign(actor):
+            elif not can_reassign(actor, ticket=locked):
                 raise TicketPermissionError
             elif not eligible_assignee_queryset(locked).filter(id=target_id).exists():
                 raise TicketValidationError({"assignee": ["Select a valid assignee."]})
@@ -248,7 +248,10 @@ def update_work_state(
     for field in WORK_STATE_FIELDS - {"assignee"}:
         if field not in changes:
             continue
-        if field == "confidentiality" and not can_change_confidentiality(actor):
+        if field == "confidentiality" and not can_change_confidentiality(
+            actor,
+            ticket=locked,
+        ):
             raise TicketPermissionError
         before[field] = getattr(locked, field)
         setattr(locked, field, changes[field])

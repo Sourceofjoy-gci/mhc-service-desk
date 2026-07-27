@@ -8,8 +8,9 @@ from django.urls import reverse
 from django.utils.dateparse import parse_datetime
 from rest_framework.test import APIClient
 
-from apps.identity_access.models import User
-from apps.tickets.models import Ticket
+from apps.audit.models import AuditEvent
+from apps.identity_access.models import Role, User, UserRole
+from apps.tickets.models import OutboxEvent, Ticket
 from apps.workflow.models import Status
 
 pytestmark = pytest.mark.django_db
@@ -51,6 +52,11 @@ def _client(user: User | None = None) -> APIClient:
     if user is not None:
         client.force_authenticate(user=user)
     return client
+
+
+def _grant_persisted_auditor(user: User) -> None:
+    role = Role.objects.create(keycloak_role="auditors", name="Auditor")
+    UserRole.objects.create(user=user, role=role)
 
 
 def _patch(client: APIClient, ticket: Ticket, data: dict):
@@ -295,3 +301,65 @@ def test_capabilities_use_request_local_group_snapshot(basic_world):
     )
     assert update.status_code == 200
     assert update.data["assignee"] == user.id
+
+
+def test_persisted_auditor_has_no_mutation_capabilities(basic_world):
+    user = _user(["ops-supervisors"])
+    _grant_persisted_auditor(user)
+    ticket = _ticket(basic_world)
+    client = _client(user)
+
+    detail = client.get(reverse("tickets-detail", args=[ticket.number]))
+
+    assert detail.status_code == 200
+    assert detail.data["capabilities"] == {
+        "can_update_work_state": False,
+        "can_self_assign": False,
+        "self_assignee_id": None,
+        "can_reassign": False,
+        "can_change_confidentiality": False,
+    }
+
+
+def test_persisted_auditor_patch_is_forbidden_and_has_no_side_effects(basic_world):
+    user = _user(["ops-supervisors"])
+    _grant_persisted_auditor(user)
+    ticket = _ticket(basic_world)
+    previous_updated_at = ticket.updated_at
+
+    update = _patch(
+        _client(user),
+        ticket,
+        {"updated_at": ticket.updated_at.isoformat(), "team": "Must not persist"},
+    )
+
+    assert update.status_code == 403
+    assert update.data == {
+        "code": "ticket_action_forbidden",
+        "detail": "You cannot perform this ticket action.",
+        "fields": {},
+        "correlation_id": CORRELATION_ID,
+    }
+    ticket.refresh_from_db()
+    assert ticket.team == ""
+    assert ticket.updated_at == previous_updated_at
+    assert not AuditEvent.objects.filter(object_id=str(ticket.id)).exists()
+    assert not OutboxEvent.objects.filter(aggregate_id=str(ticket.id)).exists()
+
+
+def test_inactive_elevated_user_has_no_mutating_capabilities(basic_world):
+    user = _user(["ops-supervisors"])
+    user.is_active = False
+    user.save(update_fields=["is_active"])
+    ticket = _ticket(basic_world)
+
+    response = _client(user).get(reverse("tickets-detail", args=[ticket.number]))
+
+    assert response.status_code == 200
+    assert response.data["capabilities"] == {
+        "can_update_work_state": False,
+        "can_self_assign": False,
+        "self_assignee_id": None,
+        "can_reassign": False,
+        "can_change_confidentiality": False,
+    }
