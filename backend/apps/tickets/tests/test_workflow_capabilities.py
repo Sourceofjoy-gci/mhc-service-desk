@@ -5,11 +5,14 @@ from uuid import uuid4
 
 import pytest
 
+from apps.audit.models import AuditEvent
 from apps.identity_access.models import Role, User, UserRole
+from apps.identity_access.scope import get_authority_snapshot
+from apps.tickets import services
 from apps.tickets.api import TicketDetailSerializer, TicketListSerializer
-from apps.tickets.models import Ticket
+from apps.tickets.models import OutboxEvent, Ticket
 from apps.tickets.workflow import available_transitions
-from apps.workflow.models import Status, Transition
+from apps.workflow.models import Status, Transition, TransitionHistory
 
 pytestmark = pytest.mark.django_db
 
@@ -152,3 +155,153 @@ def test_required_fields_reason_is_exposed_as_requirement(basic_world):
             "requires_reason": True,
         }
     ]
+
+
+def test_persisted_operational_scope_denies_conflicting_it_group_direct_service(
+    basic_world,
+):
+    actor = _user(["it-agents"])
+    operational_role = Role.objects.get(keycloak_role="ops-agents")
+    UserRole.objects.create(user=actor, role=operational_role)
+    ticket = _ticket(basic_world, domain="it")
+    previous_updated_at = ticket.updated_at
+
+    assert not available_transitions(ticket, actor).exists()
+    with pytest.raises(services.TicketPermissionError):
+        services.transition_ticket(
+            ticket_id=ticket.id,
+            actor=actor,
+            expected_updated_at=ticket.updated_at,
+            to_status_code="triage",
+        )
+
+    ticket.refresh_from_db()
+    assert ticket.status.code == "new"
+    assert ticket.updated_at == previous_updated_at
+    assert not TransitionHistory.objects.filter(ticket=ticket).exists()
+    assert not AuditEvent.objects.filter(object_id=str(ticket.id)).exists()
+    assert not OutboxEvent.objects.filter(aggregate_id=str(ticket.id)).exists()
+
+
+@pytest.mark.parametrize("dimension", ["office", "service", "queue"])
+def test_persisted_ticket_dimensions_are_enforced_before_required_roles(
+    basic_world,
+    dimension,
+):
+    actor = _user(["ops-supervisors"])
+    role = Role.objects.create(
+        keycloak_role=f"scoped-{dimension}",
+        name=f"Scoped {dimension}",
+        scopes=[{"domain": "operational", dimension: str(uuid4())}],
+    )
+    UserRole.objects.create(user=actor, role=role)
+    ticket = _ticket(basic_world)
+    transition = Transition.objects.get(
+        domain=ticket.domain,
+        from_status=ticket.status,
+        to_status__code="triage",
+    )
+    transition.required_role = "ops-supervisors"
+    transition.save(update_fields=["required_role"])
+
+    assert not available_transitions(ticket, actor).exists()
+
+
+def test_matching_persisted_scope_and_restricted_boundaries_are_enforced(basic_world):
+    regular = _user(["ops-agents"])
+    regular_role = Role.objects.get(keycloak_role="ops-agents")
+    UserRole.objects.create(user=regular, role=regular_role)
+    restricted = _ticket(basic_world)
+    restricted.confidentiality = Ticket.Confidentiality.RESTRICTED
+    restricted.save(update_fields=["confidentiality"])
+
+    assert not available_transitions(restricted, regular).exists()
+
+    supervisor = _user(["ops-supervisors"])
+    supervisor_role = Role.objects.create(
+        keycloak_role="ops-supervisors",
+        name="Operational supervisor",
+    )
+    UserRole.objects.create(user=supervisor, role=supervisor_role)
+    assert available_transitions(restricted, supervisor).exists()
+
+    responder = _user(["security-responders"])
+    responder_role = Role.objects.create(
+        keycloak_role="security-responders",
+        name="Security responder",
+    )
+    UserRole.objects.create(user=responder, role=responder_role)
+    normal = _ticket(basic_world)
+    assert not available_transitions(normal, responder).exists()
+    assert available_transitions(restricted, responder).exists()
+
+
+def test_explicit_immutable_snapshot_can_be_shared_by_capability_and_execution(
+    basic_world,
+):
+    actor = _user(["ops-agents"])
+    ticket = _ticket(basic_world)
+    snapshot = get_authority_snapshot(actor)
+
+    assert available_transitions(ticket, actor, snapshot=snapshot).exists()
+    updated = services.transition_ticket(
+        ticket_id=ticket.id,
+        actor=actor,
+        snapshot=snapshot,
+        expected_updated_at=ticket.updated_at,
+        to_status_code="triage",
+    )
+    assert updated.status.code == "triage"
+
+
+def test_cached_auditor_snapshot_stays_denied_after_assignment_is_removed(basic_world):
+    actor = _user(["ops-agents"])
+    auditor_role = Role.objects.create(keycloak_role="auditors", name="Auditor")
+    assignment = UserRole.objects.create(user=actor, role=auditor_role)
+    ticket = _ticket(basic_world)
+    request = SimpleNamespace(user=actor)
+    snapshot = get_authority_snapshot(actor, request=request)
+    assignment.delete()
+
+    listing = TicketListSerializer(ticket, context={"request": request}).data
+    detail = TicketDetailSerializer(ticket, context={"request": request}).data
+
+    assert "auditor" in snapshot.capabilities
+    assert listing["available_transition_codes"] == []
+    assert detail["available_transitions"] == []
+    with pytest.raises(services.TicketPermissionError):
+        services.transition_ticket(
+            ticket_id=ticket.id,
+            actor=actor,
+            request=request,
+            expected_updated_at=ticket.updated_at,
+            to_status_code="triage",
+        )
+
+
+def test_cached_operator_snapshot_stays_allowed_after_auditor_assignment_is_added(
+    basic_world,
+):
+    actor = _user(["ops-agents"])
+    ticket = _ticket(basic_world)
+    request = SimpleNamespace(user=actor)
+    snapshot = get_authority_snapshot(actor, request=request)
+    auditor_role = Role.objects.create(keycloak_role="auditors", name="Auditor")
+    UserRole.objects.create(user=actor, role=auditor_role)
+
+    listing = TicketListSerializer(ticket, context={"request": request}).data
+    detail = TicketDetailSerializer(ticket, context={"request": request}).data
+
+    assert "auditor" not in snapshot.capabilities
+    assert listing["available_transition_codes"] == ["triage"]
+    assert [item["to_status"] for item in detail["available_transitions"]] == [
+        "triage"
+    ]
+    updated = services.transition_ticket(
+        ticket_id=ticket.id,
+        actor=actor,
+        request=request,
+        expected_updated_at=ticket.updated_at,
+        to_status_code="triage",
+    )
+    assert updated.status.code == "triage"

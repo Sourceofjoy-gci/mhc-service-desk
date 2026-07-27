@@ -157,6 +157,7 @@ class TicketViewSet(viewsets.ModelViewSet):
                 reason=serializer.validated_data.get("reason", ""),
                 resolution_code=serializer.validated_data.get("resolution_code", ""),
                 resolution_summary=serializer.validated_data.get("resolution_summary", ""),
+                request=request,
             )
         except services.TransitionError as exc:
             return _ticket_action_error(

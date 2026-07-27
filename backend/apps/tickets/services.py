@@ -286,6 +286,8 @@ def transition_ticket(
     reason: str = "",
     resolution_code: str = "",
     resolution_summary: str = "",
+    request=None,
+    snapshot=None,
 ) -> Ticket:
     """Atomically validate and apply an optimistic workflow transition."""
     locked = (
@@ -304,7 +306,12 @@ def transition_ticket(
     ).first()
     if workflow_transition is None:
         raise TransitionError
-    if not available_transitions(locked, actor).filter(
+    if not available_transitions(
+        locked,
+        actor,
+        request=request,
+        snapshot=snapshot,
+    ).filter(
         id=workflow_transition.id
     ).exists():
         raise TicketPermissionError

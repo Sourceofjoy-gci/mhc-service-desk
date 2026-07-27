@@ -111,7 +111,7 @@ class TicketListSerializer(serializers.ModelSerializer):
         actor = getattr(request, "user", None)
         return [
             transition.to_status.code
-            for transition in available_transitions(obj, actor)
+            for transition in available_transitions(obj, actor, request=request)
         ]
 
 
@@ -177,7 +177,7 @@ class TicketDetailSerializer(TicketListSerializer):
                 "requires_resolution": transition.sets_resolution,
                 "requires_reason": "reason" in transition.required_fields,
             }
-            for transition in available_transitions(obj, actor)
+            for transition in available_transitions(obj, actor, request=request)
         ]
 
     class Meta(TicketListSerializer.Meta):
