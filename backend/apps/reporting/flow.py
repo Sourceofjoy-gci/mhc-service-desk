@@ -30,13 +30,21 @@ from apps.workflow.models import Status
 def flow_metrics(request):
     """Compute flow metrics for a domain over a window."""
     domain = request.query_params.get("domain")
-    if domain and not has_unrestricted_domain_scope(request.user, domain):
+    if domain and not has_unrestricted_domain_scope(
+        request.user,
+        domain,
+        request=request,
+    ):
         raise PermissionDenied(code="domain_scope_required")
     days = int(request.query_params.get("days", "30"))
     now = datetime.now(tz=timezone.utc)
     window_start = now.timestamp() - days * 86400
 
-    qs = scope_ticket_queryset(request.user, Ticket.objects.all()).filter(
+    qs = scope_ticket_queryset(
+        request.user,
+        Ticket.objects.all(),
+        request=request,
+    ).filter(
         created_at__gte=datetime.fromtimestamp(window_start, tz=timezone.utc)
     )
     if domain:

@@ -278,32 +278,56 @@ def _snapshot_from_groups(user) -> AuthoritySnapshot:
 def _build_authority_snapshot(user) -> AuthoritySnapshot:
     if not user or not user.is_authenticated:
         return AuthoritySnapshot()
-    if user.is_superuser:
-        admin_scope = Scope(domain="admin")
-        return AuthoritySnapshot(
-            scopes=(admin_scope,),
-            restricted_scope_keys=frozenset({_scope_key(admin_scope)}),
-        )
 
     assignments = _active_persisted_assignments(user)
     if assignments is not None:
-        return _snapshot_from_persisted(assignments)
-    return _snapshot_from_groups(user)
+        resolved = _snapshot_from_persisted(assignments)
+    else:
+        resolved = _snapshot_from_groups(user)
+
+    if not user.is_superuser:
+        return resolved
+
+    admin_scope = Scope(domain="admin")
+    return AuthoritySnapshot(
+        scopes=(admin_scope,),
+        capabilities=resolved.capabilities,
+        restricted_scope_keys=frozenset({_scope_key(admin_scope)}),
+    )
 
 
-def _authority_snapshot(user) -> AuthoritySnapshot:
-    """Return the immutable authority snapshot shared by one user/request."""
-    snapshot = getattr(user, "_authority_snapshot", None) if user else None
-    if isinstance(snapshot, AuthoritySnapshot):
-        return snapshot
+def get_authority_snapshot(user, *, request=None) -> AuthoritySnapshot:
+    """Resolve authority once per request, or freshly for a standalone caller."""
+    if request is not None:
+        snapshot = getattr(request, "_authority_snapshot", None)
+        snapshot_user = getattr(request, "_authority_snapshot_user", None)
+        if isinstance(snapshot, AuthoritySnapshot) and snapshot_user is user:
+            return snapshot
 
     snapshot = _build_authority_snapshot(user)
-    if user is not None:
-        user._authority_snapshot = snapshot
+    if request is not None:
+        request._authority_snapshot = snapshot
+        request._authority_snapshot_user = user
     return snapshot
 
 
-def get_user_scopes(user) -> list[Scope]:
+def _resolved_authority_snapshot(
+    user,
+    *,
+    request=None,
+    snapshot: AuthoritySnapshot | None = None,
+) -> AuthoritySnapshot:
+    if snapshot is not None:
+        return snapshot
+    return get_authority_snapshot(user, request=request)
+
+
+def get_user_scopes(
+    user,
+    *,
+    request=None,
+    snapshot: AuthoritySnapshot | None = None,
+) -> list[Scope]:
     """Compute canonical scopes from persisted assignments or group fallback.
 
     Active ``UserRole`` assignments take precedence so an office, service,
@@ -317,15 +341,30 @@ def get_user_scopes(user) -> list[Scope]:
         system-admins       -> admin
         auditors            -> audit (read-only across domains)
     """
-    return list(_authority_snapshot(user).scopes)
+    return list(
+        _resolved_authority_snapshot(user, request=request, snapshot=snapshot).scopes
+    )
 
 
-def is_auditor(user) -> bool:
-    return "auditor" in _authority_snapshot(user).capabilities
+def is_auditor(
+    user,
+    *,
+    request=None,
+    snapshot: AuthoritySnapshot | None = None,
+) -> bool:
+    authority = _resolved_authority_snapshot(user, request=request, snapshot=snapshot)
+    return "auditor" in authority.capabilities
 
 
-def has_unrestricted_domain_scope(user, domain: str) -> bool:
-    user._scopes = list(_authority_snapshot(user).scopes)
+def has_unrestricted_domain_scope(
+    user,
+    domain: str,
+    *,
+    request=None,
+    snapshot: AuthoritySnapshot | None = None,
+) -> bool:
+    authority = _resolved_authority_snapshot(user, request=request, snapshot=snapshot)
+    user._scopes = list(authority.scopes)
     return any(
         scope.domain == "admin"
         or (scope.domain == domain and not scope.restricted_only)
@@ -333,17 +372,29 @@ def has_unrestricted_domain_scope(user, domain: str) -> bool:
     )
 
 
-def can_view_restricted(user) -> bool:
+def can_view_restricted(
+    user,
+    *,
+    request=None,
+    snapshot: AuthoritySnapshot | None = None,
+) -> bool:
     """Restricted tickets (security, fraud, complaint) require a narrower
     audience. Only supervisors, leads, security responders, admins and
     auditors can see them (PRD §14.2, §23.1)."""
-    return bool(_authority_snapshot(user).restricted_scope_keys)
+    authority = _resolved_authority_snapshot(user, request=request, snapshot=snapshot)
+    return bool(authority.restricted_scope_keys)
 
 
-def scope_ticket_queryset(user, queryset: QuerySet) -> QuerySet:
+def scope_ticket_queryset(
+    user,
+    queryset: QuerySet,
+    *,
+    request=None,
+    snapshot: AuthoritySnapshot | None = None,
+) -> QuerySet:
     """Limit a ticket queryset to the caller's explicit scopes."""
-    snapshot = _authority_snapshot(user)
-    scopes = list(snapshot.scopes)
+    authority = _resolved_authority_snapshot(user, request=request, snapshot=snapshot)
+    scopes = list(authority.scopes)
     user._scopes = scopes
     branches: list[Q] = []
 
@@ -362,7 +413,7 @@ def scope_ticket_queryset(user, queryset: QuerySet) -> QuerySet:
             branch &= Q(queue_id=scope.queue_id)
         if scope.restricted_only:
             branch &= Q(confidentiality="restricted")
-        elif _scope_key(scope) not in snapshot.restricted_scope_keys:
+        elif _scope_key(scope) not in authority.restricted_scope_keys:
             branch &= ~Q(confidentiality="restricted")
         branches.append(branch)
 
@@ -377,7 +428,7 @@ def scope_ticket_queryset(user, queryset: QuerySet) -> QuerySet:
 
 def attach_scopes(request):
     """DRF authenticator-friendly helper: set ``request.user._scopes``."""
-    request.user._scopes = get_user_scopes(request.user)
+    request.user._scopes = get_user_scopes(request.user, request=request)
     return request.user
 
 
@@ -395,7 +446,11 @@ class ScopePermission(permissions.BasePermission):
     def has_permission(self, request, view):
         if getattr(view, "_public", False):
             return True
-        if is_auditor(request.user) and request.method not in permissions.SAFE_METHODS:
+        snapshot = get_authority_snapshot(request.user, request=request)
+        if (
+            is_auditor(request.user, snapshot=snapshot)
+            and request.method not in permissions.SAFE_METHODS
+        ):
             return False
         scope = getattr(view, "required_scope", None) or self.required_scope
         if scope is None:

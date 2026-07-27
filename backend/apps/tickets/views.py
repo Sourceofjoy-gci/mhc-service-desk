@@ -66,6 +66,7 @@ class TicketViewSet(viewsets.ModelViewSet):
         return scope_ticket_queryset(
             self.request.user,
             super().get_queryset(),
+            request=self.request,
         ).order_by("-created_at", "id")
 
     def filter_queryset(self, queryset):
@@ -323,7 +324,11 @@ def operational_dashboard(request):
     explicit unrestricted-domain check.
     """
     attach_scopes(request)
-    if not has_unrestricted_domain_scope(request.user, "operational"):
+    if not has_unrestricted_domain_scope(
+        request.user,
+        "operational",
+        request=request,
+    ):
         return Response(
             {"detail": "Operational scope required."},
             status=status.HTTP_403_FORBIDDEN,
@@ -333,7 +338,11 @@ def operational_dashboard(request):
     from django.db.models import Count
     from django.utils import timezone
 
-    qs = scope_ticket_queryset(request.user, Ticket.objects.all()).filter(domain="operational")
+    qs = scope_ticket_queryset(
+        request.user,
+        Ticket.objects.all(),
+        request=request,
+    ).filter(domain="operational")
     now = timezone.now()
 
     return Response({

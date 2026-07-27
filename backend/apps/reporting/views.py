@@ -33,6 +33,7 @@ def export_tickets_csv(request):
     qs = scope_ticket_queryset(
         request.user,
         Ticket.objects.select_related("status", "requester", "service", "office"),
+        request=request,
     ).order_by("-created_at", "-id")
 
     params = request.query_params
@@ -41,7 +42,11 @@ def export_tickets_csv(request):
     if "priority" in params:
         qs = qs.filter(priority=params["priority"])
     if "domain" in params:
-        if not has_unrestricted_domain_scope(request.user, params["domain"]):
+        if not has_unrestricted_domain_scope(
+            request.user,
+            params["domain"],
+            request=request,
+        ):
             raise PermissionDenied(code="domain_scope_required")
         qs = qs.filter(domain=params["domain"])
 
@@ -75,10 +80,18 @@ def operational_dashboard(request):
     from datetime import timedelta
 
     attach_scopes(request)
-    if not has_unrestricted_domain_scope(request.user, "operational"):
+    if not has_unrestricted_domain_scope(
+        request.user,
+        "operational",
+        request=request,
+    ):
         raise PermissionDenied(code="domain_scope_required")
 
-    qs = scope_ticket_queryset(request.user, Ticket.objects.all()).filter(domain="operational")
+    qs = scope_ticket_queryset(
+        request.user,
+        Ticket.objects.all(),
+        request=request,
+    ).filter(domain="operational")
     now = timezone.now()
     return Response({
         "totals": {
@@ -109,10 +122,14 @@ def it_dashboard(request):
     from datetime import timedelta
 
     attach_scopes(request)
-    if not has_unrestricted_domain_scope(request.user, "it"):
+    if not has_unrestricted_domain_scope(request.user, "it", request=request):
         raise PermissionDenied(code="domain_scope_required")
 
-    qs = scope_ticket_queryset(request.user, Ticket.objects.all()).filter(domain="it")
+    qs = scope_ticket_queryset(
+        request.user,
+        Ticket.objects.all(),
+        request=request,
+    ).filter(domain="it")
     now = timezone.now()
     return Response({
         "totals": {

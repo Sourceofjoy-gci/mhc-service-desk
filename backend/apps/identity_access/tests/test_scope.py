@@ -7,6 +7,7 @@ from uuid import uuid4
 
 import pytest
 from django.utils import timezone
+from rest_framework.test import APIRequestFactory, force_authenticate
 
 from apps.catalogue.models import RequestType, Service
 from apps.identity_access.models import Role, User, UserRole
@@ -22,6 +23,7 @@ from apps.identity_access.scope import (
 )
 from apps.organisations.models import Office, ServiceLocation
 from apps.tickets.models import Ticket
+from apps.tickets.views import operational_dashboard
 from apps.workflow.models import Status
 
 pytestmark = pytest.mark.django_db
@@ -474,6 +476,41 @@ def test_persisted_auditor_is_denied_every_unsafe_method(method):
     assert not permission.has_permission(request, SimpleNamespace())
 
 
+@pytest.mark.parametrize("method", ["POST", "PUT", "PATCH", "DELETE"])
+@pytest.mark.parametrize(
+    "authority_source",
+    [
+        "auditors-group",
+        "persisted-auditor",
+        "persisted-admin-and-auditor",
+    ],
+)
+def test_superuser_auditor_is_denied_every_unsafe_method(method, authority_source):
+    user = _persisted_user(groups=["auditors"] if authority_source == "auditors-group" else [])
+    user.is_superuser = True
+    if authority_source in {"persisted-auditor", "persisted-admin-and-auditor"}:
+        _assign_persisted_role(user, keycloak_role="auditor")
+    if authority_source == "persisted-admin-and-auditor":
+        _assign_persisted_role(user, keycloak_role="admin")
+
+    permission = ScopePermission()
+    request = SimpleNamespace(user=user, method=method)
+
+    assert not permission.has_permission(request, SimpleNamespace())
+
+
+@pytest.mark.parametrize("method", ["POST", "PUT", "PATCH", "DELETE"])
+def test_superuser_persisted_admin_suppresses_auditor_group_fallback(method):
+    user = _persisted_user(groups=["auditors"])
+    user.is_superuser = True
+    _assign_persisted_role(user, keycloak_role="admin")
+
+    permission = ScopePermission()
+    request = SimpleNamespace(user=user, method=method)
+
+    assert permission.has_permission(request, SimpleNamespace())
+
+
 @pytest.mark.parametrize(
     ("keycloak_role", "expected_titles"),
     [
@@ -728,6 +765,22 @@ class _ChangingAssignmentManager:
         return []
 
 
+class _RevocableAssignmentManager:
+    def __init__(self, assignment):
+        self.assignments = [assignment]
+        self.read_count = 0
+
+    def select_related(self, *args):
+        return self
+
+    def all(self):
+        self.read_count += 1
+        return list(self.assignments)
+
+    def revoke(self):
+        self.assignments = []
+
+
 @pytest.mark.usefixtures("_confidentiality_tickets")
 def test_ticket_scope_decision_uses_one_immutable_authority_snapshot():
     assignment = SimpleNamespace(
@@ -751,3 +804,36 @@ def test_ticket_scope_decision_uses_one_immutable_authority_snapshot():
 
     assert manager.read_count == 1
     assert set(visible.values_list("title", flat=True)) == {"Operational normal"}
+
+
+def test_reused_user_gets_fresh_authority_snapshot_on_the_next_request():
+    assignment = SimpleNamespace(
+        role=SimpleNamespace(
+            keycloak_role="ordinary-operational-role",
+            scopes=[{"domain": "operational"}],
+        ),
+        office_id=None,
+        expires_at=None,
+    )
+    manager = _RevocableAssignmentManager(assignment)
+    user = SimpleNamespace(
+        is_authenticated=True,
+        is_superuser=False,
+        pk=uuid4(),
+        user_roles=manager,
+        _groups=[],
+    )
+    factory = APIRequestFactory()
+
+    first_request = factory.get("/api/tickets/dashboard/operational/")
+    force_authenticate(first_request, user=user)
+    first_response = operational_dashboard(first_request)
+
+    manager.revoke()
+    second_request = factory.get("/api/tickets/dashboard/operational/")
+    force_authenticate(second_request, user=user)
+    second_response = operational_dashboard(second_request)
+
+    assert first_response.status_code == 200
+    assert second_response.status_code == 403
+    assert manager.read_count == 2
