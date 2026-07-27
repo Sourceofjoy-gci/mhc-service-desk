@@ -156,7 +156,7 @@ REST_FRAMEWORK = {
         "rest_framework.parsers.MultiPartParser",
     ],
     "EXCEPTION_HANDLER": "apps.identity_access.exception_handlers.problem_details_handler",
-    "DEFAULT_PAGINATION_CLASS": "rest_framework.pagination.CursorPagination",
+    "DEFAULT_PAGINATION_CLASS": "apps.identity_access.pagination.SafeCursorPagination",
     "PAGE_SIZE": 50,
     "DEFAULT_VERSIONING_CLASS": "rest_framework.versioning.URLPathVersioning",
     "DEFAULT_THROTTLE_CLASSES": [

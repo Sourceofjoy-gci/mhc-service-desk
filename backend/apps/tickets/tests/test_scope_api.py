@@ -55,7 +55,7 @@ def _list_titles(groups):
     force_authenticate(request, user=_user(groups))
     response = TicketViewSet.as_view({"get": "list"})(request)
     assert response.status_code == 200
-    return {row["title"] for row in response.data}
+    return {row["title"] for row in response.data["results"]}
 
 
 def test_security_responder_lists_only_restricted_tickets_and_cannot_retrieve_normal(

@@ -16,6 +16,7 @@ from rest_framework.throttling import AnonRateThrottle
 
 from apps.contacts.models import Contact
 from apps.identity_access.authentication import KeycloakJWTAuthentication
+from apps.identity_access.pagination import TicketCursorPagination
 from apps.identity_access.scope import (
     ScopePermission,
     attach_scopes,
@@ -55,7 +56,7 @@ class TicketViewSet(viewsets.ModelViewSet):
     permission_classes = [IsAuthenticated, ScopePermission]
     lookup_field = "number"
     lookup_value_regex = "[A-Z]{2}-\\d{6}-\\d{6}"
-    pagination_class = None  # we return plain lists; M3+ will add cursor pagination
+    pagination_class = TicketCursorPagination
 
     def get_serializer_class(self):
         if self.action in ("retrieve", "transition", "messages", "notes", "links"):
@@ -67,7 +68,7 @@ class TicketViewSet(viewsets.ModelViewSet):
             self.request.user,
             super().get_queryset(),
             request=self.request,
-        ).order_by("-created_at", "id")
+        ).order_by("priority", "-created_at", "-id")
 
     def filter_queryset(self, queryset):
         qs = super().filter_queryset(queryset)
