@@ -1,4 +1,4 @@
-import { NavLink, Link, useLocation } from "react-router-dom";
+import { NavLink, Link, Outlet, useLocation } from "react-router-dom";
 import {
   LayoutDashboard,
   ListChecks,
@@ -7,10 +7,10 @@ import {
   User,
   Globe,
   HeartPulse,
-  LogIn,
-  Search,
+  LogOut,
   Scale,
 } from "lucide-react";
+import { useAuth, type AuthUser } from "@/features/auth/AuthProvider";
 import { cn } from "@/lib/utils";
 import { BrandLockup } from "./brand";
 import { ThemeToggle } from "./theme-toggle";
@@ -25,6 +25,7 @@ import {
   DropdownMenuTrigger,
 } from "./ui/dropdown-menu";
 import { Avatar, AvatarFallback } from "./ui/avatar";
+import { Badge } from "./ui/badge";
 import { Separator } from "./ui/separator";
 
 interface NavItem {
@@ -79,8 +80,11 @@ function NavGroup({ label, items }: { label: string; items: NavItem[] }) {
   );
 }
 
-export function AppShell({ children }: { children: React.ReactNode }) {
+export function AppShell() {
   const location = useLocation();
+  const { user, isDevAuth, logout } = useAuth();
+  const displayName = user?.displayName || user?.username || "Signed-in user";
+
   return (
     <div className="flex min-h-full flex-col bg-background">
       <header className="sticky top-0 z-40 border-b border-border/60 bg-background/80 backdrop-blur supports-[backdrop-filter]:bg-background/60">
@@ -101,21 +105,16 @@ export function AppShell({ children }: { children: React.ReactNode }) {
           </div>
 
           <div className="ml-auto flex items-center gap-2">
-            <Button
-              variant="ghost"
-              size="sm"
-              className="hidden text-muted-foreground lg:inline-flex"
-              aria-label="Search"
-            >
-              <Search data-icon="inline-start" />
-              <span className="text-xs">Search</span>
-              <kbd className="ml-2 hidden rounded border border-border/60 bg-muted px-2 font-mono text-[10px] text-muted-foreground lg:inline">
-                ⌘K
-              </kbd>
-            </Button>
+            {isDevAuth ? (
+              <Badge variant="secondary">Development access</Badge>
+            ) : null}
             <ThemeToggle />
             <Separator orientation="vertical" className="mx-1 h-6" />
-            <UserMenu />
+            <UserMenu
+              user={user}
+              displayName={displayName}
+              onLogout={() => void logout()}
+            />
           </div>
         </div>
 
@@ -141,7 +140,7 @@ export function AppShell({ children }: { children: React.ReactNode }) {
         key={location.pathname}
         className="mx-auto w-full max-w-7xl flex-1 animate-fade-in px-4 py-6 sm:px-6"
       >
-        {children}
+        <Outlet />
       </main>
 
       <footer className="border-t border-border/60 bg-muted/30 py-4 text-center text-xs text-muted-foreground">
@@ -160,15 +159,27 @@ export function AppShell({ children }: { children: React.ReactNode }) {
   );
 }
 
-function UserMenu() {
+function UserMenu({
+  user,
+  displayName,
+  onLogout,
+}: {
+  user: AuthUser | null;
+  displayName: string;
+  onLogout: () => void;
+}) {
   return (
     <DropdownMenu>
       <DropdownMenuTrigger
         render={
-          <Button variant="ghost" size="icon" aria-label="User menu">
+          <Button
+            variant="ghost"
+            size="icon"
+            aria-label={`User menu for ${displayName}`}
+          >
             <Avatar className="size-7">
               <AvatarFallback className="bg-primary/15 text-xs font-semibold text-primary">
-                OP
+                {initials(displayName)}
               </AvatarFallback>
             </Avatar>
           </Button>
@@ -178,18 +189,18 @@ function UserMenu() {
         <DropdownMenuGroup>
           <DropdownMenuLabel className="font-normal">
             <div className="flex flex-col gap-1">
-              <span className="text-sm font-medium">Signed in (dev)</span>
+              <span className="text-sm font-medium">{displayName}</span>
               <span className="text-xs text-muted-foreground">
-                Bearer dev:demo:ops-agents
+                {user?.username ?? "Authenticated account"}
               </span>
             </div>
           </DropdownMenuLabel>
         </DropdownMenuGroup>
         <DropdownMenuSeparator />
         <DropdownMenuGroup>
-          <DropdownMenuItem render={<Link to="/login" />}>
-            <LogIn data-icon="inline-start" />
-            Sign in with Keycloak
+          <DropdownMenuItem onClick={onLogout} closeOnClick>
+            <LogOut data-icon="inline-start" />
+            Sign out
           </DropdownMenuItem>
           <DropdownMenuItem render={<Link to="/health" />}>
             <HeartPulse data-icon="inline-start" />
@@ -199,4 +210,11 @@ function UserMenu() {
       </DropdownMenuContent>
     </DropdownMenu>
   );
+}
+
+function initials(displayName: string): string {
+  const parts = displayName.trim().split(/\s+/).filter(Boolean);
+  if (parts.length === 0) return "U";
+  if (parts.length === 1) return parts[0].slice(0, 2).toUpperCase();
+  return `${parts[0][0]}${parts.at(-1)?.[0] ?? ""}`.toUpperCase();
 }

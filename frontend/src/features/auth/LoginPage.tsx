@@ -1,4 +1,3 @@
-import { useEffect, useState } from "react";
 import {
   Shield,
   KeyRound,
@@ -7,7 +6,7 @@ import {
   AlertCircle,
   ArrowRight,
 } from "lucide-react";
-import { getKeycloak, initKeycloak, type AuthState } from "./keycloak";
+import { useAuth, type AuthContextValue } from "./AuthProvider";
 import { Button } from "@/components/ui/button";
 import {
   Card,
@@ -24,16 +23,7 @@ import { Skeleton } from "@/components/ui/skeleton";
 import { BrandLockup } from "@/components/brand";
 
 export default function LoginPage() {
-  const [auth, setAuth] = useState<AuthState>({ status: "idle" });
-
-  useEffect(() => {
-    if (auth.status === "idle") {
-      setAuth({ status: "loading" });
-      initKeycloak()
-        .then((state) => setAuth(state))
-        .catch((e) => setAuth({ status: "error", error: String(e) }));
-    }
-  }, [auth.status]);
+  const auth = useAuth();
 
   return (
     <div className="grid min-h-[calc(100vh-12rem)] items-center gap-8 lg:grid-cols-2">
@@ -53,24 +43,23 @@ export default function LoginPage() {
             </CardDescription>
           </CardHeader>
           <CardContent>
-            {auth.status === "loading" || auth.status === "idle" ? (
+            {auth.state === "loading" ? (
               <SignInSkeleton />
-            ) : auth.status === "error" ? (
-              <ErrorPanel error={auth.error} />
-            ) : auth.status === "unauthenticated" ? (
+            ) : auth.state === "error" ? (
+              <ErrorPanel
+                error={auth.error ?? "The identity service is unavailable."}
+              />
+            ) : auth.state === "unauthenticated" ? (
               <SignInPanel />
             ) : (
               <SignedInPanel
-                username={auth.profile?.username ?? "—"}
-                expiresAt={auth.expiresAt ?? 0}
+                username={auth.user?.displayName ?? auth.user?.username ?? "—"}
+                expiresAt={auth.expiresAt}
               />
             )}
           </CardContent>
           <CardFooter className="flex-col">
-            <AuthAction
-              auth={auth}
-              onRetry={() => setAuth({ status: "idle" })}
-            />
+            <AuthAction auth={auth} />
           </CardFooter>
         </Card>
       </div>
@@ -168,50 +157,42 @@ function SignedInPanel({
   expiresAt,
 }: {
   username: string;
-  expiresAt: number;
+  expiresAt: number | null;
 }) {
   return (
     <Alert>
       <CheckCircle2 className="text-success-foreground" />
       <AlertTitle>Signed in as {username}</AlertTitle>
       <AlertDescription>
-        Token expires {new Date(expiresAt * 1000).toLocaleString()}
+        {expiresAt
+          ? `Token expires ${new Date(expiresAt * 1000).toLocaleString()}`
+          : "Session expiry is managed by the identity provider."}
       </AlertDescription>
     </Alert>
   );
 }
 
-function AuthAction({
-  auth,
-  onRetry,
-}: {
-  auth: AuthState;
-  onRetry: () => void;
-}) {
-  if (auth.status === "loading" || auth.status === "idle") {
+function AuthAction({ auth }: { auth: AuthContextValue }) {
+  if (auth.state === "loading") {
     return <Skeleton className="h-10 w-full" />;
   }
 
-  if (auth.status === "error") {
+  if (auth.state === "error") {
     return (
-      <Button className="w-full" onClick={onRetry} variant="outline">
-        Try again
+      <Button
+        className="w-full"
+        onClick={() => void auth.login("/")}
+        variant="outline"
+      >
+        Try sign-in again
         <ArrowRight data-icon="inline-end" />
       </Button>
     );
   }
 
-  if (auth.status === "unauthenticated") {
+  if (auth.state === "unauthenticated") {
     return (
-      <Button
-        className="w-full"
-        onClick={() =>
-          getKeycloak().login({
-            redirectUri: window.location.origin + "/login",
-          })
-        }
-        size="lg"
-      >
+      <Button className="w-full" onClick={() => void auth.login("/")} size="lg">
         <KeyRound data-icon="inline-start" />
         Sign in with Keycloak
         <ArrowRight data-icon="inline-end" />
@@ -223,9 +204,7 @@ function AuthAction({
     <Button
       className="w-full"
       variant="outline"
-      onClick={() =>
-        getKeycloak().logout({ redirectUri: window.location.origin + "/login" })
-      }
+      onClick={() => void auth.logout()}
     >
       <LogOut data-icon="inline-start" />
       Sign out

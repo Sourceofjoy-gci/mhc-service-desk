@@ -1,0 +1,67 @@
+import { HeartPulse, LogIn } from "lucide-react";
+import { Link, NavLink, Outlet, useLocation } from "react-router-dom";
+import { BrandLockup } from "./brand";
+import { ThemeToggle } from "./theme-toggle";
+import { cn } from "@/lib/utils";
+
+const PUBLIC_LINKS = [
+  { to: "/public", label: "Submit a request" },
+  { to: "/health", label: "Service health", icon: HeartPulse },
+  { to: "/login", label: "Staff sign-in", icon: LogIn },
+];
+
+export function PublicShell() {
+  const location = useLocation();
+
+  return (
+    <div className="flex min-h-full flex-col bg-background">
+      <header className="border-b border-border/60">
+        <div className="mx-auto flex w-full max-w-7xl flex-wrap items-center gap-4 px-4 py-3 sm:px-6">
+          <Link
+            to="/public"
+            className="text-foreground no-underline focus-visible:rounded-lg focus-visible:outline-none focus-visible:ring-3 focus-visible:ring-ring/50"
+          >
+            <BrandLockup size="sm" />
+          </Link>
+          <nav
+            aria-label="Public services"
+            className="ml-auto flex items-center gap-1"
+          >
+            {PUBLIC_LINKS.map(({ to, label, icon: Icon }) => (
+              <NavLink
+                key={to}
+                to={to}
+                className={({ isActive }) =>
+                  cn(
+                    "inline-flex min-h-9 items-center gap-2 rounded-lg px-3 text-sm transition-colors",
+                    "focus-visible:outline-none focus-visible:ring-3 focus-visible:ring-ring/50",
+                    isActive
+                      ? "bg-accent font-medium text-accent-foreground"
+                      : "text-muted-foreground hover:bg-accent/70 hover:text-foreground",
+                  )
+                }
+              >
+                {Icon ? (
+                  <Icon className="hidden size-4 sm:block" aria-hidden />
+                ) : null}
+                <span>{label}</span>
+              </NavLink>
+            ))}
+            <ThemeToggle />
+          </nav>
+        </div>
+      </header>
+
+      <main
+        key={location.pathname}
+        className="mx-auto w-full max-w-7xl flex-1 px-4 py-6 sm:px-6"
+      >
+        <Outlet />
+      </main>
+
+      <footer className="border-t border-border/60 py-4 text-center text-xs text-muted-foreground">
+        Master of the High Court · Public services
+      </footer>
+    </div>
+  );
+}
