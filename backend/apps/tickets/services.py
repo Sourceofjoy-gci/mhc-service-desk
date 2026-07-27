@@ -21,6 +21,12 @@ from apps.workflow.models import Status, Transition, TransitionHistory
 
 from .events import record_ticket_event
 from .models import OutboxEvent, Ticket, TicketLink, TicketMessage, TicketNote, Watcher
+from .permissions import (
+    can_change_confidentiality,
+    can_reassign,
+    can_update_work_state,
+    eligible_assignee_queryset,
+)
 
 logger = logging.getLogger(__name__)
 
@@ -134,6 +140,130 @@ def create_ticket(
 
 class TransitionError(Exception):
     """Raised when a requested transition is invalid."""
+
+
+class TicketConflictError(Exception):
+    def __init__(self, current_updated_at):
+        self.current_updated_at = current_updated_at
+
+
+class TicketPermissionError(Exception):
+    pass
+
+
+class TicketValidationError(Exception):
+    def __init__(self, fields: dict[str, list[str]]):
+        self.fields = fields
+
+
+WORK_STATE_FIELDS = {
+    "assignee",
+    "team",
+    "waiting_reason",
+    "blocked_reason",
+    "next_action",
+    "next_action_at",
+    "confidentiality",
+}
+
+
+def _validate_work_state_changes(changes: dict[str, Any]) -> None:
+    fields: dict[str, list[str]] = {}
+    unknown = changes.keys() - WORK_STATE_FIELDS
+    if unknown:
+        fields["changes"] = ["Unsupported work-state field."]
+
+    text_limits = {
+        "team": 128,
+        "waiting_reason": 64,
+        "next_action": 255,
+    }
+    for field, limit in text_limits.items():
+        if field not in changes:
+            continue
+        value = changes[field]
+        if not isinstance(value, str):
+            fields[field] = ["Must be a string."]
+        elif len(value) > limit:
+            fields[field] = [f"Ensure this field has no more than {limit} characters."]
+    if "blocked_reason" in changes and not isinstance(changes["blocked_reason"], str):
+        fields["blocked_reason"] = ["Must be a string."]
+    if (
+        "next_action_at" in changes
+        and changes["next_action_at"] is not None
+        and not isinstance(changes["next_action_at"], datetime)
+    ):
+        fields["next_action_at"] = ["Must be a valid datetime."]
+    if (
+        "confidentiality" in changes
+        and changes["confidentiality"] not in Ticket.Confidentiality.values
+    ):
+        fields["confidentiality"] = ["Select a valid choice."]
+    if fields:
+        raise TicketValidationError(fields)
+
+
+@transaction.atomic
+def update_work_state(
+    *,
+    ticket_id,
+    actor,
+    expected_updated_at,
+    changes: dict[str, Any],
+) -> Ticket:
+    """Atomically validate and apply optimistic work-state changes."""
+    locked = (
+        Ticket.objects.select_for_update(of=("self",))
+        .select_related("assignee")
+        .get(id=ticket_id)
+    )
+    if expected_updated_at != locked.updated_at:
+        raise TicketConflictError(locked.updated_at)
+    if not can_update_work_state(actor, locked):
+        raise TicketPermissionError
+
+    _validate_work_state_changes(changes)
+    before: dict[str, Any] = {}
+    after: dict[str, Any] = {}
+    update_fields: list[str] = []
+
+    if "assignee" in changes:
+        target_id = changes["assignee"]
+        if target_id is None:
+            if not can_reassign(actor):
+                raise TicketPermissionError
+        else:
+            is_self_assignment = locked.assignee_id is None and target_id == actor.id
+            if is_self_assignment:
+                pass
+            elif not can_reassign(actor):
+                raise TicketPermissionError
+            elif not eligible_assignee_queryset(locked).filter(id=target_id).exists():
+                raise TicketValidationError({"assignee": ["Select a valid assignee."]})
+        before["assignee"] = locked.assignee_id
+        locked.assignee_id = target_id
+        after["assignee"] = locked.assignee_id
+        update_fields.append("assignee")
+
+    for field in WORK_STATE_FIELDS - {"assignee"}:
+        if field not in changes:
+            continue
+        if field == "confidentiality" and not can_change_confidentiality(actor):
+            raise TicketPermissionError
+        before[field] = getattr(locked, field)
+        setattr(locked, field, changes[field])
+        after[field] = getattr(locked, field)
+        update_fields.append(field)
+
+    locked.save(update_fields=[*update_fields, "updated_at"])
+    record_ticket_event(
+        ticket=locked,
+        actor_subject=actor.keycloak_subject,
+        action="ticket.work_state.changed",
+        before=before,
+        after=after,
+    )
+    return locked
 
 
 @transaction.atomic

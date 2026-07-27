@@ -35,10 +35,31 @@ from .api import (
     TicketDetailSerializer,
     TicketListSerializer,
     TransitionRequestSerializer,
+    WorkStateRequestSerializer,
 )
 from .models import Ticket
+from .permissions import eligible_assignee_queryset
 
 logger = logging.getLogger(__name__)
+
+
+def _ticket_action_error(request, *, code, detail, fields, response_status):
+    return Response(
+        {
+            "code": code,
+            "detail": detail,
+            "fields": fields,
+            "correlation_id": getattr(request, "correlation_id", ""),
+        },
+        status=response_status,
+    )
+
+
+def _serializer_error_fields(errors):
+    return {
+        field: [str(message) for message in messages]
+        for field, messages in errors.items()
+    }
 
 
 class PublicIntakeThrottle(AnonRateThrottle):
@@ -59,7 +80,15 @@ class TicketViewSet(viewsets.ModelViewSet):
     pagination_class = TicketCursorPagination
 
     def get_serializer_class(self):
-        if self.action in ("retrieve", "transition", "messages", "notes", "links"):
+        if self.action in (
+            "retrieve",
+            "transition",
+            "messages",
+            "notes",
+            "links",
+            "work_state",
+            "assignees",
+        ):
             return TicketDetailSerializer
         return TicketListSerializer
 
@@ -118,7 +147,91 @@ class TicketViewSet(viewsets.ModelViewSet):
         if ticket.domain == "it" and ticket.status.code == "resolved":
             from .it_child import sync_child_status_to_parent
             sync_child_status_to_parent(child=ticket, actor_subject=request.user.keycloak_subject)
-        return Response(TicketDetailSerializer(ticket).data)
+        return Response(
+            TicketDetailSerializer(ticket, context=self.get_serializer_context()).data
+        )
+
+    @action(
+        detail=True,
+        methods=["patch"],
+        url_path="work-state",
+        permission_classes=[IsAuthenticated],
+    )
+    def work_state(self, request, number=None):
+        ticket = self.get_object()
+        serializer = WorkStateRequestSerializer(data=request.data)
+        if not serializer.is_valid():
+            return _ticket_action_error(
+                request,
+                code="invalid_work_state",
+                detail="Work state is invalid.",
+                fields=_serializer_error_fields(serializer.errors),
+                response_status=status.HTTP_400_BAD_REQUEST,
+            )
+
+        changes = dict(serializer.validated_data)
+        expected_updated_at = changes.pop("updated_at")
+        try:
+            updated = services.update_work_state(
+                ticket_id=ticket.id,
+                actor=request.user,
+                expected_updated_at=expected_updated_at,
+                changes=changes,
+            )
+        except services.TicketValidationError as exc:
+            return _ticket_action_error(
+                request,
+                code="invalid_work_state",
+                detail="Work state is invalid.",
+                fields=exc.fields,
+                response_status=status.HTTP_400_BAD_REQUEST,
+            )
+        except services.TicketPermissionError:
+            return _ticket_action_error(
+                request,
+                code="ticket_action_forbidden",
+                detail="You cannot perform this ticket action.",
+                fields={},
+                response_status=status.HTTP_403_FORBIDDEN,
+            )
+        except services.TicketConflictError as exc:
+            current = serializers.DateTimeField().to_representation(
+                exc.current_updated_at
+            )
+            return _ticket_action_error(
+                request,
+                code="stale_ticket",
+                detail="The ticket was updated by another user.",
+                fields={"updated_at": [current]},
+                response_status=status.HTTP_409_CONFLICT,
+            )
+        return Response(
+            TicketDetailSerializer(
+                updated,
+                context=self.get_serializer_context(),
+            ).data
+        )
+
+    @action(detail=True, methods=["get"], url_path="assignees")
+    def assignees(self, request, number=None):
+        ticket = self.get_object()
+        candidates = eligible_assignee_queryset(ticket).order_by(
+            "display_name",
+            "username",
+            "id",
+        )
+        return Response(
+            {
+                "results": [
+                    {
+                        "id": str(candidate.id),
+                        "username": candidate.username,
+                        "display_name": candidate.display_name,
+                    }
+                    for candidate in candidates
+                ]
+            }
+        )
 
     @action(detail=True, methods=["get", "post"], url_path="messages")
     def messages(self, request, number=None):

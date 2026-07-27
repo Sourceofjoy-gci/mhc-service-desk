@@ -11,6 +11,11 @@ from apps.contacts.api import ContactSerializer
 from apps.workflow.models import Status
 
 from .models import OutboxEvent, Ticket, TicketLink, TicketMessage, TicketNote, Watcher
+from .permissions import (
+    can_change_confidentiality,
+    can_reassign,
+    can_update_work_state,
+)
 
 
 class StatusRefSerializer(serializers.ModelSerializer):
@@ -75,7 +80,15 @@ class TicketListSerializer(serializers.ModelSerializer):
         # Compressed view: worst active SLA instance
         from apps.sla.models import SlaInstance
         inst = (
-            SlaInstance.objects.filter(ticket=obj, state__in=["active", "paused_requester", "paused_internal", "paused_it"])
+            SlaInstance.objects.filter(
+                ticket=obj,
+                state__in=[
+                    "active",
+                    "paused_requester",
+                    "paused_internal",
+                    "paused_it",
+                ],
+            )
             .order_by("due_at")
             .first()
         )
@@ -95,7 +108,11 @@ class TicketListSerializer(serializers.ModelSerializer):
 class TicketDetailSerializer(TicketListSerializer):
     description = serializers.CharField()
     requester = ContactSerializer(read_only=True)
-    organisation = serializers.CharField(source="organisation.name", read_only=True, allow_null=True)
+    organisation = serializers.CharField(
+        source="organisation.name",
+        read_only=True,
+        allow_null=True,
+    )
     service = serializers.CharField(source="service.name", read_only=True)
     request_type = serializers.CharField(source="request_type.name", read_only=True)
     office = serializers.CharField(source="office.name", read_only=True)
@@ -111,14 +128,38 @@ class TicketDetailSerializer(TicketListSerializer):
     messages = TicketMessageSerializer(many=True, read_only=True)
     notes = TicketNoteSerializer(many=True, read_only=True)
     links = TicketLinkSerializer(many=True, read_only=True)
+    capabilities = serializers.SerializerMethodField()
+
+    def get_capabilities(self, obj: Ticket) -> dict[str, bool | str | None]:
+        request = self.context.get("request")
+        user = getattr(request, "user", None)
+        if user is None or not user.is_authenticated:
+            return {
+                "can_update_work_state": False,
+                "can_self_assign": False,
+                "self_assignee_id": None,
+                "can_reassign": False,
+                "can_change_confidentiality": False,
+            }
+
+        can_update = can_update_work_state(user, obj)
+        can_self_assign = can_update and obj.assignee_id is None
+        return {
+            "can_update_work_state": can_update,
+            "can_self_assign": can_self_assign,
+            "self_assignee_id": str(user.id) if can_self_assign else None,
+            "can_reassign": can_reassign(user),
+            "can_change_confidentiality": can_change_confidentiality(user),
+        }
 
     class Meta(TicketListSerializer.Meta):
         fields = TicketListSerializer.Meta.fields + (
             "description", "requester", "organisation", "service", "request_type", "office",
             "matter_reference", "tags", "custom_fields",
+            "team", "blocked_reason", "next_action", "next_action_at",
             "resolution_code", "resolution_summary",
             "acknowledged_at", "first_responded_at", "resolved_at", "closed_at",
-            "messages", "notes", "links",
+            "messages", "notes", "links", "capabilities",
         )
 
 
@@ -138,6 +179,20 @@ class MessageCreateSerializer(serializers.Serializer):
 
 class NoteCreateSerializer(serializers.Serializer):
     body = serializers.CharField()
+
+
+class WorkStateRequestSerializer(serializers.Serializer):
+    updated_at = serializers.DateTimeField()
+    assignee = serializers.UUIDField(required=False, allow_null=True)
+    team = serializers.CharField(required=False, allow_blank=True, max_length=128)
+    waiting_reason = serializers.CharField(required=False, allow_blank=True, max_length=64)
+    blocked_reason = serializers.CharField(required=False, allow_blank=True)
+    next_action = serializers.CharField(required=False, allow_blank=True, max_length=255)
+    next_action_at = serializers.DateTimeField(required=False, allow_null=True)
+    confidentiality = serializers.ChoiceField(
+        required=False,
+        choices=Ticket.Confidentiality.choices,
+    )
 
 
 class PublicIntakeSerializer(serializers.Serializer):
