@@ -1,19 +1,23 @@
 """Tests for the scope-based authorisation helpers."""
 from __future__ import annotations
 
+from datetime import timedelta
 from types import SimpleNamespace
 from uuid import uuid4
 
 import pytest
+from django.utils import timezone
 
 from apps.catalogue.models import RequestType, Service
 from apps.identity_access.models import Role, User, UserRole
 from apps.identity_access.scope import (
     Scope,
     ScopePermission,
+    can_view_restricted,
     get_user_scopes,
     has_scope,
     has_unrestricted_domain_scope,
+    is_auditor,
     scope_ticket_queryset,
 )
 from apps.organisations.models import Office, ServiceLocation
@@ -390,7 +394,7 @@ def test_multiple_persisted_scopes_are_combined_with_or(basic_world):
 
 
 def test_persisted_unrestricted_scope_replaces_duplicate_restricted_scope(basic_world):
-    user = _persisted_user(groups=["security-responders"])
+    user = _persisted_user(groups=[])
     role = Role.objects.create(
         keycloak_role="combined-operational",
         name="Combined operational role",
@@ -402,3 +406,141 @@ def test_persisted_unrestricted_scope_replaces_duplicate_restricted_scope(basic_
     UserRole.objects.create(user=user, role=role, office=None)
 
     assert get_user_scopes(user) == [Scope(domain="operational", restricted_only=False)]
+
+    _ticket(
+        basic_world=basic_world,
+        number="OP-202607-300001",
+        domain="operational",
+        title="Mixed normal",
+        confidentiality="normal",
+    )
+    _ticket(
+        basic_world=basic_world,
+        number="OP-202607-300002",
+        domain="operational",
+        title="Mixed restricted",
+        confidentiality="restricted",
+    )
+
+    visible = scope_ticket_queryset(user, Ticket.objects.all())
+
+    assert set(visible.values_list("title", flat=True)) == {
+        "Mixed normal",
+        "Mixed restricted",
+    }
+
+
+@pytest.fixture
+def _confidentiality_tickets(basic_world):
+    for number, domain, title, confidentiality in (
+        ("OP-202607-400001", "operational", "Operational normal", "normal"),
+        ("OP-202607-400002", "operational", "Operational restricted", "restricted"),
+        ("IT-202607-400001", "it", "IT normal", "normal"),
+        ("IT-202607-400002", "it", "IT restricted", "restricted"),
+    ):
+        _ticket(
+            basic_world=basic_world,
+            number=number,
+            domain=domain,
+            title=title,
+            confidentiality=confidentiality,
+        )
+
+
+def _assign_persisted_role(user, *, keycloak_role, scopes=None, expires_at=None):
+    role = Role.objects.create(
+        keycloak_role=keycloak_role,
+        name=keycloak_role,
+        scopes=[] if scopes is None else scopes,
+    )
+    return UserRole.objects.create(
+        user=user,
+        role=role,
+        office=None,
+        expires_at=expires_at,
+    )
+
+
+@pytest.mark.parametrize("method", ["POST", "PUT", "PATCH", "DELETE"])
+def test_persisted_auditor_is_denied_every_unsafe_method(method):
+    user = _persisted_user(groups=[])
+    _assign_persisted_role(user, keycloak_role="auditor")
+
+    permission = ScopePermission()
+    request = SimpleNamespace(user=user, method=method)
+
+    assert not permission.has_permission(request, SimpleNamespace())
+
+
+@pytest.mark.parametrize(
+    ("keycloak_role", "expected_titles"),
+    [
+        (
+            "supervisor-operational",
+            {"Operational normal", "Operational restricted"},
+        ),
+        ("lead-it", {"IT normal", "IT restricted"}),
+        (
+            "admin",
+            {
+                "Operational normal",
+                "Operational restricted",
+                "IT normal",
+                "IT restricted",
+            },
+        ),
+        (
+            "auditor",
+            {
+                "Operational normal",
+                "Operational restricted",
+                "IT normal",
+                "IT restricted",
+            },
+        ),
+        (
+            "security-responders",
+            {"Operational restricted", "IT restricted"},
+        ),
+    ],
+)
+@pytest.mark.usefixtures("_confidentiality_tickets")
+def test_persisted_privileged_role_has_exact_restricted_visibility(
+    keycloak_role,
+    expected_titles,
+):
+    user = _persisted_user(groups=[])
+    _assign_persisted_role(user, keycloak_role=keycloak_role)
+
+    visible = scope_ticket_queryset(user, Ticket.objects.all())
+
+    assert set(visible.values_list("title", flat=True)) == expected_titles
+
+
+@pytest.mark.parametrize("assignment_kind", ["expired", "malformed", "unknown"])
+@pytest.mark.usefixtures("_confidentiality_tickets")
+def test_invalid_persisted_assignment_fails_closed_without_group_capability_fallback(
+    assignment_kind,
+):
+    user = _persisted_user(groups=["auditors", "ops-supervisors"])
+    if assignment_kind == "expired":
+        _assign_persisted_role(
+            user,
+            keycloak_role="auditor",
+            expires_at=timezone.now() - timedelta(seconds=1),
+        )
+    elif assignment_kind == "malformed":
+        _assign_persisted_role(
+            user,
+            keycloak_role="malformed-role",
+            scopes=["not-a-scope", {"restricted_only": True}],
+        )
+    else:
+        _assign_persisted_role(user, keycloak_role="unknown-role")
+
+    visible = scope_ticket_queryset(user, Ticket.objects.all())
+
+    assert get_user_scopes(user) == []
+    assert not is_auditor(user)
+    assert not can_view_restricted(user)
+    assert not visible.exists()

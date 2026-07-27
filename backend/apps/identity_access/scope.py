@@ -30,6 +30,18 @@ _DEFAULT_ROLE_SCOPES = {
         {"domain": "it", "restricted_only": True},
     ),
 }
+_AUDITOR_ROLES = {"auditor", "auditors"}
+_RESTRICTED_VIEW_ROLES = {
+    "supervisor-operational",
+    "ops-supervisors",
+    "lead-it",
+    "it-leads",
+    "admin",
+    "system-admins",
+    "auditor",
+    "auditors",
+    "security-responders",
+}
 
 
 @dataclass(frozen=True)
@@ -80,8 +92,8 @@ def _scope_id(raw_scope: dict, name: str) -> str | None:
     return str(value) if value not in (None, "") else None
 
 
-def _persisted_scopes(user) -> list[Scope] | None:
-    """Return active persisted scopes, or ``None`` when no assignments exist."""
+def _active_persisted_assignments(user) -> list | None:
+    """Return active assignments, preserving ``None`` for the group fallback."""
     assignments = getattr(user, "user_roles", None)
     if assignments is None or not getattr(user, "pk", None):
         return None
@@ -91,17 +103,34 @@ def _persisted_scopes(user) -> list[Scope] | None:
         return None
 
     now = timezone.now()
+    return [
+        assignment
+        for assignment in persisted
+        if assignment.expires_at is None or assignment.expires_at > now
+    ]
+
+
+def _valid_role_scopes(assignment) -> list[dict]:
+    raw_scopes = assignment.role.scopes or _DEFAULT_ROLE_SCOPES.get(
+        assignment.role.keycloak_role,
+        (),
+    )
+    return [
+        raw_scope
+        for raw_scope in raw_scopes
+        if isinstance(raw_scope, dict) and raw_scope.get("domain")
+    ]
+
+
+def _persisted_scopes(user) -> list[Scope] | None:
+    """Return active persisted scopes, or ``None`` when no assignments exist."""
+    assignments = _active_persisted_assignments(user)
+    if assignments is None:
+        return None
+
     scopes: list[Scope] = []
-    for assignment in persisted:
-        if assignment.expires_at is not None and assignment.expires_at <= now:
-            continue
-        raw_scopes = assignment.role.scopes or _DEFAULT_ROLE_SCOPES.get(
-            assignment.role.keycloak_role,
-            (),
-        )
-        for raw_scope in raw_scopes:
-            if not isinstance(raw_scope, dict) or not raw_scope.get("domain"):
-                continue
+    for assignment in assignments:
+        for raw_scope in _valid_role_scopes(assignment):
             office_id = (
                 str(assignment.office_id)
                 if assignment.office_id is not None
@@ -117,6 +146,26 @@ def _persisted_scopes(user) -> list[Scope] | None:
                 )
             )
     return _normalise_scopes(scopes)
+
+
+def _persisted_capabilities(user) -> set[str] | None:
+    assignments = _active_persisted_assignments(user)
+    if assignments is None:
+        return None
+
+    capabilities: set[str] = set()
+    for assignment in assignments:
+        raw_scopes = _valid_role_scopes(assignment)
+        if not raw_scopes:
+            continue
+        role_name = assignment.role.keycloak_role
+        if role_name in _AUDITOR_ROLES:
+            capabilities.add("auditor")
+        if role_name in _RESTRICTED_VIEW_ROLES or any(
+            bool(raw_scope.get("restricted_only", False)) for raw_scope in raw_scopes
+        ):
+            capabilities.add("view_restricted")
+    return capabilities
 
 
 def get_user_scopes(user) -> list[Scope]:
@@ -161,6 +210,9 @@ def get_user_scopes(user) -> list[Scope]:
 
 
 def is_auditor(user) -> bool:
+    persisted_capabilities = _persisted_capabilities(user)
+    if persisted_capabilities is not None:
+        return "auditor" in persisted_capabilities
     return "auditors" in set(getattr(user, "_groups", []) or [])
 
 
@@ -181,6 +233,9 @@ def can_view_restricted(user) -> bool:
         return False
     if user.is_superuser:
         return True
+    persisted_capabilities = _persisted_capabilities(user)
+    if persisted_capabilities is not None:
+        return "view_restricted" in persisted_capabilities
     groups = set(getattr(user, "_groups", []) or [])
     privileged = {
         "ops-supervisors", "it-leads", "security-responders",
