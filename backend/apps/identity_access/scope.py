@@ -7,6 +7,7 @@ The frontend never grants access — it only renders what the backend approves.
 from __future__ import annotations
 
 from dataclasses import dataclass
+from uuid import UUID
 
 from django.db.models import Q, QuerySet
 from django.utils import timezone
@@ -42,6 +43,17 @@ _RESTRICTED_VIEW_ROLES = {
     "auditors",
     "security-responders",
 }
+_VALID_SCOPE_DOMAINS = {"operational", "it", "admin"}
+_SCOPE_DIMENSIONS = ("office", "service", "queue")
+_VALID_SCOPE_KEYS = {
+    "domain",
+    "restricted_only",
+    *(
+        key
+        for dimension in _SCOPE_DIMENSIONS
+        for key in (dimension, f"{dimension}_id")
+    ),
+}
 
 
 @dataclass(frozen=True)
@@ -68,6 +80,18 @@ class Scope:
         return True
 
 
+ScopeKey = tuple[str, str | None, str | None, str | None]
+
+
+@dataclass(frozen=True)
+class AuthoritySnapshot:
+    """One immutable, request-local view of a user's effective authority."""
+
+    scopes: tuple[Scope, ...] = ()
+    capabilities: frozenset[str] = frozenset()
+    restricted_scope_keys: frozenset[ScopeKey] = frozenset()
+
+
 def has_scope(user, required: Scope) -> bool:
     if not user.is_authenticated:
         return False
@@ -78,18 +102,87 @@ def has_scope(user, required: Scope) -> bool:
 
 
 def _normalise_scopes(scopes: list[Scope]) -> list[Scope]:
-    normalised: dict[tuple[str, str | None, str | None, str | None], Scope] = {}
+    normalised: dict[ScopeKey, Scope] = {}
     for scope in scopes:
-        key = (scope.domain, scope.office_id, scope.service_id, scope.queue_id)
+        key = _scope_key(scope)
         existing = normalised.get(key)
         if existing is None or (existing.restricted_only and not scope.restricted_only):
             normalised[key] = scope
     return list(normalised.values())
 
 
-def _scope_id(raw_scope: dict, name: str) -> str | None:
-    value = raw_scope.get(f"{name}_id", raw_scope.get(name))
-    return str(value) if value not in (None, "") else None
+def _scope_key(scope: Scope) -> ScopeKey:
+    return (scope.domain, scope.office_id, scope.service_id, scope.queue_id)
+
+
+def _validated_scope_id(raw_scope: dict, name: str) -> tuple[bool, str | None]:
+    keys = [key for key in (name, f"{name}_id") if key in raw_scope]
+    if len(keys) > 1:
+        return False, None
+    if not keys or raw_scope[keys[0]] is None:
+        return True, None
+
+    value = raw_scope[keys[0]]
+    if not isinstance(value, str):
+        return False, None
+    try:
+        return True, str(UUID(value))
+    except (AttributeError, ValueError):
+        return False, None
+
+
+def _validated_role_scopes(assignment) -> tuple[Scope, ...] | None:
+    """Validate one persisted assignment atomically.
+
+    ``None`` means the assignment is malformed. An empty tuple is a valid but
+    authority-free assignment (for example, an unknown role with no scopes).
+    """
+    configured_scopes = assignment.role.scopes
+    if configured_scopes == []:
+        raw_scopes = _DEFAULT_ROLE_SCOPES.get(
+            assignment.role.keycloak_role,
+            (),
+        )
+    elif isinstance(configured_scopes, list):
+        raw_scopes = configured_scopes
+    else:
+        return None
+
+    scopes: list[Scope] = []
+    for raw_scope in raw_scopes:
+        if not isinstance(raw_scope, dict) or not set(raw_scope) <= _VALID_SCOPE_KEYS:
+            return None
+
+        domain = raw_scope.get("domain")
+        if not isinstance(domain, str) or domain not in _VALID_SCOPE_DOMAINS:
+            return None
+
+        restricted_only = raw_scope.get("restricted_only", False)
+        if type(restricted_only) is not bool:
+            return None
+
+        identifiers: dict[str, str | None] = {}
+        for dimension in _SCOPE_DIMENSIONS:
+            valid, value = _validated_scope_id(raw_scope, dimension)
+            if not valid:
+                return None
+            identifiers[dimension] = value
+
+        office_id = (
+            str(assignment.office_id)
+            if assignment.office_id is not None
+            else identifiers["office"]
+        )
+        scopes.append(
+            Scope(
+                domain=domain,
+                office_id=office_id,
+                service_id=identifiers["service"],
+                queue_id=identifiers["queue"],
+                restricted_only=restricted_only,
+            )
+        )
+    return tuple(scopes)
 
 
 def _active_persisted_assignments(user) -> list | None:
@@ -110,62 +203,104 @@ def _active_persisted_assignments(user) -> list | None:
     ]
 
 
-def _valid_role_scopes(assignment) -> list[dict]:
-    raw_scopes = assignment.role.scopes or _DEFAULT_ROLE_SCOPES.get(
-        assignment.role.keycloak_role,
-        (),
-    )
-    return [
-        raw_scope
-        for raw_scope in raw_scopes
-        if isinstance(raw_scope, dict) and raw_scope.get("domain")
-    ]
-
-
-def _persisted_scopes(user) -> list[Scope] | None:
-    """Return active persisted scopes, or ``None`` when no assignments exist."""
-    assignments = _active_persisted_assignments(user)
-    if assignments is None:
-        return None
-
+def _snapshot_from_persisted(assignments: list) -> AuthoritySnapshot:
     scopes: list[Scope] = []
-    for assignment in assignments:
-        for raw_scope in _valid_role_scopes(assignment):
-            office_id = (
-                str(assignment.office_id)
-                if assignment.office_id is not None
-                else _scope_id(raw_scope, "office")
-            )
-            scopes.append(
-                Scope(
-                    domain=str(raw_scope["domain"]),
-                    office_id=office_id,
-                    service_id=_scope_id(raw_scope, "service"),
-                    queue_id=_scope_id(raw_scope, "queue"),
-                    restricted_only=bool(raw_scope.get("restricted_only", False)),
-                )
-            )
-    return _normalise_scopes(scopes)
-
-
-def _persisted_capabilities(user) -> set[str] | None:
-    assignments = _active_persisted_assignments(user)
-    if assignments is None:
-        return None
-
     capabilities: set[str] = set()
+    restricted_scope_keys: set[ScopeKey] = set()
+
     for assignment in assignments:
-        raw_scopes = _valid_role_scopes(assignment)
-        if not raw_scopes:
+        assignment_scopes = _validated_role_scopes(assignment)
+        if not assignment_scopes:
             continue
+
+        scopes.extend(assignment_scopes)
         role_name = assignment.role.keycloak_role
         if role_name in _AUDITOR_ROLES:
             capabilities.add("auditor")
-        if role_name in _RESTRICTED_VIEW_ROLES or any(
-            bool(raw_scope.get("restricted_only", False)) for raw_scope in raw_scopes
-        ):
-            capabilities.add("view_restricted")
-    return capabilities
+        if role_name in _RESTRICTED_VIEW_ROLES:
+            restricted_scope_keys.update(map(_scope_key, assignment_scopes))
+        restricted_scope_keys.update(
+            _scope_key(scope) for scope in assignment_scopes if scope.restricted_only
+        )
+
+    return AuthoritySnapshot(
+        scopes=tuple(_normalise_scopes(scopes)),
+        capabilities=frozenset(capabilities),
+        restricted_scope_keys=frozenset(restricted_scope_keys),
+    )
+
+
+def _snapshot_from_groups(user) -> AuthoritySnapshot:
+    groups = set(getattr(user, "_groups", []) or [])
+    scopes: list[Scope] = []
+    capabilities: set[str] = set()
+    restricted_scope_keys: set[ScopeKey] = set()
+
+    def add_scope(scope: Scope, *, can_view_restricted_rows: bool = False):
+        scopes.append(scope)
+        if can_view_restricted_rows:
+            restricted_scope_keys.add(_scope_key(scope))
+
+    if "ops-agents" in groups:
+        add_scope(Scope(domain="operational"))
+    if "ops-supervisors" in groups:
+        add_scope(
+            Scope(domain="operational"),
+            can_view_restricted_rows=True,
+        )
+    if "it-agents" in groups:
+        add_scope(Scope(domain="it"))
+    if "it-leads" in groups:
+        add_scope(Scope(domain="it"), can_view_restricted_rows=True)
+    if "security-responders" in groups:
+        add_scope(
+            Scope(domain="operational", restricted_only=True),
+            can_view_restricted_rows=True,
+        )
+        add_scope(
+            Scope(domain="it", restricted_only=True),
+            can_view_restricted_rows=True,
+        )
+    if "system-admins" in groups:
+        add_scope(Scope(domain="admin"), can_view_restricted_rows=True)
+    if "auditors" in groups:
+        capabilities.add("auditor")
+        add_scope(Scope(domain="operational"), can_view_restricted_rows=True)
+        add_scope(Scope(domain="it"), can_view_restricted_rows=True)
+
+    return AuthoritySnapshot(
+        scopes=tuple(_normalise_scopes(scopes)),
+        capabilities=frozenset(capabilities),
+        restricted_scope_keys=frozenset(restricted_scope_keys),
+    )
+
+
+def _build_authority_snapshot(user) -> AuthoritySnapshot:
+    if not user or not user.is_authenticated:
+        return AuthoritySnapshot()
+    if user.is_superuser:
+        admin_scope = Scope(domain="admin")
+        return AuthoritySnapshot(
+            scopes=(admin_scope,),
+            restricted_scope_keys=frozenset({_scope_key(admin_scope)}),
+        )
+
+    assignments = _active_persisted_assignments(user)
+    if assignments is not None:
+        return _snapshot_from_persisted(assignments)
+    return _snapshot_from_groups(user)
+
+
+def _authority_snapshot(user) -> AuthoritySnapshot:
+    """Return the immutable authority snapshot shared by one user/request."""
+    snapshot = getattr(user, "_authority_snapshot", None) if user else None
+    if isinstance(snapshot, AuthoritySnapshot):
+        return snapshot
+
+    snapshot = _build_authority_snapshot(user)
+    if user is not None:
+        user._authority_snapshot = snapshot
+    return snapshot
 
 
 def get_user_scopes(user) -> list[Scope]:
@@ -182,42 +317,15 @@ def get_user_scopes(user) -> list[Scope]:
         system-admins       -> admin
         auditors            -> audit (read-only across domains)
     """
-    if not user or not user.is_authenticated:
-        return []
-    if user.is_superuser:
-        return [Scope(domain="admin")]
-
-    persisted_scopes = _persisted_scopes(user)
-    if persisted_scopes is not None:
-        return persisted_scopes
-
-    groups = set(getattr(user, "_groups", []) or [])
-    scopes: list[Scope] = []
-    if groups & {"ops-agents", "ops-supervisors"}:
-        scopes.append(Scope(domain="operational"))
-    if groups & {"it-agents", "it-leads"}:
-        scopes.append(Scope(domain="it"))
-    if "security-responders" in groups:
-        scopes.append(Scope(domain="operational", restricted_only=True))
-        scopes.append(Scope(domain="it", restricted_only=True))
-    if "system-admins" in groups:
-        scopes.append(Scope(domain="admin"))
-    if "auditors" in groups:
-        scopes.append(Scope(domain="operational"))
-        scopes.append(Scope(domain="it"))
-
-    return _normalise_scopes(scopes)
+    return list(_authority_snapshot(user).scopes)
 
 
 def is_auditor(user) -> bool:
-    persisted_capabilities = _persisted_capabilities(user)
-    if persisted_capabilities is not None:
-        return "auditor" in persisted_capabilities
-    return "auditors" in set(getattr(user, "_groups", []) or [])
+    return "auditor" in _authority_snapshot(user).capabilities
 
 
 def has_unrestricted_domain_scope(user, domain: str) -> bool:
-    user._scopes = get_user_scopes(user)
+    user._scopes = list(_authority_snapshot(user).scopes)
     return any(
         scope.domain == "admin"
         or (scope.domain == domain and not scope.restricted_only)
@@ -229,27 +337,15 @@ def can_view_restricted(user) -> bool:
     """Restricted tickets (security, fraud, complaint) require a narrower
     audience. Only supervisors, leads, security responders, admins and
     auditors can see them (PRD §14.2, §23.1)."""
-    if not user or not user.is_authenticated:
-        return False
-    if user.is_superuser:
-        return True
-    persisted_capabilities = _persisted_capabilities(user)
-    if persisted_capabilities is not None:
-        return "view_restricted" in persisted_capabilities
-    groups = set(getattr(user, "_groups", []) or [])
-    privileged = {
-        "ops-supervisors", "it-leads", "security-responders",
-        "system-admins", "auditors",
-    }
-    return bool(groups & privileged)
+    return bool(_authority_snapshot(user).restricted_scope_keys)
 
 
 def scope_ticket_queryset(user, queryset: QuerySet) -> QuerySet:
     """Limit a ticket queryset to the caller's explicit scopes."""
-    scopes = get_user_scopes(user)
+    snapshot = _authority_snapshot(user)
+    scopes = list(snapshot.scopes)
     user._scopes = scopes
     branches: list[Q] = []
-    restricted_access = can_view_restricted(user)
 
     for scope in scopes:
         if scope.domain == "admin":
@@ -266,7 +362,7 @@ def scope_ticket_queryset(user, queryset: QuerySet) -> QuerySet:
             branch &= Q(queue_id=scope.queue_id)
         if scope.restricted_only:
             branch &= Q(confidentiality="restricted")
-        elif not restricted_access:
+        elif _scope_key(scope) not in snapshot.restricted_scope_keys:
             branch &= ~Q(confidentiality="restricted")
         branches.append(branch)
 

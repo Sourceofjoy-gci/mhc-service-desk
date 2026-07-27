@@ -206,6 +206,7 @@ def _ticket_for_scope(
     service,
     request_type,
     queue,
+    confidentiality="normal",
 ):
     return Ticket.objects.create(
         number=number,
@@ -219,6 +220,7 @@ def _ticket_for_scope(
         request_type=request_type,
         office=office,
         queue=queue,
+        confidentiality=confidentiality,
     )
 
 
@@ -544,3 +546,208 @@ def test_invalid_persisted_assignment_fails_closed_without_group_capability_fall
     assert not is_auditor(user)
     assert not can_view_restricted(user)
     assert not visible.exists()
+
+
+@pytest.mark.parametrize(
+    "raw_scopes",
+    [
+        pytest.param(1, id="scalar-top-level-json"),
+        pytest.param({"domain": "operational"}, id="object-top-level-json"),
+        pytest.param(
+            [{"domain": "operational", "restricted_only": "false"}],
+            id="string-boolean",
+        ),
+        pytest.param(
+            [{"domain": "operational", "restricted_only": 1}],
+            id="numeric-boolean",
+        ),
+        pytest.param(
+            [{"domain": "finance"}],
+            id="unknown-domain",
+        ),
+        pytest.param(
+            [{"domain": "operational", "office": "not-a-uuid"}],
+            id="invalid-office-id",
+        ),
+        pytest.param(
+            [{"domain": "operational", "service": 123}],
+            id="wrong-service-id-type",
+        ),
+        pytest.param(
+            [{"domain": "operational", "queue_id": "not-a-uuid"}],
+            id="invalid-queue-id",
+        ),
+    ],
+)
+@pytest.mark.usefixtures("_confidentiality_tickets")
+def test_malformed_persisted_scope_schema_invalidates_the_entire_assignment(
+    raw_scopes,
+):
+    user = _persisted_user(groups=["auditors", "ops-supervisors"])
+    _assign_persisted_role(
+        user,
+        keycloak_role="malformed-schema-role",
+        scopes=raw_scopes,
+    )
+
+    try:
+        scopes = get_user_scopes(user)
+        auditor = is_auditor(user)
+        restricted = can_view_restricted(user)
+        visible = scope_ticket_queryset(user, Ticket.objects.all())
+        visible_exists = visible.exists()
+    except Exception as exc:  # pragma: no cover - turns crashes into a red assertion
+        pytest.fail(f"malformed persisted scope must fail closed, not raise: {exc!r}")
+
+    assert scopes == []
+    assert not auditor
+    assert not restricted
+    assert not visible_exists
+
+
+def test_raw_restricted_grant_is_exact_to_its_same_domain_office_branch(basic_world):
+    other_office = Office.objects.create(
+        region=basic_world["region"],
+        code="BRANCH-2",
+        name="Other branch office",
+    )
+    service, request_type = _operational_service(code="BRANCH-SVC")
+    first_queue = ServiceLocation.objects.create(
+        office=basic_world["office"],
+        name="First branch queue",
+    )
+    second_queue = ServiceLocation.objects.create(
+        office=other_office,
+        name="Second branch queue",
+    )
+    user = _persisted_user(groups=[])
+    _assign_persisted_role(
+        user,
+        keycloak_role="branch-local-restricted",
+        scopes=[
+            {
+                "domain": "operational",
+                "office": str(basic_world["office"].id),
+                "restricted_only": True,
+            },
+            {
+                "domain": "operational",
+                "office": str(other_office.id),
+            },
+        ],
+    )
+
+    for suffix, office, queue, confidentiality, title in (
+        ("01", basic_world["office"], first_queue, "normal", "first normal"),
+        (
+            "02",
+            basic_world["office"],
+            first_queue,
+            "restricted",
+            "first restricted",
+        ),
+        ("03", other_office, second_queue, "normal", "second normal"),
+        (
+            "04",
+            other_office,
+            second_queue,
+            "restricted",
+            "second restricted",
+        ),
+    ):
+        _ticket_for_scope(
+            basic_world=basic_world,
+            number=f"OP-202607-5000{suffix}",
+            title=title,
+            office=office,
+            service=service,
+            request_type=request_type,
+            queue=queue,
+            confidentiality=confidentiality,
+        )
+
+    visible = scope_ticket_queryset(user, Ticket.objects.all())
+
+    assert set(visible.values_list("title", flat=True)) == {
+        "first restricted",
+        "second normal",
+    }
+
+
+@pytest.mark.usefixtures("_confidentiality_tickets")
+def test_raw_restricted_grant_does_not_widen_an_unrelated_domain_branch():
+    user = _persisted_user(groups=[])
+    _assign_persisted_role(
+        user,
+        keycloak_role="cross-domain-restricted",
+        scopes=[
+            {"domain": "operational", "restricted_only": True},
+            {"domain": "it"},
+        ],
+    )
+
+    visible = scope_ticket_queryset(user, Ticket.objects.all())
+
+    assert set(visible.values_list("title", flat=True)) == {
+        "Operational restricted",
+        "IT normal",
+    }
+
+
+@pytest.mark.usefixtures("_confidentiality_tickets")
+def test_named_privileged_role_only_grants_restricted_rows_in_its_own_scopes():
+    user = _persisted_user(groups=[])
+    _assign_persisted_role(user, keycloak_role="supervisor-operational")
+    _assign_persisted_role(
+        user,
+        keycloak_role="ordinary-it-role",
+        scopes=[{"domain": "it"}],
+    )
+
+    visible = scope_ticket_queryset(user, Ticket.objects.all())
+
+    assert set(visible.values_list("title", flat=True)) == {
+        "Operational normal",
+        "Operational restricted",
+        "IT normal",
+    }
+
+
+class _ChangingAssignmentManager:
+    def __init__(self, assignment):
+        self.assignment = assignment
+        self.read_count = 0
+
+    def select_related(self, *args):
+        return self
+
+    def all(self):
+        self.read_count += 1
+        if self.read_count == 1:
+            return [self.assignment]
+        return []
+
+
+@pytest.mark.usefixtures("_confidentiality_tickets")
+def test_ticket_scope_decision_uses_one_immutable_authority_snapshot():
+    assignment = SimpleNamespace(
+        role=SimpleNamespace(
+            keycloak_role="ordinary-operational-role",
+            scopes=[{"domain": "operational"}],
+        ),
+        office_id=None,
+        expires_at=None,
+    )
+    manager = _ChangingAssignmentManager(assignment)
+    user = SimpleNamespace(
+        is_authenticated=True,
+        is_superuser=False,
+        pk=uuid4(),
+        user_roles=manager,
+        _groups=["auditors"],
+    )
+
+    visible = scope_ticket_queryset(user, Ticket.objects.all())
+
+    assert manager.read_count == 1
+    assert set(visible.values_list("title", flat=True)) == {"Operational normal"}
