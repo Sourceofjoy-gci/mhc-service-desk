@@ -8,6 +8,8 @@ from __future__ import annotations
 from rest_framework import serializers
 
 from apps.contacts.api import ContactSerializer
+from apps.files.views import attachment_metadata
+from apps.sla.serializers import serialize_sla_clocks
 from apps.workflow.models import Status
 
 from .models import OutboxEvent, Ticket, TicketLink, TicketMessage, TicketNote, Watcher
@@ -138,8 +140,47 @@ class TicketDetailSerializer(TicketListSerializer):
     messages = TicketMessageSerializer(many=True, read_only=True)
     notes = TicketNoteSerializer(many=True, read_only=True)
     links = TicketLinkSerializer(many=True, read_only=True)
+    assignee_detail = serializers.SerializerMethodField()
+    relationships = serializers.SerializerMethodField()
+    sla_clocks = serializers.SerializerMethodField()
+    attachments = serializers.SerializerMethodField()
     capabilities = serializers.SerializerMethodField()
     available_transitions = serializers.SerializerMethodField()
+
+    def get_assignee_detail(self, obj: Ticket) -> dict[str, str] | None:
+        if obj.assignee_id is None:
+            return None
+        return {
+            "id": str(obj.assignee_id),
+            "display_name": obj.assignee.display_name or obj.assignee.username,
+        }
+
+    def get_relationships(self, obj: Ticket) -> list[dict[str, str]]:
+        relationships = [
+            {
+                "id": str(link.id),
+                "kind": link.kind,
+                "ticket_number": link.to_ticket.number,
+                "direction": "outgoing",
+            }
+            for link in obj.links_from.select_related("to_ticket")
+        ]
+        relationships.extend(
+            {
+                "id": str(link.id),
+                "kind": link.kind,
+                "ticket_number": link.from_ticket.number,
+                "direction": "incoming",
+            }
+            for link in obj.links_to.select_related("from_ticket")
+        )
+        return sorted(relationships, key=lambda relationship: relationship["id"])
+
+    def get_sla_clocks(self, obj: Ticket) -> dict[str, object]:
+        return serialize_sla_clocks(obj)
+
+    def get_attachments(self, obj: Ticket) -> list[dict[str, object]]:
+        return [attachment_metadata(item) for item in obj.attachments.all()]
 
     def get_capabilities(self, obj: Ticket) -> dict[str, bool | str | None]:
         request = self.context.get("request")
@@ -187,7 +228,9 @@ class TicketDetailSerializer(TicketListSerializer):
             "team", "blocked_reason", "next_action", "next_action_at",
             "resolution_code", "resolution_summary",
             "acknowledged_at", "first_responded_at", "resolved_at", "closed_at",
-            "messages", "notes", "links", "capabilities", "available_transitions",
+            "reopened_at", "assignee_detail", "relationships", "sla_clocks",
+            "attachments", "messages", "notes", "links", "capabilities",
+            "available_transitions",
         )
 
 

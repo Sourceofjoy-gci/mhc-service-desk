@@ -109,6 +109,19 @@ def instantiate_slas(*, ticket: Ticket, policy: SlaPolicy) -> list[SlaInstance]:
 PAUSABLE_STATES_FOR_REQUESTER = {"paused_requester"}
 PAUSABLE_STATES_FOR_INTERNAL = {"paused_internal", "paused_it"}
 
+WAITING_SLA_STATES = {
+    "operational": {
+        "waiting_requester": SlaInstance.State.PAUSED_REQUESTER,
+        "waiting_internal": SlaInstance.State.PAUSED_INTERNAL,
+        "waiting_it": SlaInstance.State.PAUSED_IT,
+    },
+    "it": {
+        "waiting_user": SlaInstance.State.PAUSED_REQUESTER,
+        "waiting_vendor": SlaInstance.State.PAUSED_INTERNAL,
+        "waiting_change": SlaInstance.State.PAUSED_INTERNAL,
+    },
+}
+
 
 @transaction.atomic
 def pause_sla(
@@ -119,7 +132,12 @@ def pause_sla(
 ) -> SlaInstance:
     instance.state = reason
     instance.save(update_fields=["state", "updated_at"])
-    SlaPauseHistory.objects.create(instance=instance, state=reason, reason=reason, actor_subject=actor_subject)
+    SlaPauseHistory.objects.create(
+        instance=instance,
+        state=reason,
+        reason=reason,
+        actor_subject=actor_subject,
+    )
     return instance
 
 
@@ -129,8 +147,117 @@ def resume_sla(*, instance: SlaInstance, reason: str, actor_subject: str = "") -
         return instance
     instance.state = "active"
     instance.save(update_fields=["state", "updated_at"])
-    SlaPauseHistory.objects.create(instance=instance, state="active", reason=reason, actor_subject=actor_subject)
+    SlaPauseHistory.objects.create(
+        instance=instance,
+        state="active",
+        reason=reason,
+        actor_subject=actor_subject,
+    )
     return instance
+
+
+@transaction.atomic
+def complete_sla(*, ticket: Ticket, kind: str, at: datetime) -> SlaInstance | None:
+    """Complete one active SLA, preserving an already-recorded breach."""
+    instance = (
+        SlaInstance.objects.select_for_update()
+        .filter(ticket=ticket, kind=kind)
+        .order_by("created_at", "id")
+        .first()
+    )
+    if instance is None or instance.state == SlaInstance.State.BREACHED:
+        return instance
+    if instance.state == SlaInstance.State.MET:
+        return instance
+    instance.state = SlaInstance.State.MET
+    instance.completed_at = at
+    instance.save(update_fields=["state", "completed_at", "updated_at"])
+    return instance
+
+
+@transaction.atomic
+def restart_resolution_sla(*, ticket: Ticket, at: datetime) -> SlaInstance | None:
+    """Restart the existing resolution measurement after a reopen."""
+    instance = (
+        SlaInstance.objects.select_for_update()
+        .select_related("policy__calendar")
+        .filter(ticket=ticket, kind="resolution")
+        .order_by("created_at", "id")
+        .first()
+    )
+    if instance is None:
+        policy = SlaPolicy.objects.select_related("calendar").filter(
+            domain=ticket.domain,
+            priority=ticket.priority,
+            is_active=True,
+        ).first()
+        if policy is None:
+            return None
+        instance = SlaInstance(ticket=ticket, policy=policy, kind="resolution")
+
+    instance.started_at = at
+    instance.due_at = add_business_seconds(
+        at,
+        instance.policy.resolution_minutes * 60,
+        instance.policy.calendar,
+    )
+    instance.state = SlaInstance.State.ACTIVE
+    instance.consumed_business_seconds = 0
+    instance.completed_at = None
+    instance.breached_at = None
+    instance.breach_reason = ""
+    instance.last_evaluated_at = None
+    instance.warn_notified_at = None
+    instance.escalation_notified_at = None
+    instance.save()
+    return instance
+
+
+@transaction.atomic
+def sync_slas_for_transition(
+    *,
+    ticket: Ticket,
+    from_code: str,
+    to_code: str,
+    actor_subject: str,
+) -> None:
+    """Synchronize all live clocks with one accepted workflow transition."""
+    target_pause_state = WAITING_SLA_STATES.get(ticket.domain, {}).get(to_code)
+    prior_pause_state = WAITING_SLA_STATES.get(ticket.domain, {}).get(from_code)
+
+    if target_pause_state is not None:
+        for instance in SlaInstance.objects.select_for_update().filter(
+            ticket=ticket,
+            state=SlaInstance.State.ACTIVE,
+        ):
+            pause_sla(
+                instance=instance,
+                reason=target_pause_state,
+                actor_subject=actor_subject,
+            )
+    elif prior_pause_state is not None:
+        for instance in SlaInstance.objects.select_for_update().filter(
+            ticket=ticket,
+            state__in=(
+                SlaInstance.State.PAUSED_REQUESTER,
+                SlaInstance.State.PAUSED_INTERNAL,
+                SlaInstance.State.PAUSED_IT,
+            ),
+        ):
+            resume_sla(
+                instance=instance,
+                reason=f"left_{from_code}",
+                actor_subject=actor_subject,
+            )
+
+    if to_code == "resolved" and ticket.resolved_at is not None:
+        complete_sla(
+            ticket=ticket,
+            kind="resolution",
+            at=ticket.resolved_at,
+        )
+    elif to_code == "reopened" and ticket.reopened_at is not None:
+        restart_resolution_sla(ticket=ticket, at=ticket.reopened_at)
 
 
 # -----------------------------------------------------------------------------

@@ -395,6 +395,15 @@ def transition_ticket(
 
     locked.save(update_fields=[*dict.fromkeys(update_fields), "updated_at"])
 
+    from apps.sla.services import sync_slas_for_transition
+
+    sync_slas_for_transition(
+        ticket=locked,
+        from_code=previous.code,
+        to_code=target.code,
+        actor_subject=actor.keycloak_subject,
+    )
+
     TransitionHistory.objects.create(
         ticket=locked,
         from_status=previous,
@@ -459,6 +468,16 @@ def add_message(
         },
         metadata=event_metadata,
     )
+    if direction == TicketMessage.Direction.OUTBOUND and ticket.first_responded_at is None:
+        from apps.sla.services import complete_sla
+
+        ticket.first_responded_at = timezone.now()
+        ticket.save(update_fields=["first_responded_at", "updated_at"])
+        complete_sla(
+            ticket=ticket,
+            kind="first_response",
+            at=ticket.first_responded_at,
+        )
     return message
 
 

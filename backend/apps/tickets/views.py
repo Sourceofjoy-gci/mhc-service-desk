@@ -29,6 +29,7 @@ from apps.sla.models import SlaPolicy
 from apps.sla.services import instantiate_slas
 
 from . import services
+from .activity import build_ticket_activity
 from .api import (
     MessageCreateSerializer,
     NoteCreateSerializer,
@@ -97,6 +98,7 @@ class TicketViewSet(viewsets.ModelViewSet):
             "links",
             "work_state",
             "assignees",
+            "activity",
         ):
             return TicketDetailSerializer
         return TicketListSerializer
@@ -276,6 +278,11 @@ class TicketViewSet(viewsets.ModelViewSet):
             }
         )
 
+    @action(detail=True, methods=["get"], url_path="activity")
+    def activity(self, request, number=None):
+        ticket = self.get_object()
+        return Response({"results": build_ticket_activity(ticket)})
+
     @action(detail=True, methods=["get", "post"], url_path="messages")
     def messages(self, request, number=None):
         ticket = self.get_object()
@@ -298,11 +305,6 @@ class TicketViewSet(viewsets.ModelViewSet):
             template_key=ser.validated_data.get("template_key", ""),
             template_version=ser.validated_data.get("template_version", ""),
         )
-        # Mark first response if applicable
-        if ticket.first_responded_at is None and ticket.requester:
-            from django.utils import timezone
-            ticket.first_responded_at = timezone.now()
-            ticket.save(update_fields=["first_responded_at", "updated_at"])
         return Response({"id": str(msg.id)}, status=status.HTTP_201_CREATED)
 
     @action(detail=True, methods=["get", "post"], url_path="notes")
