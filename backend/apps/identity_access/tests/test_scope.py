@@ -2,9 +2,12 @@
 from __future__ import annotations
 
 from types import SimpleNamespace
+from uuid import uuid4
 
 import pytest
 
+from apps.catalogue.models import RequestType, Service
+from apps.identity_access.models import Role, User, UserRole
 from apps.identity_access.scope import (
     Scope,
     ScopePermission,
@@ -13,6 +16,7 @@ from apps.identity_access.scope import (
     has_unrestricted_domain_scope,
     scope_ticket_queryset,
 )
+from apps.organisations.models import Office, ServiceLocation
 from apps.tickets.models import Ticket
 from apps.workflow.models import Status
 
@@ -167,3 +171,234 @@ def test_auditors_are_read_only():
 
     assert permission.has_permission(SimpleNamespace(user=user, method="GET"), view)
     assert not permission.has_permission(SimpleNamespace(user=user, method="POST"), view)
+
+
+def _persisted_user(*, groups):
+    user = User.objects.create(
+        username=f"user-{uuid4().hex}",
+        keycloak_subject=f"subject-{uuid4().hex}",
+    )
+    user._groups = groups
+    return user
+
+
+def _operational_service(*, code):
+    service = Service.objects.create(code=code, name=code, domain="operational")
+    request_type = RequestType.objects.create(
+        service=service,
+        code=f"{code}-TYPE",
+        name=f"{code} request",
+        default_priority="P3",
+    )
+    return service, request_type
+
+
+def _ticket_for_scope(
+    *,
+    basic_world,
+    number,
+    title,
+    office,
+    service,
+    request_type,
+    queue,
+):
+    return Ticket.objects.create(
+        number=number,
+        domain="operational",
+        title=title,
+        status=Status.objects.get(domain="operational", code="new"),
+        priority="P3",
+        channel="web",
+        requester=basic_world["contact"],
+        service=service,
+        request_type=request_type,
+        office=office,
+        queue=queue,
+    )
+
+
+def test_persisted_role_domain_and_office_override_replace_broad_group_scope(basic_world):
+    user = _persisted_user(groups=["ops-agents"])
+    role = Role.objects.create(
+        keycloak_role="agent-operational",
+        name="Operational agent",
+        scopes=[],
+    )
+    UserRole.objects.create(user=user, role=role, office=basic_world["office"])
+
+    assert get_user_scopes(user) == [
+        Scope(domain="operational", office_id=str(basic_world["office"].id))
+    ]
+
+
+def test_persisted_scope_enforces_office_service_and_queue_ids(basic_world):
+    other_office = Office.objects.create(
+        region=basic_world["region"],
+        code="TST-2",
+        name="Other Office",
+    )
+    scoped_service, scoped_type = _operational_service(code="SCOPED-SVC")
+    other_service, other_type = _operational_service(code="OTHER-SVC")
+    scoped_queue = ServiceLocation.objects.create(
+        office=basic_world["office"],
+        name="Scoped queue",
+    )
+    other_queue = ServiceLocation.objects.create(
+        office=basic_world["office"],
+        name="Other queue",
+    )
+    user = _persisted_user(groups=["ops-agents"])
+    role = Role.objects.create(
+        keycloak_role="scoped-operational",
+        name="Scoped operational role",
+        scopes=[
+            {
+                "domain": "operational",
+                "office": str(other_office.id),
+                "service": str(scoped_service.id),
+                "queue": str(scoped_queue.id),
+            }
+        ],
+    )
+    UserRole.objects.create(user=user, role=role, office=basic_world["office"])
+
+    _ticket_for_scope(
+        basic_world=basic_world,
+        number="OP-202607-100001",
+        title="matches every dimension",
+        office=basic_world["office"],
+        service=scoped_service,
+        request_type=scoped_type,
+        queue=scoped_queue,
+    )
+    _ticket_for_scope(
+        basic_world=basic_world,
+        number="OP-202607-100002",
+        title="wrong office",
+        office=other_office,
+        service=scoped_service,
+        request_type=scoped_type,
+        queue=scoped_queue,
+    )
+    _ticket_for_scope(
+        basic_world=basic_world,
+        number="OP-202607-100003",
+        title="wrong service",
+        office=basic_world["office"],
+        service=other_service,
+        request_type=other_type,
+        queue=scoped_queue,
+    )
+    _ticket_for_scope(
+        basic_world=basic_world,
+        number="OP-202607-100004",
+        title="wrong queue",
+        office=basic_world["office"],
+        service=scoped_service,
+        request_type=scoped_type,
+        queue=other_queue,
+    )
+
+    scopes = get_user_scopes(user)
+    visible = scope_ticket_queryset(user, Ticket.objects.all())
+
+    assert scopes == [
+        Scope(
+            domain="operational",
+            office_id=str(basic_world["office"].id),
+            service_id=str(scoped_service.id),
+            queue_id=str(scoped_queue.id),
+        )
+    ]
+    assert set(visible.values_list("title", flat=True)) == {"matches every dimension"}
+
+
+def test_multiple_persisted_scopes_are_combined_with_or(basic_world):
+    other_office = Office.objects.create(
+        region=basic_world["region"],
+        code="TST-2",
+        name="Other Office",
+    )
+    first_service, first_type = _operational_service(code="FIRST-SVC")
+    second_service, second_type = _operational_service(code="SECOND-SVC")
+    first_queue = ServiceLocation.objects.create(
+        office=basic_world["office"],
+        name="First queue",
+    )
+    second_queue = ServiceLocation.objects.create(office=other_office, name="Second queue")
+    user = _persisted_user(groups=["ops-agents"])
+    first_role = Role.objects.create(
+        keycloak_role="first-scoped-role",
+        name="First scoped role",
+        scopes=[
+            {
+                "domain": "operational",
+                "service": str(first_service.id),
+                "queue": str(first_queue.id),
+            }
+        ],
+    )
+    second_role = Role.objects.create(
+        keycloak_role="second-scoped-role",
+        name="Second scoped role",
+        scopes=[
+            {
+                "domain": "operational",
+                "service": str(second_service.id),
+                "queue": str(second_queue.id),
+            }
+        ],
+    )
+    UserRole.objects.create(user=user, role=first_role, office=basic_world["office"])
+    UserRole.objects.create(user=user, role=second_role, office=other_office)
+
+    _ticket_for_scope(
+        basic_world=basic_world,
+        number="OP-202607-200001",
+        title="first branch",
+        office=basic_world["office"],
+        service=first_service,
+        request_type=first_type,
+        queue=first_queue,
+    )
+    _ticket_for_scope(
+        basic_world=basic_world,
+        number="OP-202607-200002",
+        title="second branch",
+        office=other_office,
+        service=second_service,
+        request_type=second_type,
+        queue=second_queue,
+    )
+    _ticket_for_scope(
+        basic_world=basic_world,
+        number="OP-202607-200003",
+        title="mixed dimensions",
+        office=basic_world["office"],
+        service=second_service,
+        request_type=second_type,
+        queue=second_queue,
+    )
+
+    visible = scope_ticket_queryset(user, Ticket.objects.all())
+
+    assert set(visible.values_list("title", flat=True)) == {
+        "first branch",
+        "second branch",
+    }
+
+
+def test_persisted_unrestricted_scope_replaces_duplicate_restricted_scope(basic_world):
+    user = _persisted_user(groups=["security-responders"])
+    role = Role.objects.create(
+        keycloak_role="combined-operational",
+        name="Combined operational role",
+        scopes=[
+            {"domain": "operational", "restricted_only": True},
+            {"domain": "operational", "restricted_only": False},
+        ],
+    )
+    UserRole.objects.create(user=user, role=role, office=None)
+
+    assert get_user_scopes(user) == [Scope(domain="operational", restricted_only=False)]

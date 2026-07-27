@@ -8,8 +8,8 @@ from __future__ import annotations
 
 import statistics
 from datetime import datetime, timezone
-from django.db.models import Count
 
+from django.db.models import Count
 from rest_framework.decorators import api_view, permission_classes
 from rest_framework.exceptions import PermissionDenied
 from rest_framework.permissions import IsAuthenticated
@@ -21,7 +21,6 @@ from apps.identity_access.scope import (
     has_unrestricted_domain_scope,
     scope_ticket_queryset,
 )
-
 from apps.tickets.models import Ticket
 from apps.workflow.models import Status
 

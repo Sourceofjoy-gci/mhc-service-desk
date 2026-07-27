@@ -1,7 +1,8 @@
 from uuid import uuid4
 
 import pytest
-from rest_framework.test import APIRequestFactory, force_authenticate
+from django.urls import reverse
+from rest_framework.test import APIClient, APIRequestFactory, force_authenticate
 
 from apps.identity_access.models import User
 from apps.tickets.models import Ticket
@@ -82,3 +83,25 @@ def test_supervisor_lists_normal_and_restricted_tickets_in_its_domain(scoped_tic
         "operational-normal",
         "operational-restricted",
     }
+
+
+@pytest.mark.parametrize(
+    ("groups", "expected_open"),
+    [
+        (["ops-agents"], 1),
+        (["ops-supervisors"], 2),
+        (["auditors"], 2),
+    ],
+)
+def test_routed_operational_dashboard_aggregates_only_scoped_tickets(
+    groups,
+    expected_open,
+    scoped_tickets,
+):
+    client = APIClient()
+    client.force_authenticate(user=_user(groups))
+
+    response = client.get(reverse("tickets-dashboard-operational"))
+
+    assert response.status_code == 200
+    assert response.data["totals"]["open"] == expected_open

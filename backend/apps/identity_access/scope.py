@@ -9,7 +9,27 @@ from __future__ import annotations
 from dataclasses import dataclass
 
 from django.db.models import Q, QuerySet
+from django.utils import timezone
 from rest_framework import permissions
+
+_DEFAULT_ROLE_SCOPES = {
+    "agent-operational": ({"domain": "operational"},),
+    "ops-agents": ({"domain": "operational"},),
+    "supervisor-operational": ({"domain": "operational"},),
+    "ops-supervisors": ({"domain": "operational"},),
+    "agent-it": ({"domain": "it"},),
+    "it-agents": ({"domain": "it"},),
+    "lead-it": ({"domain": "it"},),
+    "it-leads": ({"domain": "it"},),
+    "admin": ({"domain": "admin"},),
+    "system-admins": ({"domain": "admin"},),
+    "auditor": ({"domain": "operational"}, {"domain": "it"}),
+    "auditors": ({"domain": "operational"}, {"domain": "it"}),
+    "security-responders": (
+        {"domain": "operational", "restricted_only": True},
+        {"domain": "it", "restricted_only": True},
+    ),
+}
 
 
 @dataclass(frozen=True)
@@ -45,10 +65,66 @@ def has_scope(user, required: Scope) -> bool:
     return any(s.matches(required) for s in scopes)
 
 
-def get_user_scopes(user) -> list[Scope]:
-    """Compute a user's scopes from their Keycloak group memberships.
+def _normalise_scopes(scopes: list[Scope]) -> list[Scope]:
+    normalised: dict[tuple[str, str | None, str | None, str | None], Scope] = {}
+    for scope in scopes:
+        key = (scope.domain, scope.office_id, scope.service_id, scope.queue_id)
+        existing = normalised.get(key)
+        if existing is None or (existing.restricted_only and not scope.restricted_only):
+            normalised[key] = scope
+    return list(normalised.values())
 
-    Group-to-scope mapping (P0 baseline):
+
+def _scope_id(raw_scope: dict, name: str) -> str | None:
+    value = raw_scope.get(f"{name}_id", raw_scope.get(name))
+    return str(value) if value not in (None, "") else None
+
+
+def _persisted_scopes(user) -> list[Scope] | None:
+    """Return active persisted scopes, or ``None`` when no assignments exist."""
+    assignments = getattr(user, "user_roles", None)
+    if assignments is None or not getattr(user, "pk", None):
+        return None
+
+    persisted = list(assignments.select_related("role", "office").all())
+    if not persisted:
+        return None
+
+    now = timezone.now()
+    scopes: list[Scope] = []
+    for assignment in persisted:
+        if assignment.expires_at is not None and assignment.expires_at <= now:
+            continue
+        raw_scopes = assignment.role.scopes or _DEFAULT_ROLE_SCOPES.get(
+            assignment.role.keycloak_role,
+            (),
+        )
+        for raw_scope in raw_scopes:
+            if not isinstance(raw_scope, dict) or not raw_scope.get("domain"):
+                continue
+            office_id = (
+                str(assignment.office_id)
+                if assignment.office_id is not None
+                else _scope_id(raw_scope, "office")
+            )
+            scopes.append(
+                Scope(
+                    domain=str(raw_scope["domain"]),
+                    office_id=office_id,
+                    service_id=_scope_id(raw_scope, "service"),
+                    queue_id=_scope_id(raw_scope, "queue"),
+                    restricted_only=bool(raw_scope.get("restricted_only", False)),
+                )
+            )
+    return _normalise_scopes(scopes)
+
+
+def get_user_scopes(user) -> list[Scope]:
+    """Compute canonical scopes from persisted assignments or group fallback.
+
+    Active ``UserRole`` assignments take precedence so an office, service,
+    or queue boundary cannot be broadened by a domain-wide group. Users with
+    no persisted assignments use the P0 Keycloak group mapping:
         ops-agents          -> operational
         ops-supervisors     -> operational
         it-agents           -> it
@@ -61,6 +137,11 @@ def get_user_scopes(user) -> list[Scope]:
         return []
     if user.is_superuser:
         return [Scope(domain="admin")]
+
+    persisted_scopes = _persisted_scopes(user)
+    if persisted_scopes is not None:
+        return persisted_scopes
+
     groups = set(getattr(user, "_groups", []) or [])
     scopes: list[Scope] = []
     if groups & {"ops-agents", "ops-supervisors"}:
@@ -76,13 +157,7 @@ def get_user_scopes(user) -> list[Scope]:
         scopes.append(Scope(domain="operational"))
         scopes.append(Scope(domain="it"))
 
-    normalised: dict[tuple[str, str | None, str | None, str | None], Scope] = {}
-    for scope in scopes:
-        key = (scope.domain, scope.office_id, scope.service_id, scope.queue_id)
-        existing = normalised.get(key)
-        if existing is None or (existing.restricted_only and not scope.restricted_only):
-            normalised[key] = scope
-    return list(normalised.values())
+    return _normalise_scopes(scopes)
 
 
 def is_auditor(user) -> bool:

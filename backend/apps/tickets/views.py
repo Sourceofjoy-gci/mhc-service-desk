@@ -19,6 +19,7 @@ from apps.identity_access.authentication import KeycloakJWTAuthentication
 from apps.identity_access.scope import (
     ScopePermission,
     attach_scopes,
+    has_unrestricted_domain_scope,
     public_endpoint,
     scope_ticket_queryset,
 )
@@ -319,12 +320,10 @@ def operational_dashboard(request):
 
     Restricted to authenticated users with an operational scope. IT-only
     users must not see this; the cross-domain guard is enforced by an
-    explicit ``has_scope`` check (the ``@scope_required`` decorator only
-    works on class-based views).
+    explicit unrestricted-domain check.
     """
-    from apps.identity_access.scope import Scope, attach_scopes, has_scope
     attach_scopes(request)
-    if not has_scope(request.user, Scope(domain="operational")):
+    if not has_unrestricted_domain_scope(request.user, "operational"):
         return Response(
             {"detail": "Operational scope required."},
             status=status.HTTP_403_FORBIDDEN,
@@ -334,7 +333,7 @@ def operational_dashboard(request):
     from django.db.models import Count
     from django.utils import timezone
 
-    qs = Ticket.objects.filter(domain="operational")
+    qs = scope_ticket_queryset(request.user, Ticket.objects.all()).filter(domain="operational")
     now = timezone.now()
 
     return Response({
