@@ -130,26 +130,47 @@ export default function QueuePage() {
   const cursor = searchParams.get("cursor") ?? "";
   const currentSearch = searchParams.toString();
   const canonicalParams = new URLSearchParams(searchParams);
-  let hasInvalidValue = false;
+  let hasStateCanonicalization = false;
 
-  if (requestedDomain !== null && requestedDomain !== domain) {
+  if (
+    requestedDomain !== null &&
+    (searchParams.getAll("domain").length !== 1 || requestedDomain !== domain)
+  ) {
     if (domain) canonicalParams.set("domain", domain);
     else canonicalParams.delete("domain");
-    hasInvalidValue = true;
+    hasStateCanonicalization = true;
   }
-  if (searchParams.has("status") && status !== requestedStatus) {
-    canonicalParams.delete("status");
-    hasInvalidValue = true;
+  if (
+    searchParams.has("status") &&
+    (searchParams.getAll("status").length !== 1 || !status)
+  ) {
+    if (status) canonicalParams.set("status", status);
+    else canonicalParams.delete("status");
+    hasStateCanonicalization = true;
   }
-  if (searchParams.has("priority") && priority !== requestedPriority) {
-    canonicalParams.delete("priority");
-    hasInvalidValue = true;
+  if (
+    searchParams.has("priority") &&
+    (searchParams.getAll("priority").length !== 1 || !priority)
+  ) {
+    if (priority) canonicalParams.set("priority", priority);
+    else canonicalParams.delete("priority");
+    hasStateCanonicalization = true;
   }
-  if (searchParams.has("sort") && sort !== requestedSort) {
+  if (
+    searchParams.has("sort") &&
+    (searchParams.getAll("sort").length !== 1 || sort !== requestedSort)
+  ) {
     canonicalParams.set("sort", sort);
-    hasInvalidValue = true;
+    hasStateCanonicalization = true;
   }
-  if (hasInvalidValue) canonicalParams.delete("cursor");
+  if (
+    searchParams.has("cursor") &&
+    (searchParams.getAll("cursor").length !== 1 || !cursor)
+  ) {
+    if (cursor) canonicalParams.set("cursor", cursor);
+    else canonicalParams.delete("cursor");
+  }
+  if (hasStateCanonicalization) canonicalParams.delete("cursor");
   const canonicalSearch = canonicalParams.toString();
   const needsCanonicalization = canonicalSearch !== currentSearch;
 

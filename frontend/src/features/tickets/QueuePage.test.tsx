@@ -264,6 +264,77 @@ describe("queue URL state", () => {
     });
   });
 
+  it("canonicalizes present empty filters away before one request", async () => {
+    renderQueue({ route: "/tickets?status=&priority=&cursor=opaque" });
+
+    expect(screen.getByLabelText("Filter by status")).toHaveTextContent(
+      "All statuses",
+    );
+    expect(screen.getByLabelText("Filter by priority")).toHaveTextContent(
+      "All priorities",
+    );
+    await waitFor(() =>
+      expect(harness.list).toHaveBeenCalledWith({
+        domain: "operational",
+        sort: "priority",
+      }),
+    );
+    expect(harness.list).toHaveBeenCalledTimes(1);
+    expect(screen.getByTestId("location")).toHaveTextContent(/^$/);
+  });
+
+  it("collapses duplicate filter values and clears their cursor before one request", async () => {
+    renderQueue({
+      route:
+        "/tickets?domain=operational&domain=it&status=triage&status=bogus&priority=P1&priority=P2&sort=updated&sort=created&cursor=opaque",
+      groups: ["system-admins"],
+    });
+
+    expect(screen.getByLabelText("Domain")).toHaveTextContent("Operational");
+    expect(screen.getByLabelText("Filter by status")).toHaveTextContent(
+      "Triage",
+    );
+    expect(screen.getByLabelText("Filter by priority")).toHaveTextContent(
+      "P1",
+    );
+    expect(screen.getByLabelText("Sort tickets")).toHaveTextContent(
+      "Recently updated",
+    );
+    await waitFor(() =>
+      expect(harness.list).toHaveBeenCalledWith({
+        domain: "operational",
+        status: "triage",
+        priority: "P1",
+        sort: "updated",
+      }),
+    );
+    expect(harness.list).toHaveBeenCalledTimes(1);
+    const location = screen.getByTestId("location").textContent ?? "";
+    const canonical = new URLSearchParams(location);
+    expect(canonical.getAll("domain")).toEqual(["operational"]);
+    expect(canonical.getAll("status")).toEqual(["triage"]);
+    expect(canonical.getAll("priority")).toEqual(["P1"]);
+    expect(canonical.getAll("sort")).toEqual(["updated"]);
+    expect(canonical.has("cursor")).toBe(false);
+  });
+
+  it("collapses duplicate cursors to one opaque value without discarding it", async () => {
+    renderQueue({ route: "/tickets?cursor=first%2Bopaque&cursor=second" });
+
+    await waitFor(() =>
+      expect(harness.list).toHaveBeenCalledWith({
+        domain: "operational",
+        sort: "priority",
+        cursor: "first+opaque",
+      }),
+    );
+    expect(harness.list).toHaveBeenCalledTimes(1);
+    const location = screen.getByTestId("location").textContent ?? "";
+    expect(new URLSearchParams(location).getAll("cursor")).toEqual([
+      "first+opaque",
+    ]);
+  });
+
   it("treats malformed, missing, empty, and current cursor links as unavailable", async () => {
     renderQueue({
       route: "/tickets?cursor=current",
