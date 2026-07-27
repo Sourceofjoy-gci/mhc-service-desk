@@ -38,7 +38,8 @@ class Role(models.Model):
     keycloak_role = models.CharField(max_length=128, unique=True)
     name = models.CharField(max_length=128)
     description = models.TextField(blank=True)
-    scopes = models.JSONField(default=list)  # list of {"domain", "office", "service", "queue"} dicts
+    # List of {"domain", "office", "service", "queue"} dictionaries.
+    scopes = models.JSONField(default=list)
     created_at = models.DateTimeField(auto_now_add=True)
     updated_at = models.DateTimeField(auto_now=True)
 
@@ -67,6 +68,9 @@ class UserRole(models.Model):
         db_table = "identity_user_role"
         unique_together = [("user", "role", "office")]
 
+    def __str__(self) -> str:
+        return f"{self.user}: {self.role}"
+
 
 class AuditLogin(models.Model):
     """Append-only login audit. Mirrors Keycloak events for forensic review."""
@@ -83,3 +87,7 @@ class AuditLogin(models.Model):
 
     class Meta:
         db_table = "identity_login_audit"
+
+    def __str__(self) -> str:
+        outcome = "success" if self.success else "failure"
+        return f"{self.keycloak_subject}: {outcome}"

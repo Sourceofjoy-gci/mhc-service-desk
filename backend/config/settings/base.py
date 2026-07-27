@@ -104,9 +104,13 @@ TEMPLATES = [
 DATABASES = {
     "default": env.db(
         "DATABASE_URL",
-        default=f"postgresql://{env('POSTGRES_USER', default='mhc')}:{env('POSTGRES_PASSWORD', default='')}"
-                f"@{env('POSTGRES_HOST', default='postgres')}:{env('POSTGRES_PORT', default='5432')}"
-                f"/{env('POSTGRES_DB', default='mhc')}",
+        default=(
+            f"postgresql://{env('POSTGRES_USER', default='mhc')}:"
+            f"{env('POSTGRES_PASSWORD', default='')}"
+            f"@{env('POSTGRES_HOST', default='postgres')}:"
+            f"{env('POSTGRES_PORT', default='5432')}"
+            f"/{env('POSTGRES_DB', default='mhc')}"
+        ),
     ),
 }
 DATABASES["default"].setdefault("ENGINE", "django_prometheus.db.backends.postgresql")

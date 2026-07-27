@@ -73,7 +73,7 @@ class KeycloakJWTAuthentication(authentication.BaseAuthentication):
         # --------------------------------------------------------------------
 
         try:
-            unverified = AccessToken(token, verify=False)
+            AccessToken(token, verify=False)
         except Exception as exc:
             raise exceptions.AuthenticationFailed(f"Malformed token: {exc}") from exc
 
