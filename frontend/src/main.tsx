@@ -5,6 +5,7 @@ import { BrowserRouter } from "react-router-dom";
 import App from "./app/App";
 import { ThemeProvider } from "./components/theme-provider";
 import { Toaster } from "./components/ui/sonner";
+import { AuthProvider } from "./features/auth/AuthProvider";
 import "./index.css";
 
 const queryClient = new QueryClient({
@@ -45,7 +46,9 @@ ReactDOM.createRoot(root).render(
     <ThemeProvider>
       <QueryClientProvider client={queryClient}>
         <BrowserRouter>
-          <App />
+          <AuthProvider>
+            <App />
+          </AuthProvider>
         </BrowserRouter>
         <Toaster richColors={false} position="top-right" />
       </QueryClientProvider>

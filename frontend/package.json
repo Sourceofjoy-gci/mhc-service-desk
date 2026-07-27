@@ -40,8 +40,10 @@
     "zod": "^3.23.8"
   },
   "devDependencies": {
+    "@testing-library/dom": "^10.0.0",
     "@testing-library/jest-dom": "^6.5.0",
     "@testing-library/react": "^16.0.1",
+    "@testing-library/user-event": "^14.5.2",
     "@types/node": "^22.7.5",
     "@types/react": "^18.3.11",
     "@types/react-dom": "^18.3.0",
@@ -51,6 +53,7 @@
     "eslint": "^9.11.1",
     "eslint-plugin-react": "^7.37.1",
     "eslint-plugin-react-hooks": "^4.6.2",
+    "jsdom": "^25.0.0",
     "prettier": "^3.3.3",
     "tailwindcss-animate": "^1.0.7",
     "typescript": "^5.6.2",

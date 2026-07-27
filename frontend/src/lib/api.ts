@@ -1,18 +1,39 @@
 /**
  * API client for the MHC e-Ticketing backend.
  *
- * Dev-mode note: when `VITE_DEV_AUTH` is "1", requests use a stub Bearer
- * token format `dev:<username>:<groups>` which the backend accepts in DEBUG.
- * In production, remove the dev header and use Keycloak OIDC.
+ * Authentication is supplied by AuthProvider so request handling remains
+ * independent of Keycloak and development identity details.
  */
 
 const API_BASE = (import.meta.env.VITE_API_BASE_URL ?? "") + "/api/v1";
 
+// Kept for the legacy attachment uploader until it is migrated to api().
 export const DEV_AUTH_TOKEN =
   import.meta.env.VITE_DEV_AUTH === "1" &&
   import.meta.env.MODE === "development"
     ? "Bearer dev:demo:ops-agents"
     : null;
+
+export interface ApiAuthAdapter {
+  getAccessToken(forceRefresh?: boolean): Promise<string | null>;
+  refresh(): Promise<boolean>;
+  login(returnTo: string): Promise<void>;
+}
+
+export interface RequestOptions {
+  method?: "GET" | "POST" | "PUT" | "PATCH" | "DELETE";
+  body?: unknown;
+  signal?: AbortSignal;
+  auth?: boolean;
+  retry401?: boolean;
+  headers?: Record<string, string>;
+}
+
+let authAdapter: ApiAuthAdapter | null = null;
+
+export function configureApiAuth(adapter: ApiAuthAdapter): void {
+  authAdapter = adapter;
+}
 
 export type Domain = "operational" | "it";
 export type Priority = "P1" | "P2" | "P3" | "P4";
@@ -86,13 +107,7 @@ export interface DashboardData {
   breached_sla: number;
 }
 
-interface RequestOptions {
-  method?: "GET" | "POST" | "PUT" | "PATCH" | "DELETE";
-  body?: unknown;
-  signal?: AbortSignal;
-}
-
-class ApiError extends Error {
+export class ApiError extends Error {
   status: number;
   body: unknown;
   constructor(status: number, body: unknown) {
@@ -103,21 +118,73 @@ class ApiError extends Error {
 }
 
 export async function api<T>(path: string, opts: RequestOptions = {}): Promise<T> {
-  const headers: Record<string, string> = { "Content-Type": "application/json" };
-  if (DEV_AUTH_TOKEN) headers.Authorization = DEV_AUTH_TOKEN;
+  const usesAuth = opts.auth !== false;
+  const isFormData =
+    typeof FormData !== "undefined" && opts.body instanceof FormData;
+  const headers: Record<string, string> = { ...opts.headers };
+  if (!isFormData && !hasHeader(headers, "Content-Type")) {
+    headers["Content-Type"] = "application/json";
+  }
+  if (usesAuth && authAdapter) {
+    const token = await authAdapter.getAccessToken();
+    if (token) headers.Authorization = asBearerToken(token);
+  }
+
   const r = await fetch(API_BASE + path, {
     method: opts.method ?? "GET",
     headers,
-    body: opts.body !== undefined ? JSON.stringify(opts.body) : undefined,
+    body:
+      opts.body === undefined
+        ? undefined
+        : isFormData
+          ? (opts.body as FormData)
+          : JSON.stringify(opts.body),
     signal: opts.signal,
   });
   if (!r.ok) {
     let body: unknown = null;
     try { body = await r.json(); } catch { /* non-JSON */ }
-    throw new ApiError(r.status, body);
+    const error = new ApiError(r.status, body);
+    if (r.status === 401 && usesAuth && authAdapter) {
+      let refreshed = false;
+      if (opts.retry401 !== false) {
+        try {
+          refreshed = await authAdapter.refresh();
+        } catch {
+          refreshed = false;
+        }
+      }
+      if (refreshed) {
+        try {
+          return await api<T>(path, { ...opts, retry401: false });
+        } catch (retryError) {
+          if (retryError instanceof ApiError && retryError.status === 401) {
+            throw error;
+          }
+          throw retryError;
+        }
+      }
+      try {
+        await authAdapter.login(
+          window.location.pathname + window.location.search,
+        );
+      } catch {
+        // A redirect can interrupt the login promise; callers still receive
+        // the API failure that initiated reauthentication.
+      }
+    }
+    throw error;
   }
   if (r.status === 204) return undefined as T;
   return r.json() as Promise<T>;
+}
+
+function hasHeader(headers: Record<string, string>, name: string): boolean {
+  return Object.keys(headers).some((key) => key.toLowerCase() === name.toLowerCase());
+}
+
+function asBearerToken(token: string): string {
+  return `Bearer ${token.replace(/^Bearer\s+/i, "")}`;
 }
 
 export const ticketsApi = {
@@ -162,7 +229,7 @@ export const ticketsApi = {
       title: string;
       priority: string;
       message: string;
-    }>(`/tickets/public/intake/`, { method: "POST", body: data }),
+    }>(`/tickets/public/intake/`, { method: "POST", body: data, auth: false }),
 };
 
 export const servicesApi = {

@@ -9,6 +9,13 @@ export type AuthState =
 
 let keycloak: Keycloak | null = null;
 
+export function isDevAuthEnabled(): boolean {
+  return (
+    import.meta.env.VITE_DEV_AUTH === "1" &&
+    import.meta.env.MODE === "development"
+  );
+}
+
 export function getKeycloak(): Keycloak {
   if (!keycloak) {
     keycloak = new Keycloak({
