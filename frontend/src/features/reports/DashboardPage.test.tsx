@@ -145,6 +145,22 @@ describe("dashboard domain state", () => {
 });
 
 describe("dashboard permission state", () => {
+  it.each([
+    { groups: [] },
+    { groups: ["unknown-role"] },
+    { groups: ["security-responders"] },
+  ])(
+    "renders PermissionPage without a dashboard request for groups $groups",
+    async ({ groups }) => {
+      renderDashboard({ groups });
+
+      expect(
+        await screen.findByRole("heading", { name: "Access not permitted" }),
+      ).toBeInTheDocument();
+      expect(harness.dashboard).not.toHaveBeenCalled();
+    },
+  );
+
   it("renders PermissionPage for a 403 without initiating login", async () => {
     harness.dashboard.mockRejectedValue(
       new ApiError(403, { detail: "domain_scope_required" }),

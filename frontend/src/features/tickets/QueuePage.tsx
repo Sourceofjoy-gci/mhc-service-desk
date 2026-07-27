@@ -17,13 +17,14 @@ import {
   X,
 } from "lucide-react";
 import { useAuth } from "@/features/auth/AuthProvider";
+import PermissionPage from "@/features/auth/PermissionPage";
 import {
-  admittedDomains,
+  domainCapabilities,
   ticketsApi,
   type Domain,
   type TicketSummary,
 } from "@/lib/api";
-import type { Page } from "@/lib/collections";
+import { cursorFromPageLink, type Page } from "@/lib/collections";
 import { TicketCard } from "./TicketCard";
 import {
   Alert,
@@ -101,33 +102,61 @@ const EMPTY_PAGE: Page<TicketSummary> = {
 type SortKey = "priority" | "created" | "updated";
 
 const SORT_KEYS = new Set<SortKey>(["priority", "created", "updated"]);
+const STATUS_KEYS = new Set(STATUS_OPTIONS.map(({ value }) => value));
+const PRIORITY_KEYS = new Set<string>(PRIORITY_OPTIONS);
 
 export default function QueuePage() {
   const { user } = useAuth();
   const [searchParams, setSearchParams] = useSearchParams();
   const location = useLocation();
   const navigate = useNavigate();
-  const domains = admittedDomains(user?.groups ?? []);
+  const { queueDomains: domains } = domainCapabilities(user?.groups ?? []);
   const requestedDomain = searchParams.get("domain");
   const domain = domains.includes(requestedDomain as Domain)
     ? (requestedDomain as Domain)
     : domains[0];
-  const status = searchParams.get("status") ?? "";
-  const priority = searchParams.get("priority") ?? "";
+  const requestedStatus = searchParams.get("status");
+  const status =
+    requestedStatus && STATUS_KEYS.has(requestedStatus) ? requestedStatus : "";
+  const requestedPriority = searchParams.get("priority");
+  const priority =
+    requestedPriority && PRIORITY_KEYS.has(requestedPriority)
+      ? requestedPriority
+      : "";
   const search = searchParams.get("search") ?? "";
   const requestedSort = searchParams.get("sort") as SortKey | null;
   const sort =
     requestedSort && SORT_KEYS.has(requestedSort) ? requestedSort : "priority";
   const cursor = searchParams.get("cursor") ?? "";
+  const currentSearch = searchParams.toString();
+  const canonicalParams = new URLSearchParams(searchParams);
+  let hasInvalidValue = false;
+
+  if (requestedDomain !== null && requestedDomain !== domain) {
+    if (domain) canonicalParams.set("domain", domain);
+    else canonicalParams.delete("domain");
+    hasInvalidValue = true;
+  }
+  if (searchParams.has("status") && status !== requestedStatus) {
+    canonicalParams.delete("status");
+    hasInvalidValue = true;
+  }
+  if (searchParams.has("priority") && priority !== requestedPriority) {
+    canonicalParams.delete("priority");
+    hasInvalidValue = true;
+  }
+  if (searchParams.has("sort") && sort !== requestedSort) {
+    canonicalParams.set("sort", sort);
+    hasInvalidValue = true;
+  }
+  if (hasInvalidValue) canonicalParams.delete("cursor");
+  const canonicalSearch = canonicalParams.toString();
+  const needsCanonicalization = canonicalSearch !== currentSearch;
 
   useEffect(() => {
-    if (!requestedDomain || requestedDomain === domain) return;
-    const next = new URLSearchParams(searchParams);
-    if (domain) next.set("domain", domain);
-    else next.delete("domain");
-    next.delete("cursor");
-    setSearchParams(next, { replace: true });
-  }, [domain, requestedDomain, searchParams, setSearchParams]);
+    if (!needsCanonicalization) return;
+    setSearchParams(new URLSearchParams(canonicalSearch), { replace: true });
+  }, [canonicalSearch, needsCanonicalization, setSearchParams]);
 
   const updateParam = (
     key: "domain" | "status" | "priority" | "search" | "sort",
@@ -152,6 +181,7 @@ export default function QueuePage() {
   const { data, isLoading, error, refetch, isFetching } = useQuery({
     queryKey: ["tickets", params],
     queryFn: () => ticketsApi.list(params),
+    enabled: Boolean(domain) && !needsCanonicalization,
   });
 
   const page = data ?? EMPTY_PAGE;
@@ -164,17 +194,15 @@ export default function QueuePage() {
     setSearchParams(new URLSearchParams({ sort }));
   };
 
-  const paginate = (serverLink: string | null) => {
-    if (!serverLink) return;
-    const serverCursor = new URL(
-      serverLink,
-      window.location.origin,
-    ).searchParams.get("cursor");
+  const paginate = (serverCursor: string | null) => {
     if (!serverCursor) return;
     const next = new URLSearchParams(searchParams);
     next.set("cursor", serverCursor);
     setSearchParams(next);
   };
+
+  const previousCursor = cursorFromPageLink(page.previous, cursor || null);
+  const nextCursor = cursorFromPageLink(page.next, cursor || null);
 
   const retainQueueLocation = (event: ReactMouseEvent<HTMLDivElement>) => {
     if (
@@ -196,6 +224,8 @@ export default function QueuePage() {
       state: { returnTo: `${location.pathname}${location.search}` },
     });
   };
+
+  if (!domain) return <PermissionPage />;
 
   return (
     <div className="flex flex-col gap-5">
@@ -242,8 +272,8 @@ export default function QueuePage() {
       )}
 
       <Pagination
-        previous={page.previous}
-        next={page.next}
+        previous={previousCursor}
+        next={nextCursor}
         onNavigate={paginate}
       />
     </div>

@@ -64,6 +64,51 @@ def _client():
     return client
 
 
+def _client_for_groups(groups):
+    user = User.objects.create(
+        username=f"agent-{uuid4().hex}",
+        keycloak_subject=f"subject-{uuid4().hex}",
+    )
+    user._groups = groups
+    client = APIClient()
+    client.force_authenticate(user=user)
+    return client
+
+
+@pytest.fixture
+def cross_domain_collection_tickets(basic_world):
+    tickets = []
+    for domain, prefix, service_key, uuid_offset in (
+        ("operational", "OP", "gen_info", 10_000),
+        ("it", "IT", "it_inc", 20_000),
+    ):
+        service = basic_world[service_key]
+        request_type = service.request_types.get()
+        status = Status.objects.get(domain=domain, code="new")
+        tickets.extend(
+            Ticket(
+                id=UUID(int=uuid_offset + index),
+                number=f"{prefix}-202607-{index:06d}",
+                domain=domain,
+                title=f"{domain} ticket {index}",
+                status=status,
+                priority="P3",
+                channel="web",
+                requester=basic_world["contact"],
+                service=service,
+                request_type=request_type,
+                office=basic_world["office"],
+            )
+            for index in range(1, 56)
+        )
+    Ticket.objects.bulk_create(tickets)
+    Ticket.objects.update(
+        created_at=timezone.now() - timedelta(days=1),
+        updated_at=timezone.now() - timedelta(days=1),
+    )
+    return tickets
+
+
 def _all_pages(client, *, sort=None):
     params = {"sort": sort} if sort else {}
     first = client.get(reverse("tickets-list"), params)
@@ -108,6 +153,69 @@ def _traverse_pages(fetch, first_url):
 
 def _descending_timestamp(value):
     return -timezone.datetime.fromisoformat(value.replace("Z", "+00:00")).timestamp()
+
+
+@pytest.mark.parametrize(
+    "groups",
+    [
+        pytest.param(["ops-agents", "it-agents"], id="combined-ordinary"),
+        pytest.param(["system-admins"], id="administrator"),
+        pytest.param(["auditors"], id="auditor"),
+    ],
+)
+@pytest.mark.parametrize("domain", ["operational", "it"])
+def test_ticket_domain_filter_isolates_every_cursor_page(
+    cross_domain_collection_tickets,
+    groups,
+    domain,
+):
+    client = _client_for_groups(groups)
+    responses, rows = _traverse_pages(
+        client.get,
+        f"{reverse('tickets-list')}?{urlencode({'domain': domain})}",
+    )
+
+    assert len(responses) == 2
+    assert len(rows) == 55
+    assert {row["domain"] for row in rows} == {domain}
+    assert all(f"domain={domain}" in response.data["next"] for response in responses[:-1])
+
+
+@pytest.mark.parametrize(
+    ("groups", "tampered_domain"),
+    [
+        (["ops-agents"], "it"),
+        (["it-agents"], "operational"),
+    ],
+)
+def test_ticket_domain_filter_cannot_broaden_an_ordinary_scope(
+    cross_domain_collection_tickets,
+    groups,
+    tampered_domain,
+):
+    response = _client_for_groups(groups).get(
+        reverse("tickets-list"),
+        {"domain": tampered_domain},
+    )
+
+    assert response.status_code == 200
+    assert response.data == {"next": None, "previous": None, "results": []}
+
+
+def test_ticket_domain_filter_rejects_an_unknown_domain(
+    cross_domain_collection_tickets,
+):
+    response = _client_for_groups(["system-admins"]).get(
+        reverse("tickets-list"),
+        {"domain": "finance"},
+    )
+
+    assert response.status_code == 400
+    assert response.data["code"] == "invalid_choice"
+    assert response.data["detail"] == "Request failed validation"
+    assert response.data["fields"] == {
+        "domain": ['"finance" is not a valid choice.'],
+    }
 
 
 def test_ticket_list_uses_cursor_envelope_without_losing_boundary_rows(collection_tickets):

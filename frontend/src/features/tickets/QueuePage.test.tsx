@@ -239,6 +239,92 @@ describe("queue URL state", () => {
       '"returnTo":"/tickets?domain=operational&sort=updated&cursor=previous%2Fopaque"',
     );
   });
+
+  it("canonicalizes invalid filters and sort before making one constrained request", async () => {
+    renderQueue({
+      route:
+        "/tickets?domain=finance&status=bogus&priority=P0&sort=random&cursor=opaque&search=estate",
+      groups: ["system-admins"],
+    });
+
+    await waitFor(() =>
+      expect(harness.list).toHaveBeenCalledWith({
+        domain: "operational",
+        search: "estate",
+        sort: "priority",
+      }),
+    );
+    expect(harness.list).toHaveBeenCalledTimes(1);
+    const location = screen.getByTestId("location").textContent ?? "";
+    const canonical = new URLSearchParams(location);
+    expect(Object.fromEntries(canonical)).toEqual({
+      domain: "operational",
+      sort: "priority",
+      search: "estate",
+    });
+  });
+
+  it("treats malformed, missing, empty, and current cursor links as unavailable", async () => {
+    renderQueue({
+      route: "/tickets?cursor=current",
+      page: {
+        next: "http://[",
+        previous: "/api/v1/tickets/?cursor=current",
+        results: [TICKET],
+      },
+    });
+
+    await screen.findByText("Estate query");
+    expect(
+      screen.queryByRole("navigation", { name: "Queue pagination" }),
+    ).not.toBeInTheDocument();
+  });
+
+  it("replaces page results and removes stale pagination links on the last page", async () => {
+    const lastTicket = {
+      ...TICKET,
+      id: "ticket-2",
+      number: "OP-202607-000002",
+      title: "Last page ticket",
+    };
+    harness.auth = makeAuth(["ops-agents"]);
+    harness.list.mockImplementation((params: Record<string, string>) =>
+      Promise.resolve(
+        params.cursor
+          ? { next: null, previous: null, results: [lastTicket] }
+          : {
+              next: "/api/v1/tickets/?cursor=next-page",
+              previous: null,
+              results: [TICKET],
+            },
+      ),
+    );
+    const queryClient = new QueryClient({
+      defaultOptions: { queries: { retry: false } },
+    });
+    render(
+      <QueryClientProvider client={queryClient}>
+        <MemoryRouter
+          initialEntries={["/tickets"]}
+          future={{ v7_startTransition: true, v7_relativeSplatPath: true }}
+        >
+          <Routes>
+            <Route path="/tickets" element={<QueuePage />} />
+          </Routes>
+        </MemoryRouter>
+      </QueryClientProvider>,
+    );
+
+    const user = userEvent.setup();
+    await screen.findByText("Estate query");
+    await user.click(screen.getByRole("button", { name: "Next" }));
+
+    expect(await screen.findByText("Last page ticket")).toBeInTheDocument();
+    expect(screen.queryByText("Estate query")).not.toBeInTheDocument();
+    expect(
+      screen.queryByRole("navigation", { name: "Queue pagination" }),
+    ).not.toBeInTheDocument();
+  });
 });
 
 describe("queue domain constraints", () => {
@@ -255,6 +341,8 @@ describe("queue domain constraints", () => {
         sort: "priority",
       }),
     );
+    expect(harness.list).toHaveBeenCalledTimes(1);
+    expect(screen.getByTestId("location")).toHaveTextContent("?domain=it");
   });
 
   it.each([["system-admins"], ["auditors"], ["ops-agents", "it-agents"]])(
@@ -267,6 +355,34 @@ describe("queue domain constraints", () => {
         await screen.findByRole("option", { name: "Operational" }),
       ).toBeInTheDocument();
       expect(screen.getByRole("option", { name: "IT" })).toBeInTheDocument();
+    },
+  );
+
+  it("offers both restricted queues to security responders", async () => {
+    renderQueue({ groups: ["security-responders"] });
+
+    await userEvent.setup().click(screen.getByLabelText("Domain"));
+    expect(
+      await screen.findByRole("option", { name: "Operational" }),
+    ).toBeInTheDocument();
+    expect(screen.getByRole("option", { name: "IT" })).toBeInTheDocument();
+    await waitFor(() =>
+      expect(harness.list).toHaveBeenCalledWith({
+        domain: "operational",
+        sort: "priority",
+      }),
+    );
+  });
+
+  it.each([{ groups: [] }, { groups: ["unknown-role"] }])(
+    "renders permission state without a list request for groups $groups",
+    async ({ groups }) => {
+      renderQueue({ groups });
+
+      expect(
+        await screen.findByRole("heading", { name: "Access not permitted" }),
+      ).toBeInTheDocument();
+      expect(harness.list).not.toHaveBeenCalled();
     },
   );
 });

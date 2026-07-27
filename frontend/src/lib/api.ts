@@ -134,6 +134,13 @@ export class ApiAuthUnavailableError extends Error {
   }
 }
 
+export class ApiLinkError extends Error {
+  constructor(message: string) {
+    super(message);
+    this.name = "ApiLinkError";
+  }
+}
+
 export async function api<T>(path: string, opts: RequestOptions = {}): Promise<T> {
   const usesAuth = opts.auth !== false;
   const requestAuth = authAdapter;
@@ -204,14 +211,19 @@ export async function apiUrl<T>(absoluteOrRelativeUrl: string): Promise<T> {
     API_BASE.endsWith("/") ? API_BASE : `${API_BASE}/`,
     window.location.origin,
   );
-  const serverUrl = new URL(absoluteOrRelativeUrl, apiBaseUrl);
+  let serverUrl: URL;
+  try {
+    serverUrl = new URL(absoluteOrRelativeUrl, apiBaseUrl);
+  } catch {
+    throw new ApiLinkError("Server link is malformed");
+  }
   const apiPathPrefix = apiBaseUrl.pathname.replace(/\/$/, "");
 
   if (
     serverUrl.pathname !== apiPathPrefix &&
     !serverUrl.pathname.startsWith(`${apiPathPrefix}/`)
   ) {
-    throw new Error("Server link is outside the configured API path");
+    throw new ApiLinkError("Server link is outside the configured API path");
   }
 
   const path = serverUrl.pathname.slice(apiPathPrefix.length) || "/";
@@ -231,7 +243,7 @@ export const ticketsApi = {
     params: Record<string, string> = {},
   ): Promise<Page<TicketSummary>> => {
     const qs = new URLSearchParams(params).toString();
-    const value = await api<TicketSummary[] | Page<TicketSummary>>(
+    const value = await api<unknown>(
       `/tickets/${qs ? "?" + qs : ""}`,
     );
     return normalizePage(value);
@@ -287,7 +299,7 @@ export const ticketsApi = {
 
 export const servicesApi = {
   list: async (): Promise<Page<unknown>> =>
-    normalizePage(await api<unknown[] | Page<unknown>>("/catalogue/services/")),
+    normalizePage(await api<unknown>("/catalogue/services/")),
 };
 
 const OPERATIONAL_GROUPS = new Set([
@@ -303,13 +315,24 @@ const ALL_DOMAIN_GROUPS = new Set([
   "auditor",
   "auditors",
 ]);
+const RESTRICTED_QUEUE_GROUPS = new Set(["security-responders"]);
 
-export function admittedDomains(groups: readonly string[]): Domain[] {
+export interface DomainCapabilities {
+  queueDomains: Domain[];
+  dashboardDomains: Domain[];
+}
+
+export function domainCapabilities(
+  groups: readonly string[],
+): DomainCapabilities {
   const names = new Set(
     groups.map((group) => group.split("/").filter(Boolean).at(-1) ?? group),
   );
   if ([...names].some((group) => ALL_DOMAIN_GROUPS.has(group))) {
-    return ["operational", "it"];
+    return {
+      queueDomains: ["operational", "it"],
+      dashboardDomains: ["operational", "it"],
+    };
   }
 
   const domains: Domain[] = [];
@@ -317,5 +340,12 @@ export function admittedDomains(groups: readonly string[]): Domain[] {
     domains.push("operational");
   }
   if ([...names].some((group) => IT_GROUPS.has(group))) domains.push("it");
-  return domains;
+  return {
+    queueDomains: [...names].some((group) =>
+      RESTRICTED_QUEUE_GROUPS.has(group),
+    )
+      ? ["operational", "it"]
+      : domains,
+    dashboardDomains: domains,
+  };
 }

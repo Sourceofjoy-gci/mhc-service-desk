@@ -8,7 +8,7 @@ from __future__ import annotations
 import logging
 
 from django.db.models import Q
-from rest_framework import status, viewsets
+from rest_framework import serializers, status, viewsets
 from rest_framework.decorators import action, api_view, permission_classes, throttle_classes
 from rest_framework.permissions import AllowAny, IsAuthenticated
 from rest_framework.response import Response
@@ -73,6 +73,13 @@ class TicketViewSet(viewsets.ModelViewSet):
     def filter_queryset(self, queryset):
         qs = super().filter_queryset(queryset)
         params = self.request.query_params
+        if "domain" in params:
+            domain_field = serializers.ChoiceField(choices=Ticket.Domain.values)
+            try:
+                domain = domain_field.run_validation(params["domain"])
+            except serializers.ValidationError as exc:
+                raise serializers.ValidationError({"domain": exc.detail}) from exc
+            qs = qs.filter(domain=domain)
         if "status" in params:
             qs = qs.filter(status__code=params["status"])
         if "priority" in params:

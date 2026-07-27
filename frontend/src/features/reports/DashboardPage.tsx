@@ -40,7 +40,7 @@ import {
 } from "@/components/ui/table";
 import { cn } from "@/lib/utils";
 import {
-  admittedDomains,
+  domainCapabilities,
   ApiError,
   ticketsApi,
   type Domain,
@@ -72,7 +72,7 @@ const DASHBOARD_DOMAIN_OPTIONS = [
 export default function DashboardPage() {
   const { user } = useAuth();
   const [searchParams, setSearchParams] = useSearchParams();
-  const domains = admittedDomains(user?.groups ?? []);
+  const { dashboardDomains: domains } = domainCapabilities(user?.groups ?? []);
   const requestedDomain = searchParams.get("domain");
   const domain = domains.includes(requestedDomain as Domain)
     ? (requestedDomain as Domain)
