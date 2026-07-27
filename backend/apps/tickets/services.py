@@ -20,13 +20,14 @@ from apps.organisations.models import Office
 from apps.workflow.models import Status, Transition, TransitionHistory
 
 from .events import record_ticket_event
-from .models import OutboxEvent, Ticket, TicketLink, TicketMessage, TicketNote, Watcher
+from .models import Ticket, TicketLink, TicketMessage, TicketNote, Watcher
 from .permissions import (
     can_change_confidentiality,
     can_reassign,
     can_update_work_state,
     eligible_assignee_queryset,
 )
+from .workflow import available_transitions
 
 logger = logging.getLogger(__name__)
 
@@ -140,6 +141,12 @@ def create_ticket(
 
 class TransitionError(Exception):
     """Raised when a requested transition is invalid."""
+
+    def __init__(self, fields: dict[str, list[str]] | None = None):
+        self.fields = fields or {
+            "to_status": ["Select an available transition."],
+        }
+        super().__init__("Transition is invalid.")
 
 
 class TicketConflictError(Exception):
@@ -272,74 +279,131 @@ def update_work_state(
 @transaction.atomic
 def transition_ticket(
     *,
-    ticket: Ticket,
+    ticket_id,
+    actor,
+    expected_updated_at,
     to_status_code: str,
-    actor_subject: str,
     reason: str = "",
     resolution_code: str = "",
     resolution_summary: str = "",
-    extra: dict[str, Any] | None = None,
 ) -> Ticket:
-    """Validate and apply a workflow transition.
+    """Atomically validate and apply an optimistic workflow transition."""
+    locked = (
+        Ticket.objects.select_for_update(of=("self",))
+        .select_related("status")
+        .get(id=ticket_id)
+    )
+    if expected_updated_at != locked.updated_at:
+        raise TicketConflictError(locked.updated_at)
 
-    Raises TransitionError on invalid moves; emits a `ticket.transitioned`
-    outbox event so downstream systems can react.
-    """
-    extra = extra or {}
-    target = Status.objects.get(domain=ticket.domain, code=to_status_code)
-    transition = Transition.objects.filter(
-        domain=ticket.domain,
-        from_status=ticket.status,
-        to_status=target,
+    workflow_transition = Transition.objects.select_related("to_status").filter(
+        domain=locked.domain,
+        from_status=locked.status,
+        to_status__code=to_status_code,
         is_active=True,
     ).first()
-    if not transition:
-        raise TransitionError(
-            f"No transition {ticket.status.code} -> {target.code} for {ticket.domain}"
-        )
-    if transition.sets_resolution:
-        if not (resolution_code and resolution_summary):
-            raise TransitionError(
-                "Resolution code and summary are required to move to this status"
-            )
+    if workflow_transition is None:
+        raise TransitionError
+    if not available_transitions(locked, actor).filter(
+        id=workflow_transition.id
+    ).exists():
+        raise TicketPermissionError
 
-    previous = ticket.status
-    ticket.status = target
-    if transition.sets_resolution:
-        ticket.resolution_code = resolution_code
-        ticket.resolution_summary = resolution_summary
-        ticket.resolved_at = timezone.now()
-    ticket.save(
-        update_fields=[
-            "status",
-            "resolution_code",
-            "resolution_summary",
-            "resolved_at",
-            "updated_at",
-        ]
-    )
+    supplied_fields = {
+        "reason": reason,
+        "resolution_code": resolution_code,
+        "resolution_summary": resolution_summary,
+    }
+    required = set(workflow_transition.required_fields)
+    if workflow_transition.sets_resolution:
+        required.update({"resolution_code", "resolution_summary"})
+    missing = {
+        field: ["This field is required."]
+        for field in required
+        if not str(supplied_fields.get(field, "")).strip()
+    }
+    if missing:
+        raise TransitionError(missing)
+
+    now = timezone.now()
+    previous = locked.status
+    target = workflow_transition.to_status
+    before: dict[str, Any] = {"status": previous.code}
+    after: dict[str, Any] = {"status": target.code}
+    update_fields = ["status"]
+    locked.status = target
+
+    if workflow_transition.sets_resolution:
+        before.update(
+            {
+                "resolution_code": locked.resolution_code,
+                "resolution_summary": locked.resolution_summary,
+                "resolved_at": locked.resolved_at,
+            }
+        )
+        locked.resolution_code = resolution_code
+        locked.resolution_summary = resolution_summary
+        locked.resolved_at = now
+        after.update(
+            {
+                "resolution_code": locked.resolution_code,
+                "resolution_summary": locked.resolution_summary,
+                "resolved_at": locked.resolved_at,
+            }
+        )
+        update_fields.extend(
+            ["resolution_code", "resolution_summary", "resolved_at"]
+        )
+
+    if target.code == "reopened":
+        before.update(
+            {
+                "resolution_code": locked.resolution_code,
+                "resolution_summary": locked.resolution_summary,
+                "resolved_at": locked.resolved_at,
+                "reopened_at": locked.reopened_at,
+            }
+        )
+        locked.resolution_code = ""
+        locked.resolution_summary = ""
+        locked.resolved_at = None
+        locked.reopened_at = now
+        after.update(
+            {
+                "resolution_code": "",
+                "resolution_summary": "",
+                "resolved_at": None,
+                "reopened_at": locked.reopened_at,
+            }
+        )
+        update_fields.extend(
+            ["resolution_code", "resolution_summary", "resolved_at", "reopened_at"]
+        )
+
+    if target.code == "closed":
+        before["closed_at"] = locked.closed_at
+        locked.closed_at = now
+        after["closed_at"] = locked.closed_at
+        update_fields.append("closed_at")
+
+    locked.save(update_fields=[*dict.fromkeys(update_fields), "updated_at"])
 
     TransitionHistory.objects.create(
-        ticket=ticket,
+        ticket=locked,
         from_status=previous,
         to_status=target,
-        actor_subject=actor_subject,
+        actor_subject=actor.keycloak_subject,
         reason=reason,
     )
-    OutboxEvent.objects.create(
-        aggregate="ticket",
-        aggregate_id=str(ticket.id),
-        event_type="ticket.transitioned",
-        payload={
-            "ticket_number": ticket.number,
-            "from": previous.code,
-            "to": target.code,
-            "actor": actor_subject,
-            "reason": reason,
-            **({"resolution_code": resolution_code} if resolution_code else {}),
-        },
+    record_ticket_event(
+        ticket=locked,
+        actor_subject=actor.keycloak_subject,
+        action="ticket.transitioned",
+        before=before,
+        after=after,
+        metadata={"reason": reason},
     )
-    return ticket
+    return locked
 
 
 # -----------------------------------------------------------------------------

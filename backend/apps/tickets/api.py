@@ -16,6 +16,7 @@ from .permissions import (
     can_reassign,
     can_update_work_state,
 )
+from .workflow import available_transitions
 
 
 class StatusRefSerializer(serializers.ModelSerializer):
@@ -59,6 +60,7 @@ class TicketListSerializer(serializers.ModelSerializer):
     service_code = serializers.CharField(source="service.code", read_only=True)
     age_hours = serializers.SerializerMethodField()
     sla_health = serializers.SerializerMethodField()
+    available_transition_codes = serializers.SerializerMethodField()
 
     class Meta:
         model = Ticket
@@ -67,7 +69,7 @@ class TicketListSerializer(serializers.ModelSerializer):
             "status_code", "status_name", "status_public",
             "requester_name", "office_code", "service_code",
             "assignee", "waiting_reason", "created_at", "updated_at",
-            "age_hours", "sla_health",
+            "age_hours", "sla_health", "available_transition_codes",
         )
         read_only_fields = fields
 
@@ -104,6 +106,14 @@ class TicketListSerializer(serializers.ModelSerializer):
         # consumption percent is a stub; full impl reads consumed_business_seconds
         return "on_track"
 
+    def get_available_transition_codes(self, obj: Ticket) -> list[str]:
+        request = self.context.get("request")
+        actor = getattr(request, "user", None)
+        return [
+            transition.to_status.code
+            for transition in available_transitions(obj, actor)
+        ]
+
 
 class TicketDetailSerializer(TicketListSerializer):
     description = serializers.CharField()
@@ -129,6 +139,7 @@ class TicketDetailSerializer(TicketListSerializer):
     notes = TicketNoteSerializer(many=True, read_only=True)
     links = TicketLinkSerializer(many=True, read_only=True)
     capabilities = serializers.SerializerMethodField()
+    available_transitions = serializers.SerializerMethodField()
 
     def get_capabilities(self, obj: Ticket) -> dict[str, bool | str | None]:
         request = self.context.get("request")
@@ -156,6 +167,19 @@ class TicketDetailSerializer(TicketListSerializer):
             ),
         }
 
+    def get_available_transitions(self, obj: Ticket) -> list[dict[str, object]]:
+        request = self.context.get("request")
+        actor = getattr(request, "user", None)
+        return [
+            {
+                "to_status": transition.to_status.code,
+                "label": transition.name,
+                "requires_resolution": transition.sets_resolution,
+                "requires_reason": "reason" in transition.required_fields,
+            }
+            for transition in available_transitions(obj, actor)
+        ]
+
     class Meta(TicketListSerializer.Meta):
         fields = TicketListSerializer.Meta.fields + (
             "description", "requester", "organisation", "service", "request_type", "office",
@@ -163,12 +187,13 @@ class TicketDetailSerializer(TicketListSerializer):
             "team", "blocked_reason", "next_action", "next_action_at",
             "resolution_code", "resolution_summary",
             "acknowledged_at", "first_responded_at", "resolved_at", "closed_at",
-            "messages", "notes", "links", "capabilities",
+            "messages", "notes", "links", "capabilities", "available_transitions",
         )
 
 
 class TransitionRequestSerializer(serializers.Serializer):
     to_status = serializers.CharField()
+    updated_at = serializers.DateTimeField()
     reason = serializers.CharField(required=False, allow_blank=True)
     resolution_code = serializers.CharField(required=False, allow_blank=True)
     resolution_summary = serializers.CharField(required=False, allow_blank=True)

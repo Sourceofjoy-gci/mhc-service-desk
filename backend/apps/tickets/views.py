@@ -81,7 +81,7 @@ class TicketViewSet(viewsets.ModelViewSet):
     pagination_class = TicketCursorPagination
 
     def permission_denied(self, request, message=None, code=None):
-        if self.action == "work_state" and request.user.is_authenticated:
+        if self.action in {"transition", "work_state"} and request.user.is_authenticated:
             raise PermissionDenied(
                 detail="You cannot perform this ticket action.",
                 code="ticket_action_forbidden",
@@ -140,18 +140,51 @@ class TicketViewSet(viewsets.ModelViewSet):
     def transition(self, request, number=None):
         ticket = self.get_object()
         serializer = TransitionRequestSerializer(data=request.data)
-        serializer.is_valid(raise_exception=True)
+        if not serializer.is_valid():
+            return _ticket_action_error(
+                request,
+                code="invalid_transition",
+                detail="Transition is invalid.",
+                fields=_serializer_error_fields(serializer.errors),
+                response_status=status.HTTP_400_BAD_REQUEST,
+            )
         try:
-            services.transition_ticket(
-                ticket=ticket,
+            ticket = services.transition_ticket(
+                ticket_id=ticket.id,
+                actor=request.user,
+                expected_updated_at=serializer.validated_data["updated_at"],
                 to_status_code=serializer.validated_data["to_status"],
-                actor_subject=request.user.keycloak_subject,
                 reason=serializer.validated_data.get("reason", ""),
                 resolution_code=serializer.validated_data.get("resolution_code", ""),
                 resolution_summary=serializer.validated_data.get("resolution_summary", ""),
             )
         except services.TransitionError as exc:
-            return Response({"detail": str(exc)}, status=status.HTTP_400_BAD_REQUEST)
+            return _ticket_action_error(
+                request,
+                code="invalid_transition",
+                detail="Transition is invalid.",
+                fields=exc.fields,
+                response_status=status.HTTP_400_BAD_REQUEST,
+            )
+        except services.TicketPermissionError:
+            return _ticket_action_error(
+                request,
+                code="ticket_action_forbidden",
+                detail="You cannot perform this ticket action.",
+                fields={},
+                response_status=status.HTTP_403_FORBIDDEN,
+            )
+        except services.TicketConflictError as exc:
+            current = serializers.DateTimeField().to_representation(
+                exc.current_updated_at
+            )
+            return _ticket_action_error(
+                request,
+                code="stale_ticket",
+                detail="The ticket was updated by another user.",
+                fields={"updated_at": [current]},
+                response_status=status.HTTP_409_CONFLICT,
+            )
         # If an IT child reaches resolved, sync parent from waiting_it -> in_progress
         if ticket.domain == "it" and ticket.status.code == "resolved":
             from .it_child import sync_child_status_to_parent
@@ -346,7 +379,12 @@ class TicketViewSet(viewsets.ModelViewSet):
         from .api import TicketListSerializer
         for ticket in qs.order_by("priority", "-created_at")[:300]:
             code = ticket.status.code
-            grouped.setdefault(code, []).append(TicketListSerializer(ticket).data)
+            grouped.setdefault(code, []).append(
+                TicketListSerializer(
+                    ticket,
+                    context=self.get_serializer_context(),
+                ).data
+            )
         return Response({"columns": grouped})
 
 
