@@ -8,6 +8,7 @@ from __future__ import annotations
 
 from dataclasses import dataclass
 
+from django.db.models import Q, QuerySet
 from rest_framework import permissions
 
 
@@ -17,11 +18,14 @@ class Scope:
     office_id: str | None = None
     service_id: str | None = None
     queue_id: str | None = None
+    restricted_only: bool = False
 
     def matches(self, other: Scope) -> bool:
         if self.domain == "admin":
             return True
         if self.domain != other.domain:
+            return False
+        if self.restricted_only and not other.restricted_only:
             return False
         if self.office_id and other.office_id and self.office_id != other.office_id:
             return False
@@ -63,12 +67,35 @@ def get_user_scopes(user) -> list[Scope]:
         scopes.append(Scope(domain="operational"))
     if groups & {"it-agents", "it-leads"}:
         scopes.append(Scope(domain="it"))
+    if "security-responders" in groups:
+        scopes.append(Scope(domain="operational", restricted_only=True))
+        scopes.append(Scope(domain="it", restricted_only=True))
     if "system-admins" in groups:
         scopes.append(Scope(domain="admin"))
     if "auditors" in groups:
         scopes.append(Scope(domain="operational"))
         scopes.append(Scope(domain="it"))
-    return scopes
+
+    normalised: dict[tuple[str, str | None, str | None, str | None], Scope] = {}
+    for scope in scopes:
+        key = (scope.domain, scope.office_id, scope.service_id, scope.queue_id)
+        existing = normalised.get(key)
+        if existing is None or (existing.restricted_only and not scope.restricted_only):
+            normalised[key] = scope
+    return list(normalised.values())
+
+
+def is_auditor(user) -> bool:
+    return "auditors" in set(getattr(user, "_groups", []) or [])
+
+
+def has_unrestricted_domain_scope(user, domain: str) -> bool:
+    user._scopes = get_user_scopes(user)
+    return any(
+        scope.domain == "admin"
+        or (scope.domain == domain and not scope.restricted_only)
+        for scope in user._scopes
+    )
 
 
 def can_view_restricted(user) -> bool:
@@ -85,6 +112,41 @@ def can_view_restricted(user) -> bool:
         "system-admins", "auditors",
     }
     return bool(groups & privileged)
+
+
+def scope_ticket_queryset(user, queryset: QuerySet) -> QuerySet:
+    """Limit a ticket queryset to the caller's explicit scopes."""
+    scopes = get_user_scopes(user)
+    user._scopes = scopes
+    branches: list[Q] = []
+    restricted_access = can_view_restricted(user)
+
+    for scope in scopes:
+        if scope.domain == "admin":
+            branch = Q(pk__isnull=False)
+        elif scope.domain in {"operational", "it"}:
+            branch = Q(domain=scope.domain)
+        else:
+            continue
+        if scope.office_id:
+            branch &= Q(office_id=scope.office_id)
+        if scope.service_id:
+            branch &= Q(service_id=scope.service_id)
+        if scope.queue_id:
+            branch &= Q(queue_id=scope.queue_id)
+        if scope.restricted_only:
+            branch &= Q(confidentiality="restricted")
+        elif not restricted_access:
+            branch &= ~Q(confidentiality="restricted")
+        branches.append(branch)
+
+    if not branches:
+        return queryset.none()
+
+    combined = branches[0]
+    for branch in branches[1:]:
+        combined |= branch
+    return queryset.filter(combined)
 
 
 def attach_scopes(request):
@@ -107,6 +169,8 @@ class ScopePermission(permissions.BasePermission):
     def has_permission(self, request, view):
         if getattr(view, "_public", False):
             return True
+        if is_auditor(request.user) and request.method not in permissions.SAFE_METHODS:
+            return False
         scope = getattr(view, "required_scope", None) or self.required_scope
         if scope is None:
             return bool(request.user and request.user.is_authenticated)

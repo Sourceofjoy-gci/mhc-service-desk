@@ -56,6 +56,11 @@
       "realmRoles": ["staff", "lead-it"]
     },
     {
+      "name": "security-responders",
+      "path": "/security-responders",
+      "realmRoles": ["staff"]
+    },
+    {
       "name": "system-admins",
       "path": "/system-admins",
       "realmRoles": ["staff", "admin"]

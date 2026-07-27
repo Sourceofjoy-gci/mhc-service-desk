@@ -20,7 +20,7 @@ from apps.identity_access.scope import (
     ScopePermission,
     attach_scopes,
     public_endpoint,
-    scope_required,
+    scope_ticket_queryset,
 )
 from apps.sla.models import SlaPolicy
 from apps.sla.services import instantiate_slas
@@ -62,24 +62,10 @@ class TicketViewSet(viewsets.ModelViewSet):
         return TicketListSerializer
 
     def get_queryset(self):
-        attach_scopes(self.request)
-        qs = super().get_queryset()
-        scopes = self.request.user._scopes
-        domain_filter = Q()
-        admin_or_audit = any(s.domain in ("admin", "audit") for s in scopes)
-        if admin_or_audit:
-            qs = qs.order_by("-created_at", "id")
-        else:
-            for s in scopes:
-                domain_filter |= Q(domain=s.domain)
-            if not domain_filter:
-                return qs.none()
-            qs = qs.filter(domain_filter)
-        # Restricted tickets: only supervisors / leads / security / auditors / admins
-        from apps.identity_access.scope import can_view_restricted
-        if not can_view_restricted(self.request.user):
-            qs = qs.exclude(confidentiality="restricted")
-        return qs.order_by("-created_at", "id")
+        return scope_ticket_queryset(
+            self.request.user,
+            super().get_queryset(),
+        ).order_by("-created_at", "id")
 
     def filter_queryset(self, queryset):
         qs = super().filter_queryset(queryset)
@@ -129,7 +115,10 @@ class TicketViewSet(viewsets.ModelViewSet):
         ticket = self.get_object()
         if request.method == "GET":
             from .api import TicketMessageSerializer
-            return Response({"results": TicketMessageSerializer(ticket.messages.all(), many=True).data})
+
+            return Response({
+                "results": TicketMessageSerializer(ticket.messages.all(), many=True).data
+            })
         ser = MessageCreateSerializer(data=request.data)
         ser.is_valid(raise_exception=True)
         msg = services.add_message(
@@ -276,9 +265,11 @@ def public_intake(request):
         # refresh derived fields
         updated = False
         if contact.full_name != data["requester_name"]:
-            contact.full_name = data["requester_name"]; updated = True
+            contact.full_name = data["requester_name"]
+            updated = True
         if data.get("requester_phone") and contact.phone_e164 != data["requester_phone"]:
-            contact.phone_e164 = data["requester_phone"]; updated = True
+            contact.phone_e164 = data["requester_phone"]
+            updated = True
         if updated:
             contact.save()
     else:
@@ -300,7 +291,11 @@ def public_intake(request):
 
     # Materialise SLA instances
     try:
-        policy = SlaPolicy.objects.get(domain="operational", priority=ticket.priority, is_active=True)
+        policy = SlaPolicy.objects.get(
+            domain="operational",
+            priority=ticket.priority,
+            is_active=True,
+        )
         instantiate_slas(ticket=ticket, policy=policy)
     except SlaPolicy.DoesNotExist:
         logger.warning("no_sla_policy_for_ticket", extra={"correlation_id": ticket.number})
@@ -344,7 +339,14 @@ def operational_dashboard(request):
 
     return Response({
         "totals": {
-            "open": qs.exclude(status__code__in=["closed", "resolved", "cancelled", "rejected", "duplicate", "spam"]).count(),
+            "open": qs.exclude(status__code__in=[
+                "closed",
+                "resolved",
+                "cancelled",
+                "rejected",
+                "duplicate",
+                "spam",
+            ]).count(),
             "today": qs.filter(created_at__date=now.date()).count(),
             "this_week": qs.filter(created_at__gte=now - timedelta(days=7)).count(),
         },
@@ -352,7 +354,9 @@ def operational_dashboard(request):
             qs.values("priority").annotate(count=Count("id")).order_by("priority")
         ),
         "by_status": list(
-            qs.values("status__code", "status__name").annotate(count=Count("id")).order_by("status__order")
+            qs.values("status__code", "status__name")
+            .annotate(count=Count("id"))
+            .order_by("status__order")
         ),
         "unassigned": qs.filter(assignee__isnull=True).exclude(
             status__code__in=["closed", "resolved", "cancelled", "rejected", "duplicate", "spam"]

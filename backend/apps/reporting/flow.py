@@ -8,13 +8,19 @@ from __future__ import annotations
 
 import statistics
 from datetime import datetime, timezone
+from django.db.models import Count
 
 from rest_framework.decorators import api_view, permission_classes
+from rest_framework.exceptions import PermissionDenied
 from rest_framework.permissions import IsAuthenticated
 from rest_framework.response import Response
 
 from apps.identity_access.authentication import KeycloakJWTAuthentication
-from apps.identity_access.scope import ScopePermission
+from apps.identity_access.scope import (
+    ScopePermission,
+    has_unrestricted_domain_scope,
+    scope_ticket_queryset,
+)
 
 from apps.tickets.models import Ticket
 from apps.workflow.models import Status
@@ -24,12 +30,18 @@ from apps.workflow.models import Status
 @permission_classes([IsAuthenticated, ScopePermission])
 def flow_metrics(request):
     """Compute flow metrics for a domain over a window."""
-    domain = request.query_params.get("domain", "operational")
+    domain = request.query_params.get("domain")
+    if domain and not has_unrestricted_domain_scope(request.user, domain):
+        raise PermissionDenied(code="domain_scope_required")
     days = int(request.query_params.get("days", "30"))
     now = datetime.now(tz=timezone.utc)
     window_start = now.timestamp() - days * 86400
 
-    qs = Ticket.objects.filter(domain=domain, created_at__gte=datetime.fromtimestamp(window_start, tz=timezone.utc))
+    qs = scope_ticket_queryset(request.user, Ticket.objects.all()).filter(
+        created_at__gte=datetime.fromtimestamp(window_start, tz=timezone.utc)
+    )
+    if domain:
+        qs = qs.filter(domain=domain)
     closed = qs.filter(status__is_terminal=True)
     lead_times = []
     cycle_times = []
@@ -41,13 +53,18 @@ def flow_metrics(request):
 
     wip = qs.exclude(status__is_terminal=True).count()
     by_status = list(
-        qs.values("status__code", "status__name").annotate(count=__import__("django").db.models.Count("id"))
+        qs.values("status__code", "status__name").annotate(count=Count("id"))
     )
 
     def pctile(values, p):
         if not values:
             return None
-        return round(statistics.quantiles(values, n=100)[p - 1] if len(values) >= 100 else sorted(values)[int(len(values) * p / 100)], 1)
+        value = (
+            statistics.quantiles(values, n=100)[p - 1]
+            if len(values) >= 100
+            else sorted(values)[int(len(values) * p / 100)]
+        )
+        return round(value, 1)
 
     return Response({
         "domain": domain,

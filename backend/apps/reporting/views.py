@@ -5,11 +5,17 @@ import csv
 
 from django.http import StreamingHttpResponse
 from rest_framework.decorators import api_view, permission_classes
+from rest_framework.exceptions import PermissionDenied
 from rest_framework.permissions import IsAuthenticated
 from rest_framework.response import Response
 
 from apps.identity_access.authentication import KeycloakJWTAuthentication
-from apps.identity_access.scope import ScopePermission, attach_scopes
+from apps.identity_access.scope import (
+    ScopePermission,
+    attach_scopes,
+    has_unrestricted_domain_scope,
+    scope_ticket_queryset,
+)
 from apps.tickets.models import Ticket
 
 
@@ -24,31 +30,10 @@ class Echo:
 @permission_classes([IsAuthenticated, ScopePermission])
 def export_tickets_csv(request):
     """Stream a CSV of the tickets visible to the caller (FR-087)."""
-    # Re-use the same filter logic as the list view via attach_scopes
-    class _Shim:
-        pass
-    shim = _Shim()
-    shim.queryset = Ticket.objects.all()
-    shim.request = request
-    viewset_like = type("V", (), {"get_queryset": lambda self: Ticket.objects.all()})()
-    viewset_like.request = request
-    # Re-implement the filter inline (kept narrow to avoid coupling)
-    attach_scopes(request)
-    qs = Ticket.objects.select_related("status", "requester", "service", "office").all()
-    scopes = request.user._scopes
-    domain_filter = None
-    from django.db.models import Q
-    for s in scopes:
-        if s.domain in ("admin", "audit"):
-            domain_filter = Q()  # no domain restriction
-            break
-        if domain_filter is None:
-            domain_filter = Q(domain=s.domain)
-        else:
-            domain_filter |= Q(domain=s.domain)
-    if domain_filter is not None:
-        qs = qs.filter(domain_filter)
-    qs = qs.order_by("-created_at")
+    qs = scope_ticket_queryset(
+        request.user,
+        Ticket.objects.select_related("status", "requester", "service", "office"),
+    ).order_by("-created_at", "-id")
 
     params = request.query_params
     if "status" in params:
@@ -56,6 +41,8 @@ def export_tickets_csv(request):
     if "priority" in params:
         qs = qs.filter(priority=params["priority"])
     if "domain" in params:
+        if not has_unrestricted_domain_scope(request.user, params["domain"]):
+            raise PermissionDenied(code="domain_scope_required")
         qs = qs.filter(domain=params["domain"])
 
     def rows():
@@ -87,7 +74,11 @@ def operational_dashboard(request):
     from django.utils import timezone
     from datetime import timedelta
 
-    qs = Ticket.objects.filter(domain="operational")
+    attach_scopes(request)
+    if not has_unrestricted_domain_scope(request.user, "operational"):
+        raise PermissionDenied(code="domain_scope_required")
+
+    qs = scope_ticket_queryset(request.user, Ticket.objects.all()).filter(domain="operational")
     now = timezone.now()
     return Response({
         "totals": {
@@ -117,7 +108,11 @@ def it_dashboard(request):
     from django.utils import timezone
     from datetime import timedelta
 
-    qs = Ticket.objects.filter(domain="it")
+    attach_scopes(request)
+    if not has_unrestricted_domain_scope(request.user, "it"):
+        raise PermissionDenied(code="domain_scope_required")
+
+    qs = scope_ticket_queryset(request.user, Ticket.objects.all()).filter(domain="it")
     now = timezone.now()
     return Response({
         "totals": {
