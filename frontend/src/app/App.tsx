@@ -11,6 +11,7 @@ import KanbanPage from "@/features/tickets/KanbanPage";
 import TicketDetailPage from "@/features/tickets/TicketDetailPage";
 import DashboardPage from "@/features/reports/DashboardPage";
 import PublicFormPage from "@/features/public/PublicFormPage";
+import NotFoundPage from "@/features/public/NotFoundPage";
 import ChannelIntakePage from "@/features/tickets/ChannelIntakePage";
 import HomePage from "@/features/home/HomePage";
 
@@ -23,6 +24,7 @@ export default function App() {
           <Route path="/health" element={<HealthPage />} />
           <Route path="/login" element={<LoginPage />} />
           <Route path="/forbidden" element={<PermissionPage />} />
+          <Route path="*" element={<NotFoundPage />} />
         </Route>
         <Route element={<ProtectedRoute />}>
           <Route element={<AppShell />}>

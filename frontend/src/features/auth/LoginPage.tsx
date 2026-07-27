@@ -20,16 +20,20 @@ import { Alert, AlertDescription, AlertTitle } from "@/components/ui/alert";
 import { Badge } from "@/components/ui/badge";
 import { Separator } from "@/components/ui/separator";
 import { Skeleton } from "@/components/ui/skeleton";
+import { Spinner } from "@/components/ui/spinner";
 import { BrandLockup } from "@/components/brand";
+import { useAuthAction } from "./useAuthAction";
 
 export default function LoginPage() {
   const auth = useAuth();
+  const authAction = useAuthAction();
+  const isDevelopmentSession = auth.state === "authenticated" && auth.isDevAuth;
 
   return (
     <div className="grid min-h-[calc(100vh-12rem)] items-center gap-8 lg:grid-cols-2">
       <BrandPanel />
       <div className="mx-auto w-full max-w-md">
-        <Card>
+        <Card aria-busy={authAction.pending || auth.state === "loading"}>
           <CardHeader className="text-center">
             <div className="mx-auto grid size-12 place-items-center rounded-lg bg-muted text-primary">
               <KeyRound />
@@ -51,15 +55,44 @@ export default function LoginPage() {
               />
             ) : auth.state === "unauthenticated" ? (
               <SignInPanel />
+            ) : isDevelopmentSession ? (
+              <DevelopmentAuthPanel
+                username={
+                  auth.user?.displayName?.trim() ||
+                  auth.user?.username?.trim() ||
+                  "Signed-in user"
+                }
+              />
             ) : (
               <SignedInPanel
-                username={auth.user?.displayName ?? auth.user?.username ?? "—"}
+                username={
+                  auth.user?.displayName?.trim() ||
+                  auth.user?.username?.trim() ||
+                  "Signed-in user"
+                }
                 expiresAt={auth.expiresAt}
               />
             )}
           </CardContent>
-          <CardFooter className="flex-col">
-            <AuthAction auth={auth} />
+          <CardFooter className="flex-col gap-3">
+            {authAction.error ? (
+              <Alert variant="destructive" className="w-full">
+                <AlertCircle aria-hidden />
+                <AlertTitle>
+                  {auth.state === "authenticated"
+                    ? "Could not sign out"
+                    : "Could not sign in"}
+                </AlertTitle>
+                <AlertDescription>{authAction.error}</AlertDescription>
+              </Alert>
+            ) : null}
+            {isDevelopmentSession ? null : (
+              <AuthAction
+                auth={auth}
+                pending={authAction.pending}
+                run={authAction.run}
+              />
+            )}
           </CardFooter>
         </Card>
       </div>
@@ -122,12 +155,23 @@ function BrandPanel() {
 
 function SignInSkeleton() {
   return (
-    <div className="flex flex-col gap-3">
-      <Skeleton className="h-9 w-full" />
-      <Skeleton className="h-4 w-2/3" />
-      <Separator />
-      <Skeleton className="h-4 w-full" />
-      <Skeleton className="h-4 w-5/6" />
+    <div
+      role="status"
+      aria-label="Checking authentication status"
+      aria-live="polite"
+      aria-busy="true"
+      className="flex flex-col gap-3"
+    >
+      <span className="text-center text-sm text-muted-foreground">
+        Checking authentication status…
+      </span>
+      <div aria-hidden className="flex flex-col gap-3">
+        <Skeleton className="h-9 w-full" />
+        <Skeleton className="h-4 w-2/3" />
+        <Separator />
+        <Skeleton className="h-4 w-full" />
+        <Skeleton className="h-4 w-5/6" />
+      </div>
     </div>
   );
 }
@@ -152,6 +196,19 @@ function SignInPanel() {
   );
 }
 
+function DevelopmentAuthPanel({ username }: { username: string }) {
+  return (
+    <Alert>
+      <CheckCircle2 className="text-success-foreground" />
+      <AlertTitle>Development access for {username}</AlertTitle>
+      <AlertDescription>
+        Local development access is active. Sign-out is unavailable in this
+        mode.
+      </AlertDescription>
+    </Alert>
+  );
+}
+
 function SignedInPanel({
   username,
   expiresAt,
@@ -172,29 +229,37 @@ function SignedInPanel({
   );
 }
 
-function AuthAction({ auth }: { auth: AuthContextValue }) {
+function AuthAction({
+  auth,
+  pending,
+  run,
+}: {
+  auth: AuthContextValue;
+  pending: boolean;
+  run: (action: () => Promise<void>) => Promise<void>;
+}) {
   if (auth.state === "loading") {
     return <Skeleton className="h-10 w-full" />;
   }
 
   if (auth.state === "error") {
-    return (
-      <Button
-        className="w-full"
-        onClick={() => void auth.login("/")}
-        variant="outline"
-      >
-        Try sign-in again
-        <ArrowRight data-icon="inline-end" />
-      </Button>
-    );
+    return null;
   }
 
   if (auth.state === "unauthenticated") {
     return (
-      <Button className="w-full" onClick={() => void auth.login("/")} size="lg">
-        <KeyRound data-icon="inline-start" />
-        Sign in with Keycloak
+      <Button
+        className="w-full"
+        disabled={pending}
+        onClick={() => void run(() => auth.login("/"))}
+        size="lg"
+      >
+        {pending ? (
+          <Spinner aria-hidden data-icon="inline-start" />
+        ) : (
+          <KeyRound data-icon="inline-start" />
+        )}
+        {pending ? "Signing in…" : "Sign in with Keycloak"}
         <ArrowRight data-icon="inline-end" />
       </Button>
     );
@@ -203,11 +268,16 @@ function AuthAction({ auth }: { auth: AuthContextValue }) {
   return (
     <Button
       className="w-full"
+      disabled={pending}
       variant="outline"
-      onClick={() => void auth.logout()}
+      onClick={() => void run(auth.logout)}
     >
-      <LogOut data-icon="inline-start" />
-      Sign out
+      {pending ? (
+        <Spinner aria-hidden data-icon="inline-start" />
+      ) : (
+        <LogOut data-icon="inline-start" />
+      )}
+      {pending ? "Signing out…" : "Sign out"}
     </Button>
   );
 }

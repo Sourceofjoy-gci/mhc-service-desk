@@ -1,9 +1,11 @@
-import { useEffect, useRef } from "react";
+import { useEffect, useRef, useState } from "react";
 import { AlertCircle } from "lucide-react";
 import { Outlet, useLocation } from "react-router-dom";
 import { Alert, AlertDescription, AlertTitle } from "@/components/ui/alert";
+import { Button } from "@/components/ui/button";
 import { Spinner } from "@/components/ui/spinner";
 import { useAuth } from "./AuthProvider";
+import { authActionError } from "./useAuthAction";
 
 export function ProtectedRoute() {
   const { state, error, login } = useAuth();
@@ -59,13 +61,59 @@ function LoginRedirect({
   login: (returnTo?: string) => Promise<void>;
   returnTo: string;
 }) {
-  const started = useRef(false);
+  const [attempt, setAttempt] = useState(0);
+  const [failure, setFailure] = useState<string | null>(null);
+  const activeAttempt = useRef<{
+    id: number;
+    promise: Promise<void>;
+  } | null>(null);
 
   useEffect(() => {
-    if (started.current) return;
-    started.current = true;
-    void login(returnTo);
-  }, [login, returnTo]);
+    let mounted = true;
+    let current = activeAttempt.current;
+
+    if (!current || current.id !== attempt) {
+      current = {
+        id: attempt,
+        promise: Promise.resolve().then(() => login(returnTo)),
+      };
+      activeAttempt.current = current;
+    }
+
+    const observedAttempt = current;
+    void observedAttempt.promise.catch((loginError) => {
+      if (mounted && activeAttempt.current === observedAttempt) {
+        setFailure(authActionError(loginError));
+      }
+    });
+
+    return () => {
+      mounted = false;
+    };
+  }, [attempt, login, returnTo]);
+
+  if (failure) {
+    return (
+      <main className="grid min-h-svh place-items-center px-6 py-12">
+        <Alert variant="destructive" className="max-w-lg">
+          <AlertCircle aria-hidden />
+          <AlertTitle>Could not start sign-in</AlertTitle>
+          <AlertDescription className="flex flex-col items-start gap-3">
+            <span>{failure}</span>
+            <Button
+              variant="outline"
+              onClick={() => {
+                setFailure(null);
+                setAttempt((value) => value + 1);
+              }}
+            >
+              Retry sign-in
+            </Button>
+          </AlertDescription>
+        </Alert>
+      </main>
+    );
+  }
 
   return (
     <main className="grid min-h-svh place-items-center px-6 py-12">

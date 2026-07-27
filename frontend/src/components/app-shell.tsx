@@ -9,8 +9,10 @@ import {
   HeartPulse,
   LogOut,
   Scale,
+  AlertCircle,
 } from "lucide-react";
 import { useAuth, type AuthUser } from "@/features/auth/AuthProvider";
+import { useAuthAction } from "@/features/auth/useAuthAction";
 import { cn } from "@/lib/utils";
 import { BrandLockup } from "./brand";
 import { ThemeToggle } from "./theme-toggle";
@@ -27,6 +29,8 @@ import {
 import { Avatar, AvatarFallback } from "./ui/avatar";
 import { Badge } from "./ui/badge";
 import { Separator } from "./ui/separator";
+import { Alert, AlertDescription, AlertTitle } from "./ui/alert";
+import { Spinner } from "./ui/spinner";
 
 interface NavItem {
   to: string;
@@ -83,7 +87,8 @@ function NavGroup({ label, items }: { label: string; items: NavItem[] }) {
 export function AppShell() {
   const location = useLocation();
   const { user, isDevAuth, logout } = useAuth();
-  const displayName = user?.displayName || user?.username || "Signed-in user";
+  const identity = normalizeIdentity(user);
+  const logoutAction = useAuthAction();
 
   return (
     <div className="flex min-h-full flex-col bg-background">
@@ -111,9 +116,10 @@ export function AppShell() {
             <ThemeToggle />
             <Separator orientation="vertical" className="mx-1 h-6" />
             <UserMenu
-              user={user}
-              displayName={displayName}
-              onLogout={() => void logout()}
+              identity={identity}
+              canLogout={!isDevAuth}
+              logoutPending={logoutAction.pending}
+              onLogout={() => void logoutAction.run(logout)}
             />
           </div>
         </div>
@@ -135,6 +141,16 @@ export function AppShell() {
           ))}
         </nav>
       </header>
+
+      {logoutAction.error ? (
+        <div className="mx-auto w-full max-w-7xl px-4 pt-4 sm:px-6">
+          <Alert variant="destructive">
+            <AlertCircle aria-hidden />
+            <AlertTitle>Could not sign out</AlertTitle>
+            <AlertDescription>{logoutAction.error}</AlertDescription>
+          </Alert>
+        </div>
+      ) : null}
 
       <main
         key={location.pathname}
@@ -160,12 +176,14 @@ export function AppShell() {
 }
 
 function UserMenu({
-  user,
-  displayName,
+  identity,
+  canLogout,
+  logoutPending,
   onLogout,
 }: {
-  user: AuthUser | null;
-  displayName: string;
+  identity: StaffIdentity;
+  canLogout: boolean;
+  logoutPending: boolean;
   onLogout: () => void;
 }) {
   return (
@@ -175,11 +193,11 @@ function UserMenu({
           <Button
             variant="ghost"
             size="icon"
-            aria-label={`User menu for ${displayName}`}
+            aria-label={`User menu for ${identity.label}`}
           >
             <Avatar className="size-7">
               <AvatarFallback className="bg-primary/15 text-xs font-semibold text-primary">
-                {initials(displayName)}
+                {identity.initials}
               </AvatarFallback>
             </Avatar>
           </Button>
@@ -189,19 +207,29 @@ function UserMenu({
         <DropdownMenuGroup>
           <DropdownMenuLabel className="font-normal">
             <div className="flex flex-col gap-1">
-              <span className="text-sm font-medium">{displayName}</span>
+              <span className="text-sm font-medium">{identity.label}</span>
               <span className="text-xs text-muted-foreground">
-                {user?.username ?? "Authenticated account"}
+                {identity.username}
               </span>
             </div>
           </DropdownMenuLabel>
         </DropdownMenuGroup>
         <DropdownMenuSeparator />
         <DropdownMenuGroup>
-          <DropdownMenuItem onClick={onLogout} closeOnClick>
-            <LogOut data-icon="inline-start" />
-            Sign out
-          </DropdownMenuItem>
+          {canLogout ? (
+            <DropdownMenuItem
+              onClick={onLogout}
+              closeOnClick={false}
+              disabled={logoutPending}
+            >
+              {logoutPending ? (
+                <Spinner aria-hidden data-icon="inline-start" />
+              ) : (
+                <LogOut data-icon="inline-start" />
+              )}
+              {logoutPending ? "Signing out…" : "Sign out"}
+            </DropdownMenuItem>
+          ) : null}
           <DropdownMenuItem render={<Link to="/health" />}>
             <HeartPulse data-icon="inline-start" />
             System health
@@ -212,9 +240,27 @@ function UserMenu({
   );
 }
 
-function initials(displayName: string): string {
-  const parts = displayName.trim().split(/\s+/).filter(Boolean);
-  if (parts.length === 0) return "U";
-  if (parts.length === 1) return parts[0].slice(0, 2).toUpperCase();
-  return `${parts[0][0]}${parts.at(-1)?.[0] ?? ""}`.toUpperCase();
+interface StaffIdentity {
+  label: string;
+  username: string;
+  initials: string;
+}
+
+function normalizeIdentity(user: AuthUser | null): StaffIdentity {
+  const displayName = user?.displayName?.trim() ?? "";
+  const username = user?.username?.trim() ?? "";
+  const label = displayName || username || "Signed-in user";
+  const parts = label.split(/\s+/).filter(Boolean);
+  const first = Array.from(parts[0] ?? "");
+  const last = Array.from(parts.at(-1) ?? "");
+  const initials =
+    parts.length === 1
+      ? first.slice(0, 2).join("").toLocaleUpperCase()
+      : `${first[0] ?? ""}${last[0] ?? ""}`.toLocaleUpperCase();
+
+  return {
+    label,
+    username: username || "Authenticated account",
+    initials,
+  };
 }
