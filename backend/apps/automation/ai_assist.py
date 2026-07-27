@@ -12,7 +12,7 @@ provider (with DPIA and a recorded policy review).
 from __future__ import annotations
 
 import logging
-from dataclasses import dataclass, asdict
+from dataclasses import dataclass
 from typing import Any
 
 from django.db import transaction
@@ -40,10 +40,6 @@ class AiSuggestion:
     model_version: str
     prompt_hash: str         # SHA-256 of the prompt used (for audit)
     created_at: str
-
-    def to_audit(self) -> dict:
-        return asdict(self)
-
 
 def record_suggestion(*, ticket: Ticket, suggestion: AiSuggestion) -> None:
     """Persist the suggestion as an audit event + outbox record.

@@ -127,6 +127,7 @@ def create_it_child_ticket(
     waiting_it = Status.objects.filter(domain="operational", code="waiting_it").first()
     if waiting_it and parent.status.code not in ("closed", "resolved", "cancelled", "rejected"):
         previous = parent.status
+        previous_waiting_reason = parent.waiting_reason
         parent.status = waiting_it
         parent.waiting_reason = "Waiting for IT"
         parent.save(update_fields=["status", "waiting_reason", "updated_at"])
@@ -143,7 +144,7 @@ def create_it_child_ticket(
             action="ticket.transitioned",
             before={
                 "status": previous.code,
-                "waiting_reason": "",
+                "waiting_reason": previous_waiting_reason,
             },
             after={
                 "status": waiting_it.code,
@@ -178,6 +179,7 @@ def sync_child_status_to_parent(*, child: Ticket, actor_subject: str = "") -> No
     if not target:
         return
     previous = parent.status
+    previous_waiting_reason = parent.waiting_reason
     parent.status = target
     parent.waiting_reason = ""
     parent.save(update_fields=["status", "waiting_reason", "updated_at"])
@@ -194,7 +196,7 @@ def sync_child_status_to_parent(*, child: Ticket, actor_subject: str = "") -> No
         action="ticket.transitioned",
         before={
             "status": previous.code,
-            "waiting_reason": "Waiting for IT",
+            "waiting_reason": previous_waiting_reason,
         },
         after={"status": target.code, "waiting_reason": ""},
         metadata={

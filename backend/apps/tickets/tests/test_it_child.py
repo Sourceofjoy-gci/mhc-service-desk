@@ -153,3 +153,60 @@ def test_child_to_parent_sync_records_one_canonical_transition_pair(world):
         event_type="ticket.transitioned",
         payload=event.payload,
     ).count() == 1
+
+
+def test_it_child_creation_records_the_actual_existing_parent_waiting_reason(world):
+    from apps.audit.models import AuditEvent
+    from apps.workflow.models import Status
+
+    parent = services.create_ticket(
+        domain="operational", title="X", description="",
+        requester=world["contact"], service=world["gen_info"], request_type=world["op_rt"],
+        office=world["office"], channel="email", actor_subject="creator",
+    )
+    parent.status = Status.objects.get(domain="operational", code="waiting_it")
+    parent.waiting_reason = "Waiting on vendor escalation"
+    parent.save(update_fields=["status", "waiting_reason", "updated_at"])
+
+    it_child.create_it_child_ticket(
+        parent=parent, summary="Investigate", requester=world["contact"],
+        requester_office=world["office"], technical_priority="P3", actor_subject="tester",
+    )
+
+    event = AuditEvent.objects.filter(
+        object_id=str(parent.id), action="ticket.transitioned",
+    ).latest("occurred_at")
+    assert event.payload["before"] == {
+        "waiting_reason": "Waiting on vendor escalation",
+    }
+    assert event.payload["after"] == {"waiting_reason": "Waiting for IT"}
+
+
+def test_child_sync_records_the_actual_non_default_parent_waiting_reason(world):
+    from apps.audit.models import AuditEvent
+    from apps.workflow.models import Status
+
+    parent = services.create_ticket(
+        domain="operational", title="X", description="",
+        requester=world["contact"], service=world["gen_info"], request_type=world["op_rt"],
+        office=world["office"], channel="email", actor_subject="creator",
+    )
+    child = it_child.create_it_child_ticket(
+        parent=parent, summary="Investigate", requester=world["contact"],
+        requester_office=world["office"], technical_priority="P3", actor_subject="tester",
+    )
+    parent.waiting_reason = "Awaiting privileged-access approval"
+    parent.save(update_fields=["waiting_reason", "updated_at"])
+    child.status = Status.objects.get(domain="it", code="resolved")
+    child.save(update_fields=["status", "updated_at"])
+
+    it_child.sync_child_status_to_parent(child=child, actor_subject="sync-agent")
+
+    event = AuditEvent.objects.filter(
+        object_id=str(parent.id), action="ticket.transitioned",
+    ).latest("occurred_at")
+    assert event.payload["before"] == {
+        "status": "waiting_it",
+        "waiting_reason": "Awaiting privileged-access approval",
+    }
+    assert event.payload["after"] == {"status": "in_progress", "waiting_reason": ""}
