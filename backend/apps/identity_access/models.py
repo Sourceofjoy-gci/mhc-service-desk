@@ -20,6 +20,7 @@ class User(AbstractUser):
     display_name = models.CharField(max_length=255, blank=True)
     mfa_enabled = models.BooleanField(default=False)
     last_keycloak_sync = models.DateTimeField(null=True, blank=True)
+    keycloak_groups = models.JSONField(default=list, blank=True)
 
     class Meta:
         db_table = "identity_user"

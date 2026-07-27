@@ -13,6 +13,7 @@ class AuditEvent(models.Model):
     object_type = models.CharField(max_length=64)
     object_id = models.CharField(max_length=64)
     ip_address = models.GenericIPAddressField(null=True)
+    payload = models.JSONField(default=dict, blank=True)
     payload_hash = models.CharField(max_length=64)
     occurred_at = models.DateTimeField(auto_now_add=True, db_index=True)
 

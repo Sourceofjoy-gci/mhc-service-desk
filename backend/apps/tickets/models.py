@@ -103,6 +103,8 @@ class Ticket(models.Model):
 
     waiting_reason = models.CharField(max_length=64, blank=True)
     blocked_reason = models.TextField(blank=True)
+    next_action = models.CharField(max_length=255, blank=True)
+    next_action_at = models.DateTimeField(null=True, blank=True)
 
     resolution_code = models.CharField(max_length=64, blank=True)
     resolution_summary = models.TextField(blank=True)

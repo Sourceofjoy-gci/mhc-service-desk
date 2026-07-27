@@ -68,7 +68,8 @@ class KeycloakJWTAuthentication(authentication.BaseAuthentication):
                     username=username,
                     defaults={"keycloak_subject": f"dev:{username}"},
                 )
-                user._groups = groups
+                groups = _normalize_groups(groups)
+                _synchronize_groups(user, groups)
                 return user, {"sub": f"dev:{username}", "groups": groups}
         # --------------------------------------------------------------------
 
@@ -132,8 +133,10 @@ class KeycloakJWTAuthentication(authentication.BaseAuthentication):
         elif email and email != user.email:
             user.email = email
             user.save(update_fields=["email"])
-        # Capture groups for scope calculation
-        user._groups = payload.get("groups", []) or []
+        # Persist the IdP snapshot and retain a request-local copy for scope
+        # calculation so one request cannot observe an in-flight refresh.
+        groups = _normalize_groups(payload.get("groups"))
+        _synchronize_groups(user, groups)
         return user, payload
 
     def authenticate_header(self, request):
@@ -141,6 +144,18 @@ class KeycloakJWTAuthentication(authentication.BaseAuthentication):
 
 
 # --- helpers ----------------------------------------------------------------
+
+def _normalize_groups(raw_groups: object) -> list[str]:
+    if not isinstance(raw_groups, list | tuple):
+        return []
+    return [str(group) for group in raw_groups if group is not None]
+
+
+def _synchronize_groups(user: User, groups: list[str]) -> None:
+    if user.keycloak_groups != groups:
+        user.keycloak_groups = groups
+        user.save(update_fields=["keycloak_groups"])
+    user._groups = list(groups)
 
 def _decode_unverified_header(token: str) -> dict[str, Any]:
     import jwt
