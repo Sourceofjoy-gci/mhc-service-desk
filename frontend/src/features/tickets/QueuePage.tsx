@@ -1,6 +1,11 @@
 import { useQuery } from "@tanstack/react-query";
-import { useMemo, useState } from "react";
-import { Link } from "react-router-dom";
+import { useEffect, type MouseEvent as ReactMouseEvent } from "react";
+import {
+  Link,
+  useLocation,
+  useNavigate,
+  useSearchParams,
+} from "react-router-dom";
 import {
   AlertCircle,
   ArrowUpDown,
@@ -11,7 +16,14 @@ import {
   Search,
   X,
 } from "lucide-react";
-import { ticketsApi, type TicketSummary } from "@/lib/api";
+import { useAuth } from "@/features/auth/AuthProvider";
+import {
+  admittedDomains,
+  ticketsApi,
+  type Domain,
+  type TicketSummary,
+} from "@/lib/api";
+import type { Page } from "@/lib/collections";
 import { TicketCard } from "./TicketCard";
 import {
   Alert,
@@ -63,8 +75,12 @@ const SORT_OPTIONS = [
   { value: "priority", label: "By priority" },
   { value: "created", label: "Newest first" },
   { value: "updated", label: "Recently updated" },
-  { value: "sla", label: "SLA at risk first" },
 ];
+
+const DOMAIN_OPTIONS = [
+  { value: "operational", label: "Operational" },
+  { value: "it", label: "IT" },
+] as const;
 
 const STATUS_SELECT_ITEMS = [
   { value: "all", label: "All statuses" },
@@ -76,54 +92,110 @@ const PRIORITY_SELECT_ITEMS = [
   ...PRIORITY_OPTIONS.map((value) => ({ value, label: value })),
 ];
 
-const EMPTY_TICKETS: TicketSummary[] = [];
+const EMPTY_PAGE: Page<TicketSummary> = {
+  next: null,
+  previous: null,
+  results: [],
+};
 
-type SortKey = "priority" | "created" | "updated" | "sla";
+type SortKey = "priority" | "created" | "updated";
+
+const SORT_KEYS = new Set<SortKey>(["priority", "created", "updated"]);
 
 export default function QueuePage() {
-  const [status, setStatus] = useState<string>("");
-  const [priority, setPriority] = useState<string>("");
-  const [search, setSearch] = useState("");
-  const [sort, setSort] = useState<SortKey>("priority");
+  const { user } = useAuth();
+  const [searchParams, setSearchParams] = useSearchParams();
+  const location = useLocation();
+  const navigate = useNavigate();
+  const domains = admittedDomains(user?.groups ?? []);
+  const requestedDomain = searchParams.get("domain");
+  const domain = domains.includes(requestedDomain as Domain)
+    ? (requestedDomain as Domain)
+    : domains[0];
+  const status = searchParams.get("status") ?? "";
+  const priority = searchParams.get("priority") ?? "";
+  const search = searchParams.get("search") ?? "";
+  const requestedSort = searchParams.get("sort") as SortKey | null;
+  const sort =
+    requestedSort && SORT_KEYS.has(requestedSort) ? requestedSort : "priority";
+  const cursor = searchParams.get("cursor") ?? "";
+
+  useEffect(() => {
+    if (!requestedDomain || requestedDomain === domain) return;
+    const next = new URLSearchParams(searchParams);
+    if (domain) next.set("domain", domain);
+    else next.delete("domain");
+    next.delete("cursor");
+    setSearchParams(next, { replace: true });
+  }, [domain, requestedDomain, searchParams, setSearchParams]);
+
+  const updateParam = (
+    key: "domain" | "status" | "priority" | "search" | "sort",
+    value: string,
+    replace = false,
+  ) => {
+    const next = new URLSearchParams(searchParams);
+    if (value) next.set(key, value);
+    else next.delete(key);
+    next.delete("cursor");
+    setSearchParams(next, { replace });
+  };
 
   const params: Record<string, string> = {};
+  if (domain) params.domain = domain;
   if (status) params.status = status;
   if (priority) params.priority = priority;
   if (search) params.search = search;
+  params.sort = sort;
+  if (cursor) params.cursor = cursor;
 
   const { data, isLoading, error, refetch, isFetching } = useQuery({
     queryKey: ["tickets", params],
     queryFn: () => ticketsApi.list(params),
   });
 
-  const items = data ?? EMPTY_TICKETS;
+  const page = data ?? EMPTY_PAGE;
+  const items = page.results;
+  const activeFilters = [requestedDomain, status, priority, search].filter(
+    Boolean,
+  ).length;
 
-  const sorted = useMemo(() => {
-    const arr = [...items];
-    const priorityOrder: Record<string, number> = {
-      P1: 0,
-      P2: 1,
-      P3: 2,
-      P4: 3,
-    };
-    arr.sort((a, b) => {
-      switch (sort) {
-        case "priority":
-          return (
-            (priorityOrder[a.priority] ?? 9) - (priorityOrder[b.priority] ?? 9)
-          );
-        case "created":
-          return b.created_at.localeCompare(a.created_at);
-        case "updated":
-          return b.updated_at.localeCompare(a.updated_at);
-        case "sla":
-          return slaScore(a.sla_health) - slaScore(b.sla_health);
-      }
+  const clearFilters = () => {
+    setSearchParams(new URLSearchParams({ sort }));
+  };
+
+  const paginate = (serverLink: string | null) => {
+    if (!serverLink) return;
+    const serverCursor = new URL(
+      serverLink,
+      window.location.origin,
+    ).searchParams.get("cursor");
+    if (!serverCursor) return;
+    const next = new URLSearchParams(searchParams);
+    next.set("cursor", serverCursor);
+    setSearchParams(next);
+  };
+
+  const retainQueueLocation = (event: ReactMouseEvent<HTMLDivElement>) => {
+    if (
+      event.button !== 0 ||
+      event.metaKey ||
+      event.ctrlKey ||
+      event.shiftKey ||
+      event.altKey
+    ) {
+      return;
+    }
+    const target = event.target as Element;
+    const ticketLink = target.closest<HTMLAnchorElement>(
+      "a[data-ticket-number]",
+    );
+    if (!ticketLink) return;
+    event.preventDefault();
+    navigate(ticketLink.getAttribute("href") ?? ticketLink.pathname, {
+      state: { returnTo: `${location.pathname}${location.search}` },
     });
-    return arr;
-  }, [items, sort]);
-
-  const activeFilters = [status, priority, search].filter(Boolean).length;
+  };
 
   return (
     <div className="flex flex-col gap-5">
@@ -132,22 +204,21 @@ export default function QueuePage() {
         isFetching={isFetching}
         onRefresh={() => refetch()}
         sort={sort}
-        onSortChange={setSort}
+        onSortChange={(value) => updateParam("sort", value)}
       />
 
       <FilterBar
         search={search}
-        onSearch={setSearch}
+        onSearch={(value) => updateParam("search", value, true)}
         status={status}
-        onStatus={setStatus}
+        onStatus={(value) => updateParam("status", value)}
         priority={priority}
-        onPriority={setPriority}
+        onPriority={(value) => updateParam("priority", value)}
+        domain={domain}
+        domains={domains}
+        onDomain={(value) => updateParam("domain", value)}
         activeFilters={activeFilters}
-        onClear={() => {
-          setStatus("");
-          setPriority("");
-          setSearch("");
-        }}
+        onClear={clearFilters}
       />
 
       {error ? (
@@ -157,39 +228,26 @@ export default function QueuePage() {
         />
       ) : isLoading ? (
         <QueueSkeleton />
-      ) : sorted.length === 0 ? (
-        <EmptyState
-          hasFilters={activeFilters > 0}
-          onClear={() => {
-            setStatus("");
-            setPriority("");
-            setSearch("");
-          }}
-        />
+      ) : items.length === 0 ? (
+        <EmptyState hasFilters={activeFilters > 0} onClear={clearFilters} />
       ) : (
-        <div className="grid grid-cols-tickets gap-3">
-          {sorted.map((ticket) => (
+        <div
+          className="grid grid-cols-tickets gap-3"
+          onClickCapture={retainQueueLocation}
+        >
+          {items.map((ticket) => (
             <TicketCard key={ticket.id} ticket={ticket} />
           ))}
         </div>
       )}
+
+      <Pagination
+        previous={page.previous}
+        next={page.next}
+        onNavigate={paginate}
+      />
     </div>
   );
-}
-
-function slaScore(health: string): number {
-  switch (health) {
-    case "breached":
-      return 0;
-    case "at_risk":
-      return 1;
-    case "on_track":
-      return 2;
-    case "paused":
-      return 3;
-    default:
-      return 4;
-  }
 }
 
 function PageHeader({
@@ -272,6 +330,9 @@ function FilterBar({
   onStatus,
   priority,
   onPriority,
+  domain,
+  domains,
+  onDomain,
   activeFilters,
   onClear,
 }: {
@@ -281,11 +342,14 @@ function FilterBar({
   onStatus: (value: string) => void;
   priority: string;
   onPriority: (value: string) => void;
+  domain: Domain | undefined;
+  domains: Domain[];
+  onDomain: (value: Domain) => void;
   activeFilters: number;
   onClear: () => void;
 }) {
   return (
-    <FieldGroup className="grid gap-3 rounded-lg bg-card p-3 ring-1 ring-foreground/10 sm:grid-cols-[minmax(12rem,1fr)_12rem_9rem_auto] sm:items-center">
+    <FieldGroup className="grid gap-3 rounded-lg bg-card p-3 ring-1 ring-foreground/10 sm:grid-cols-[minmax(12rem,1fr)_repeat(3,minmax(8rem,auto))_auto] sm:items-center">
       <Field>
         <FieldLabel htmlFor="queue-search" className="sr-only">
           Search tickets
@@ -304,6 +368,34 @@ function FilterBar({
           />
         </div>
       </Field>
+      {domains.length > 1 ? (
+        <Field>
+          <FieldLabel htmlFor="queue-domain" className="sr-only">
+            Domain
+          </FieldLabel>
+          <Select
+            items={DOMAIN_OPTIONS}
+            value={domain}
+            onValueChange={(value) => {
+              if (value == null) return;
+              onDomain(value as Domain);
+            }}
+          >
+            <SelectTrigger id="queue-domain" className="w-full">
+              <SelectValue />
+            </SelectTrigger>
+            <SelectContent>
+              <SelectGroup>
+                {DOMAIN_OPTIONS.map((option) => (
+                  <SelectItem key={option.value} value={option.value}>
+                    {option.label}
+                  </SelectItem>
+                ))}
+              </SelectGroup>
+            </SelectContent>
+          </Select>
+        </Field>
+      ) : null}
       <Field>
         <FieldLabel htmlFor="queue-status" className="sr-only">
           Filter by status
@@ -373,6 +465,41 @@ function FilterBar({
         </Button>
       ) : null}
     </FieldGroup>
+  );
+}
+
+function Pagination({
+  previous,
+  next,
+  onNavigate,
+}: {
+  previous: string | null;
+  next: string | null;
+  onNavigate: (serverLink: string | null) => void;
+}) {
+  if (!previous && !next) return null;
+
+  return (
+    <nav
+      aria-label="Queue pagination"
+      className="flex items-center justify-between border-t pt-4"
+    >
+      <Button
+        variant="outline"
+        disabled={!previous}
+        onClick={() => onNavigate(previous)}
+      >
+        Previous
+      </Button>
+      <p className="text-xs text-muted-foreground">More queue results</p>
+      <Button
+        variant="outline"
+        disabled={!next}
+        onClick={() => onNavigate(next)}
+      >
+        Next
+      </Button>
+    </nav>
   );
 }
 

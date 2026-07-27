@@ -1,6 +1,10 @@
 import { useQuery } from "@tanstack/react-query";
 import { AlertCircleIcon, BarChart3Icon } from "lucide-react";
+import { useEffect } from "react";
+import { useSearchParams } from "react-router-dom";
 import { PriorityBadge, StatusBadge } from "@/components/domain-badges";
+import { useAuth } from "@/features/auth/AuthProvider";
+import PermissionPage from "@/features/auth/PermissionPage";
 import { Alert, AlertDescription, AlertTitle } from "@/components/ui/alert";
 import {
   Card,
@@ -17,6 +21,15 @@ import {
   EmptyTitle,
 } from "@/components/ui/empty";
 import { Skeleton } from "@/components/ui/skeleton";
+import { Field, FieldLabel } from "@/components/ui/field";
+import {
+  Select,
+  SelectContent,
+  SelectGroup,
+  SelectItem,
+  SelectTrigger,
+  SelectValue,
+} from "@/components/ui/select";
 import {
   Table,
   TableBody,
@@ -26,7 +39,12 @@ import {
   TableRow,
 } from "@/components/ui/table";
 import { cn } from "@/lib/utils";
-import { ticketsApi } from "../../lib/api";
+import {
+  admittedDomains,
+  ApiError,
+  ticketsApi,
+  type Domain,
+} from "../../lib/api";
 
 const knownPriorityCodes = new Set(["P1", "P2", "P3", "P4"]);
 const knownStatusCodes = new Set([
@@ -46,15 +64,42 @@ const knownStatusCodes = new Set([
   "spam",
 ]);
 
+const DASHBOARD_DOMAIN_OPTIONS = [
+  { value: "operational", label: "Operational" },
+  { value: "it", label: "IT" },
+] as const;
+
 export default function DashboardPage() {
+  const { user } = useAuth();
+  const [searchParams, setSearchParams] = useSearchParams();
+  const domains = admittedDomains(user?.groups ?? []);
+  const requestedDomain = searchParams.get("domain");
+  const domain = domains.includes(requestedDomain as Domain)
+    ? (requestedDomain as Domain)
+    : domains[0];
+
+  useEffect(() => {
+    if (!domain || requestedDomain === domain) return;
+    const next = new URLSearchParams(searchParams);
+    next.set("domain", domain);
+    setSearchParams(next, { replace: true });
+  }, [domain, requestedDomain, searchParams, setSearchParams]);
+
   const { data, isLoading, error } = useQuery({
-    queryKey: ["dashboard"],
-    queryFn: () => ticketsApi.dashboard(),
+    queryKey: ["dashboard", domain],
+    queryFn: () => ticketsApi.dashboard(domain!),
+    enabled: Boolean(domain),
     refetchInterval: 30_000,
   });
 
+  if (!domain) return <PermissionPage />;
+
   if (isLoading) {
     return <DashboardSkeleton />;
+  }
+
+  if (error instanceof ApiError && error.status === 403) {
+    return <PermissionPage />;
   }
 
   if (error || !data) {
@@ -75,13 +120,45 @@ export default function DashboardPage() {
 
   return (
     <section className="flex flex-col gap-6">
-      <div className="flex flex-col gap-1">
-        <h1 className="text-2xl font-semibold tracking-tight">
-          Operational dashboard
-        </h1>
-        <p className="text-sm text-muted-foreground">
-          Current ticket volumes and service-level attention points.
-        </p>
+      <div className="flex flex-wrap items-end justify-between gap-3">
+        <div className="flex flex-col gap-1">
+          <h1 className="text-2xl font-semibold tracking-tight">
+            {domain === "it" ? "IT" : "Operational"} dashboard
+          </h1>
+          <p className="text-sm text-muted-foreground">
+            Current ticket volumes and service-level attention points.
+          </p>
+        </div>
+        {domains.length > 1 ? (
+          <Field className="w-44">
+            <FieldLabel htmlFor="dashboard-domain" className="sr-only">
+              Dashboard domain
+            </FieldLabel>
+            <Select
+              items={DASHBOARD_DOMAIN_OPTIONS}
+              value={domain}
+              onValueChange={(value) => {
+                if (value == null) return;
+                const next = new URLSearchParams(searchParams);
+                next.set("domain", value);
+                setSearchParams(next);
+              }}
+            >
+              <SelectTrigger id="dashboard-domain" className="w-full">
+                <SelectValue />
+              </SelectTrigger>
+              <SelectContent>
+                <SelectGroup>
+                  {DASHBOARD_DOMAIN_OPTIONS.map((option) => (
+                    <SelectItem key={option.value} value={option.value}>
+                      {option.label}
+                    </SelectItem>
+                  ))}
+                </SelectGroup>
+              </SelectContent>
+            </Select>
+          </Field>
+        ) : null}
       </div>
 
       <div className="grid grid-cols-1 gap-4 sm:grid-cols-2 xl:grid-cols-5">
@@ -106,10 +183,12 @@ export default function DashboardPage() {
           value={d.unassigned}
         />
         <MetricCard
-          label="Breached SLA"
-          description="Needs attention"
-          value={d.breached_sla}
-          isDestructive={d.breached_sla > 0}
+          label={domain === "it" ? "P1/P2 open" : "Breached SLA"}
+          description={
+            domain === "it" ? "High-priority active" : "Needs attention"
+          }
+          value={domain === "it" ? (d.p1p2 ?? 0) : (d.breached_sla ?? 0)}
+          isDestructive={domain === "operational" && (d.breached_sla ?? 0) > 0}
         />
       </div>
 

@@ -5,6 +5,8 @@
  * independent of Keycloak and development identity details.
  */
 
+import { normalizePage, type Page } from "./collections";
+
 const API_BASE = (import.meta.env.VITE_API_BASE_URL ?? "") + "/api/v1";
 
 export interface ApiAuthAdapter {
@@ -100,7 +102,8 @@ export interface DashboardData {
   by_priority: { priority: string; count: number }[];
   by_status: { status__code: string; status__name: string; count: number }[];
   unassigned: number;
-  breached_sla: number;
+  breached_sla?: number;
+  p1p2?: number;
 }
 
 export interface AttachmentUploadResult {
@@ -196,6 +199,25 @@ export async function api<T>(path: string, opts: RequestOptions = {}): Promise<T
   return r.json() as Promise<T>;
 }
 
+export async function apiUrl<T>(absoluteOrRelativeUrl: string): Promise<T> {
+  const apiBaseUrl = new URL(
+    API_BASE.endsWith("/") ? API_BASE : `${API_BASE}/`,
+    window.location.origin,
+  );
+  const serverUrl = new URL(absoluteOrRelativeUrl, apiBaseUrl);
+  const apiPathPrefix = apiBaseUrl.pathname.replace(/\/$/, "");
+
+  if (
+    serverUrl.pathname !== apiPathPrefix &&
+    !serverUrl.pathname.startsWith(`${apiPathPrefix}/`)
+  ) {
+    throw new Error("Server link is outside the configured API path");
+  }
+
+  const path = serverUrl.pathname.slice(apiPathPrefix.length) || "/";
+  return api<T>(`${path}${serverUrl.search}`);
+}
+
 function hasHeader(headers: Record<string, string>, name: string): boolean {
   return Object.keys(headers).some((key) => key.toLowerCase() === name.toLowerCase());
 }
@@ -205,9 +227,14 @@ function asBearerToken(token: string): string {
 }
 
 export const ticketsApi = {
-  list: (params: Record<string, string> = {}) => {
+  list: async (
+    params: Record<string, string> = {},
+  ): Promise<Page<TicketSummary>> => {
     const qs = new URLSearchParams(params).toString();
-    return api<TicketSummary[]>(`/tickets/${qs ? "?" + qs : ""}`);
+    const value = await api<TicketSummary[] | Page<TicketSummary>>(
+      `/tickets/${qs ? "?" + qs : ""}`,
+    );
+    return normalizePage(value);
   },
   get: (number: string) => api<TicketDetail>(`/tickets/${number}/`),
   kanban: (domain: Domain) => api<KanbanData>(`/tickets/kanban/?domain=${domain}`),
@@ -226,7 +253,8 @@ export const ticketsApi = {
       method: "POST",
       body: { body },
     }),
-  dashboard: () => api<DashboardData>(`/tickets/dashboard/operational/`),
+  dashboard: (domain: Domain) =>
+    api<DashboardData>(`/reports/dashboard/${domain}`),
   uploadAttachments: (number: string, files: readonly File[]) => {
     const form = new FormData();
     for (const file of files) form.append("files", file);
@@ -258,5 +286,36 @@ export const ticketsApi = {
 };
 
 export const servicesApi = {
-  list: () => api<unknown[]>("/catalogue/services/"),
+  list: async (): Promise<Page<unknown>> =>
+    normalizePage(await api<unknown[] | Page<unknown>>("/catalogue/services/")),
 };
+
+const OPERATIONAL_GROUPS = new Set([
+  "agent-operational",
+  "ops-agents",
+  "supervisor-operational",
+  "ops-supervisors",
+]);
+const IT_GROUPS = new Set(["agent-it", "it-agents", "lead-it", "it-leads"]);
+const ALL_DOMAIN_GROUPS = new Set([
+  "admin",
+  "system-admins",
+  "auditor",
+  "auditors",
+]);
+
+export function admittedDomains(groups: readonly string[]): Domain[] {
+  const names = new Set(
+    groups.map((group) => group.split("/").filter(Boolean).at(-1) ?? group),
+  );
+  if ([...names].some((group) => ALL_DOMAIN_GROUPS.has(group))) {
+    return ["operational", "it"];
+  }
+
+  const domains: Domain[] = [];
+  if ([...names].some((group) => OPERATIONAL_GROUPS.has(group))) {
+    domains.push("operational");
+  }
+  if ([...names].some((group) => IT_GROUPS.has(group))) domains.push("it");
+  return domains;
+}
