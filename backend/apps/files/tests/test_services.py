@@ -1,6 +1,8 @@
 """Low-level attachment service boundary tests."""
 from __future__ import annotations
 
+from dataclasses import replace
+
 import pytest
 from botocore.exceptions import ClientError
 
@@ -69,39 +71,67 @@ def test_upload_reader_rejects_the_chunk_that_crosses_the_size_cap(
         policy.read_attachment_bounded(_ChunkOnlyUpload())
 
 
-class _ConditionalObjectStore:
-    def __init__(self) -> None:
-        self.objects: dict[str, tuple[bytes, str]] = {}
+class _VersionedObjectStore:
+    """Model MinIO's versioned writes and key-only delete behaviour."""
+
+    def __init__(self, *, return_version_id: bool = True) -> None:
+        self.versions: dict[str, list[tuple[str, bytes, str]]] = {}
+        self.delete_calls: list[dict[str, object]] = []
+        self.return_version_id = return_version_id
+        self._next_version = 1
+
+    def current(self, key: str) -> tuple[str, bytes, str] | None:
+        versions = self.versions.get(key, [])
+        return versions[-1] if versions else None
 
     def put_object(self, **kwargs: object) -> dict[str, str]:
         key = str(kwargs["Key"])
-        if kwargs.get("IfNoneMatch") == "*" and key in self.objects:
+        if kwargs.get("IfNoneMatch") == "*" and self.current(key) is not None:
             raise ClientError(
                 {"Error": {"Code": "PreconditionFailed", "Message": "exists"}},
                 "PutObject",
             )
         body = kwargs["Body"]
         assert isinstance(body, bytes)
-        etag = '"created-etag"'
-        self.objects[key] = (body, etag)
-        return {"ETag": etag}
+        version_id = f"version-{self._next_version}"
+        self._next_version += 1
+        etag = f'"etag-{version_id}"'
+        self.versions.setdefault(key, []).append((version_id, body, etag))
+        result = {"ETag": etag}
+        if self.return_version_id:
+            result["VersionId"] = version_id
+        return result
 
     def delete_object(self, **kwargs: object) -> dict[str, str]:
+        self.delete_calls.append(dict(kwargs))
         key = str(kwargs["Key"])
-        current = self.objects.get(key)
-        if current is None or kwargs.get("IfMatch") != current[1]:
-            raise ClientError(
-                {"Error": {"Code": "PreconditionFailed", "Message": "changed"}},
-                "DeleteObject",
-            )
-        del self.objects[key]
-        return {}
+        versions = self.versions.get(key, [])
+        version_id = kwargs.get("VersionId")
+        if version_id is None:
+            # Real MinIO ignores DeleteObject IfMatch and removes the latest object.
+            if versions:
+                versions.pop()
+            return {}
+        for index, version in enumerate(versions):
+            if version[0] == version_id:
+                versions.pop(index)
+                return {}
+        raise ClientError(
+            {"Error": {"Code": "NoSuchVersion", "Message": "missing"}},
+            "DeleteObject",
+        )
 
 
 def test_conditional_upload_does_not_overwrite_an_existing_object(monkeypatch) -> None:
     """Catch a collision turning an upload into an overwrite."""
-    store = _ConditionalObjectStore()
-    store.objects["attachments/collision"] = (b"existing", '"existing-etag"')
+    store = _VersionedObjectStore()
+    store.put_object(
+        Bucket="mhc-attachments",
+        Key="attachments/collision",
+        Body=b"existing",
+        ContentType="application/pdf",
+    )
+    existing = store.current("attachments/collision")
     monkeypatch.setattr(services, "_s3_client", lambda: store)
 
     with pytest.raises(ClientError):
@@ -111,29 +141,90 @@ def test_conditional_upload_does_not_overwrite_an_existing_object(monkeypatch) -
             content_type="application/pdf",
         )
 
-    assert store.objects["attachments/collision"] == (
-        b"existing",
-        '"existing-etag"',
-    )
+    assert store.current("attachments/collision") == existing
 
 
-def test_compensation_does_not_delete_an_object_replaced_after_upload(
+def test_compensation_deletes_exact_version_and_preserves_later_replacement(
     monkeypatch,
 ) -> None:
-    """Catch cleanup deleting bytes no longer owned by this request."""
-    store = _ConditionalObjectStore()
+    """Catch key-only or ETag-only cleanup deleting a replacement object."""
+    store = _VersionedObjectStore()
     monkeypatch.setattr(services, "_s3_client", lambda: store)
     created = services.upload_to_minio(
         key="attachments/request-object",
         data=b"request",
         content_type="application/pdf",
     )
-    store.objects["attachments/request-object"] = (b"replacement", '"new-etag"')
-
-    with pytest.raises(ClientError):
-        services.delete_from_minio(stored_object=created)
-
-    assert store.objects["attachments/request-object"] == (
-        b"replacement",
-        '"new-etag"',
+    store.put_object(
+        Bucket=created.bucket,
+        Key=created.key,
+        Body=b"replacement",
+        ContentType="application/pdf",
     )
+
+    services.delete_from_minio(stored_object=created)
+
+    current = store.current(created.key)
+    assert current is not None
+    assert current[1] == b"replacement"
+    assert store.delete_calls == [
+        {
+            "Bucket": created.bucket,
+            "Key": created.key,
+            "VersionId": created.version_id,
+        }
+    ]
+
+
+def test_upload_without_version_id_fails_closed_and_retains_orphan(
+    monkeypatch,
+    caplog,
+) -> None:
+    """Catch accepting an unversioned write that cannot be safely compensated."""
+    store = _VersionedObjectStore(return_version_id=False)
+    monkeypatch.setattr(services, "_s3_client", lambda: store)
+
+    services.logger.addHandler(caplog.handler)
+    try:
+        with pytest.raises(RuntimeError, match="ownership VersionId"):
+            services.upload_to_minio(
+                key="attachments/unversioned-object",
+                data=b"request",
+                content_type="application/pdf",
+            )
+    finally:
+        services.logger.removeHandler(caplog.handler)
+
+    current = store.current("attachments/unversioned-object")
+    assert current is not None
+    assert current[1] == b"request"
+    assert store.delete_calls == []
+    assert "minio_put_missing_version_id" in caplog.messages
+
+
+def test_cleanup_without_version_id_never_deletes_by_key_or_etag(
+    monkeypatch,
+    caplog,
+) -> None:
+    """Catch a malformed ownership handle falling back to an unsafe delete."""
+    store = _VersionedObjectStore()
+    monkeypatch.setattr(services, "_s3_client", lambda: store)
+    created = services.upload_to_minio(
+        key="attachments/request-object",
+        data=b"request",
+        content_type="application/pdf",
+    )
+    unsafe_handle = replace(created, version_id="")
+
+    services.logger.addHandler(caplog.handler)
+    try:
+        with pytest.raises(RuntimeError, match="ownership VersionId"):
+            services.delete_from_minio(stored_object=unsafe_handle)
+    finally:
+        services.logger.removeHandler(caplog.handler)
+
+    current = store.current(created.key)
+    assert current is not None
+    assert current[1] == b"request"
+    assert store.delete_calls == []
+    assert "minio_delete_missing_version_id" in caplog.messages

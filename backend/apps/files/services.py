@@ -7,7 +7,7 @@ import logging
 import socket
 from dataclasses import dataclass
 from datetime import timedelta
-from typing import NotRequired, Protocol, TypedDict, Unpack
+from typing import Protocol, TypedDict, Unpack
 from urllib.parse import urlparse
 
 import boto3
@@ -43,8 +43,7 @@ class _PutObjectResult(TypedDict, total=False):
 class _DeleteObjectArguments(TypedDict):
     Bucket: str
     Key: str
-    IfMatch: str
-    VersionId: NotRequired[str]
+    VersionId: str
 
 
 class _PresignArguments(TypedDict):
@@ -72,7 +71,7 @@ class StoredObject:
     bucket: str
     key: str
     etag: str
-    version_id: str | None = None
+    version_id: str
 
 
 def _s3_client() -> _S3Client:
@@ -144,24 +143,39 @@ def upload_to_minio(
     etag = result.get("ETag")
     if not etag:
         raise RuntimeError("Object storage did not return an ownership ETag.")
+    version_id = result.get("VersionId")
+    if not version_id:
+        logger.error(
+            "minio_put_missing_version_id",
+            extra={"bucket": bucket, "key": key, "etag": etag},
+        )
+        raise RuntimeError("Object storage did not return an ownership VersionId.")
     return StoredObject(
         bucket=bucket,
         key=key,
         etag=etag,
-        version_id=result.get("VersionId"),
+        version_id=version_id,
     )
 
 
 def delete_from_minio(*, stored_object: StoredObject) -> None:
-    """Conditionally delete only the exact object created by this request."""
+    """Delete only the exact object version created by this request."""
+    if not stored_object.version_id:
+        logger.error(
+            "minio_delete_missing_version_id",
+            extra={
+                "bucket": stored_object.bucket,
+                "key": stored_object.key,
+                "etag": stored_object.etag,
+            },
+        )
+        raise RuntimeError("Stored object has no ownership VersionId.")
     client = _s3_client()
     arguments = _DeleteObjectArguments(
         Bucket=stored_object.bucket,
         Key=stored_object.key,
-        IfMatch=stored_object.etag,
+        VersionId=stored_object.version_id,
     )
-    if stored_object.version_id:
-        arguments["VersionId"] = stored_object.version_id
     client.delete_object(**arguments)
 
 
