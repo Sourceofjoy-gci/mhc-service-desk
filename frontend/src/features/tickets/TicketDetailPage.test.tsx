@@ -382,13 +382,15 @@ describe("ticket operator workspace", () => {
     renderDetail();
 
     await screen.findByText("No activity yet");
+    const reply = screen.getByRole("textbox", { name: "Reply message" });
     await user.type(
-      screen.getByRole("textbox", { name: "Reply message" }),
+      reply,
       "The estate file is ready.",
     );
     await user.click(screen.getByRole("button", { name: "Send reply" }));
 
     expect(await screen.findByText("The estate file is ready.")).toBeVisible();
+    await waitFor(() => expect(reply).toHaveValue(""));
     expect(harness.activity).toHaveBeenCalledTimes(2);
     expect(harness.get).toHaveBeenCalledTimes(1);
   });
