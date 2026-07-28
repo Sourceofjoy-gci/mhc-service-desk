@@ -391,11 +391,7 @@ export function ActivityTimeline({ ticketNumber }: ActivityTimelineProps) {
     );
   }
 
-  const items = query.data.results.map(typedActivity).sort((left, right) => {
-    const timeDifference =
-      Date.parse(left.occurred_at) - Date.parse(right.occurred_at);
-    return timeDifference || left.id.localeCompare(right.id);
-  });
+  const items = query.data.results.map(typedActivity);
 
   return (
     <ol aria-label="Ticket activity" className="divide-y">

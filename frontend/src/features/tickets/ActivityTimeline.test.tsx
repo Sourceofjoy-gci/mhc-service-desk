@@ -98,7 +98,7 @@ beforeEach(() => {
 
 describe("typed ticket activity", () => {
   it("renders every supported activity type oldest first without raw payloads", async () => {
-    harness.activity.mockResolvedValue({ results: [...ITEMS].reverse() });
+    harness.activity.mockResolvedValue({ results: ITEMS });
 
     renderWithProviders(<ActivityTimeline ticketNumber="MHC-2026-000001" />);
 
@@ -141,6 +141,44 @@ describe("typed ticket activity", () => {
     );
     expect(timeline).not.toHaveTextContent("body_text");
     expect(timeline).not.toHaveTextContent('"before"');
+  });
+
+  it("preserves backend chronology below JavaScript millisecond precision", async () => {
+    const earlier: ActivityItem = {
+      id: "message:z-earlier",
+      type: "message",
+      occurred_at: "2026-07-27T08:00:00.000001Z",
+      actor: { subject: "agent-1", display_name: "Agent One" },
+      visibility: "requester",
+      payload: {
+        body_text: "Earlier backend item",
+        direction: "outbound",
+        delivery_status: "sent",
+      },
+    };
+    const later: ActivityItem = {
+      id: "message:a-later",
+      type: "message",
+      occurred_at: "2026-07-27T08:00:00.000999Z",
+      actor: { subject: "agent-2", display_name: "Supervisor Two" },
+      visibility: "requester",
+      payload: {
+        body_text: "Later backend item",
+        direction: "outbound",
+        delivery_status: "sent",
+      },
+    };
+    harness.activity.mockResolvedValue({ results: [earlier, later] });
+
+    renderWithProviders(<ActivityTimeline ticketNumber="MHC-2026-000001" />);
+
+    const entries = within(
+      await screen.findByRole("list", { name: "Ticket activity" }),
+    ).getAllByRole("listitem");
+    expect(entries.map((entry) => entry.textContent)).toEqual([
+      expect.stringContaining("Earlier backend item"),
+      expect.stringContaining("Later backend item"),
+    ]);
   });
 
   it("shows a distinct loading state", () => {
