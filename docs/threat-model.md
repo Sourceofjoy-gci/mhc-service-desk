@@ -39,5 +39,7 @@ Methodology: **STRIDE** per category, scoped to the modules active in the P0 bui
 ## Open risks
 
 - **No penetration test has been performed yet.** Schedule pre-pilot.
-- **No DPIA signed.** Required before P1 public rollout.
+- **No DPIA signed.** Signed data-protection approval is required before any
+  real personal data enters the system or any pilot is activated, including
+  the P0 pilot.
 - **No formal threat model review by an external party.** Target after M3.
