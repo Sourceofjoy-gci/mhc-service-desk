@@ -75,6 +75,39 @@ def add_business_seconds(
     return cursor
 
 
+def business_seconds_between(
+    start: datetime,
+    end: datetime,
+    calendar: BusinessCalendar,
+) -> int:
+    """Return business seconds in ``[start, end)`` for one calendar."""
+    if end <= start:
+        return 0
+
+    total = 0
+    holiday_set = set(calendar.holidays)
+    current_date = start.date()
+    while current_date <= end.date():
+        if current_date.isoformat() not in holiday_set:
+            for interval in calendar.weekday_hours.get(str(current_date.isoweekday()), []):
+                slot_start = datetime.combine(
+                    current_date,
+                    time.fromisoformat(interval["start"]),
+                    tzinfo=start.tzinfo,
+                )
+                slot_end = datetime.combine(
+                    current_date,
+                    time.fromisoformat(interval["end"]),
+                    tzinfo=start.tzinfo,
+                )
+                overlap_start = max(start, slot_start)
+                overlap_end = min(end, slot_end)
+                if overlap_end > overlap_start:
+                    total += int((overlap_end - overlap_start).total_seconds())
+        current_date += timedelta(days=1)
+    return total
+
+
 # -----------------------------------------------------------------------------
 # Instance creation
 # -----------------------------------------------------------------------------
@@ -130,8 +163,19 @@ def pause_sla(
     reason: str,
     actor_subject: str = "",
 ) -> SlaInstance:
+    instance = (
+        SlaInstance.objects.select_for_update()
+        .select_related("policy__calendar")
+        .get(pk=instance.pk)
+    )
+    if instance.state == SlaInstance.State.ACTIVE:
+        instance.remaining_business_seconds = business_seconds_between(
+            timezone.now(),
+            instance.due_at,
+            instance.policy.calendar,
+        )
     instance.state = reason
-    instance.save(update_fields=["state", "updated_at"])
+    instance.save(update_fields=["state", "remaining_business_seconds", "updated_at"])
     SlaPauseHistory.objects.create(
         instance=instance,
         state=reason,
@@ -143,10 +187,32 @@ def pause_sla(
 
 @transaction.atomic
 def resume_sla(*, instance: SlaInstance, reason: str, actor_subject: str = "") -> SlaInstance:
+    instance = (
+        SlaInstance.objects.select_for_update()
+        .select_related("policy__calendar")
+        .get(pk=instance.pk)
+    )
     if instance.state == "active":
         return instance
+    remaining_business_seconds = instance.remaining_business_seconds
+    if remaining_business_seconds is not None:
+        instance.due_at = add_business_seconds(
+            timezone.now(),
+            remaining_business_seconds,
+            instance.policy.calendar,
+        )
     instance.state = "active"
-    instance.save(update_fields=["state", "updated_at"])
+    instance.remaining_business_seconds = (
+        0 if remaining_business_seconds == 0 else None
+    )
+    instance.save(
+        update_fields=[
+            "state",
+            "due_at",
+            "remaining_business_seconds",
+            "updated_at",
+        ]
+    )
     SlaPauseHistory.objects.create(
         instance=instance,
         state="active",
@@ -169,9 +235,28 @@ def complete_sla(*, ticket: Ticket, kind: str, at: datetime) -> SlaInstance | No
         return instance
     if instance.state == SlaInstance.State.MET:
         return instance
-    instance.state = SlaInstance.State.MET
+    overdue = (
+        instance.state == SlaInstance.State.ACTIVE
+        and (
+            at > instance.due_at
+            or instance.remaining_business_seconds == 0
+        )
+    ) or (
+        instance.state
+        in {
+            SlaInstance.State.PAUSED_REQUESTER,
+            SlaInstance.State.PAUSED_INTERNAL,
+            SlaInstance.State.PAUSED_IT,
+        }
+        and instance.remaining_business_seconds == 0
+    )
+    instance.state = SlaInstance.State.BREACHED if overdue else SlaInstance.State.MET
     instance.completed_at = at
-    instance.save(update_fields=["state", "completed_at", "updated_at"])
+    update_fields = ["state", "completed_at", "updated_at"]
+    if overdue:
+        instance.breached_at = min(instance.due_at, at)
+        update_fields.append("breached_at")
+    instance.save(update_fields=update_fields)
     return instance
 
 
@@ -203,6 +288,7 @@ def restart_resolution_sla(*, ticket: Ticket, at: datetime) -> SlaInstance | Non
     )
     instance.state = SlaInstance.State.ACTIVE
     instance.consumed_business_seconds = 0
+    instance.remaining_business_seconds = None
     instance.completed_at = None
     instance.breached_at = None
     instance.breach_reason = ""
@@ -277,10 +363,11 @@ def sync_slas_for_transition(
 # Periodic evaluator
 # -----------------------------------------------------------------------------
 
+@transaction.atomic
 def evaluate_open_slas() -> int:
     """Walk all open SLA instances, mark breaches, return count evaluated."""
     now = timezone.now()
-    qs = SlaInstance.objects.filter(
+    qs = SlaInstance.objects.select_for_update(skip_locked=True).filter(
         state__in=["active", "paused_requester", "paused_internal", "paused_it"]
     )
     evaluated = 0
@@ -289,12 +376,13 @@ def evaluate_open_slas() -> int:
         evaluated += 1
         if inst.state != "active":
             continue
-        if inst.due_at <= now and inst.state == "active":
+        update_fields = ["last_evaluated_at", "updated_at"]
+        if inst.due_at <= now:
             inst.state = "breached"
             inst.breached_at = now
-            inst.save(update_fields=["state", "breached_at", "updated_at"])
+            update_fields.extend(["state", "breached_at"])
             breached += 1
         inst.last_evaluated_at = now
-        inst.save(update_fields=["last_evaluated_at", "updated_at"])
+        inst.save(update_fields=update_fields)
     logger.info("sla_evaluator_run", extra={"evaluated": evaluated, "breached": breached})
     return evaluated

@@ -88,6 +88,7 @@ class SlaInstance(models.Model):
     started_at = models.DateTimeField(default=timezone.now)
     due_at = models.DateTimeField()
     consumed_business_seconds = models.PositiveIntegerField(default=0)
+    remaining_business_seconds = models.PositiveIntegerField(null=True, blank=True)
     completed_at = models.DateTimeField(null=True, blank=True)
     breached_at = models.DateTimeField(null=True, blank=True)
     breach_reason = models.TextField(blank=True)

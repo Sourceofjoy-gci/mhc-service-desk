@@ -41,6 +41,8 @@ def serialize_sla_clock(
         SlaInstance.State.PAUSED_IT,
     }:
         state = "paused"
+        if instance.remaining_business_seconds is not None:
+            remaining = instance.remaining_business_seconds
         overdue = 0
     elif instance.state == SlaInstance.State.MET:
         state = "met"
