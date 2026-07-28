@@ -5,6 +5,9 @@ from django.db import migrations, models
 
 def normalize_delivery_event_types(apps, schema_editor) -> None:
     event_model = apps.get_model("email_channel", "EmailWebhookEvent")
+    event_model.objects.filter(event_type="failure").update(
+        event_type="delivery_failure"
+    )
     event_model.objects.filter(event_type="bounce").update(
         event_type="delivery_bounce"
     )
