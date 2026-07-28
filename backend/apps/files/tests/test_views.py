@@ -9,6 +9,7 @@ from django.urls import reverse
 from rest_framework.test import APIClient
 
 from apps.audit.models import AuditEvent
+from apps.files import policy as file_policy
 from apps.files import services as file_services
 from apps.files.models import Attachment, AttachmentAccessLog
 from apps.identity_access.models import User
@@ -18,12 +19,13 @@ from apps.workflow.models import Status
 pytestmark = pytest.mark.django_db
 
 
-def _user(groups):
+def _user(groups, *, active=True):
     user = User.objects.create(
         username=f"user-{uuid4().hex}",
         keycloak_subject=f"subject-{uuid4().hex}",
         display_name="Attachment User",
         keycloak_groups=groups,
+        is_active=active,
     )
     user._groups = groups
     return user
@@ -581,6 +583,102 @@ def test_security_responder_can_only_access_restricted_ticket_attachments(
     assert allowed.status_code == 200
     assert len(allowed.data["results"]) == 1
     assert denied.status_code == 404
+
+
+@pytest.mark.parametrize(
+    ("groups", "active", "ticket_domain", "confidentiality", "expected_status"),
+    [
+        (["security-responders"], True, "operational", "restricted", 403),
+        (["auditors"], True, "operational", "normal", 403),
+        (["ops-agents"], False, "operational", "normal", 403),
+        ([], True, "operational", "normal", 404),
+        (["ops-agents"], True, "it", "normal", 404),
+    ],
+)
+def test_readable_or_unscoped_actors_cannot_upload_before_any_provider_call(
+    basic_world,
+    monkeypatch,
+    groups,
+    active,
+    ticket_domain,
+    confidentiality,
+    expected_status,
+):
+    """Catch attachment POST drifting from the ticket content capability."""
+    actor = _user(groups, active=active)
+    ticket = _ticket(
+        basic_world,
+        domain=ticket_domain,
+        confidentiality=confidentiality,
+    )
+    monkeypatch.setattr(
+        "apps.files.views.scan_with_clamav",
+        lambda _data: pytest.fail("denied attachment reached ClamAV"),
+    )
+    monkeypatch.setattr(
+        "apps.files.views.upload_to_minio",
+        lambda **_kwargs: pytest.fail("denied attachment reached object storage"),
+    )
+    monkeypatch.setattr(
+        "apps.files.views.record_attachment",
+        lambda **_kwargs: pytest.fail("denied attachment reached persistence"),
+    )
+
+    detail = _client(actor).get(reverse("tickets-detail", args=[ticket.number]))
+    response = _client(actor).post(
+        reverse("ticket-attachments", args=[ticket.number]),
+        {"files": [_pdf("denied.pdf")]},
+        format="multipart",
+    )
+
+    if detail.status_code == 200:
+        assert detail.data["capabilities"]["can_upload_attachment"] is False
+    assert response.status_code == expected_status
+    assert not Attachment.objects.filter(ticket=ticket).exists()
+    assert not AuditEvent.objects.filter(object_id=str(ticket.id)).exists()
+    assert not OutboxEvent.objects.filter(aggregate_id=str(ticket.id)).exists()
+
+
+def test_attachment_post_rechecks_revoked_authority_before_provider_calls(
+    basic_world,
+    monkeypatch,
+):
+    """Catch a stale pre-read scope snapshot authorizing the locked write."""
+    actor = _user(["ops-agents"])
+    ticket = _ticket(basic_world)
+    real_validate_content = file_policy.validate_attachment_content
+
+    def revoke_after_pre_read(*, data, content_type):
+        real_validate_content(data=data, content_type=content_type)
+        User.objects.filter(id=actor.id).update(keycloak_groups=[])
+
+    monkeypatch.setattr(
+        "apps.files.views.validate_attachment_content",
+        revoke_after_pre_read,
+    )
+    monkeypatch.setattr(
+        "apps.files.views.scan_with_clamav",
+        lambda _data: pytest.fail("revoked attachment reached ClamAV"),
+    )
+    monkeypatch.setattr(
+        "apps.files.views.upload_to_minio",
+        lambda **_kwargs: pytest.fail("revoked attachment reached object storage"),
+    )
+    monkeypatch.setattr(
+        "apps.files.views.record_attachment",
+        lambda **_kwargs: pytest.fail("revoked attachment reached persistence"),
+    )
+
+    response = _client(actor).post(
+        reverse("ticket-attachments", args=[ticket.number]),
+        {"files": [_pdf("revoked.pdf")]},
+        format="multipart",
+    )
+
+    assert response.status_code == 404
+    assert not Attachment.objects.filter(ticket=ticket).exists()
+    assert not AuditEvent.objects.filter(object_id=str(ticket.id)).exists()
+    assert not OutboxEvent.objects.filter(aggregate_id=str(ticket.id)).exists()
 
 
 def test_auditor_can_list_and_download_but_cannot_upload(basic_world, monkeypatch):

@@ -8,6 +8,7 @@ from dataclasses import dataclass
 from uuid import UUID
 
 from django.db import transaction
+from django.http import Http404
 from django.shortcuts import get_object_or_404
 from rest_framework import status
 from rest_framework.decorators import api_view, permission_classes
@@ -18,8 +19,13 @@ from rest_framework.response import Response
 
 from apps.identity_access.authentication import KeycloakJWTAuthentication
 from apps.identity_access.models import User
-from apps.identity_access.scope import ScopePermission, scope_ticket_queryset
+from apps.identity_access.scope import (
+    ScopePermission,
+    get_authority_snapshot,
+    scope_ticket_queryset,
+)
 from apps.tickets.models import Ticket
+from apps.tickets.permissions import can_add_ticket_content
 
 from .models import Attachment
 from .policy import (
@@ -54,6 +60,10 @@ class _PreparedAttachment:
     object_key: str
 
 
+class _AttachmentStorageError(Exception):
+    """Raised so storage failures exit and roll back the locked DB transaction."""
+
+
 def _cleanup_stored_objects(stored_objects: Sequence[StoredObject]) -> None:
     for stored_object in reversed(stored_objects):
         try:
@@ -69,6 +79,19 @@ def _authenticated_user(request: Request) -> User:
         detail="Authentication credentials were not provided.",
         code="not_authenticated",
     )
+
+
+def _reload_actor_authority(actor: User) -> User:
+    """Reload durable authority so the locked write does not trust stale claims."""
+    fresh_actor = User.objects.get(pk=actor.pk)
+    durable_groups = [
+        group
+        for group in (fresh_actor.keycloak_groups or [])
+        if isinstance(group, str)
+    ]
+    durable_groups.extend(fresh_actor.groups.values_list("name", flat=True))
+    vars(fresh_actor)["_groups"] = durable_groups
+    return fresh_actor
 
 
 def _attachment_error(
@@ -129,6 +152,13 @@ def upload(request: Request, ticket_number: str) -> Response:
             }
         )
 
+    actor = _authenticated_user(request)
+    if not can_add_ticket_content(actor, ticket, request=request):
+        raise PermissionDenied(
+            detail="You cannot perform this ticket action.",
+            code="ticket_action_forbidden",
+        )
+
     files = request.FILES.getlist("files") or request.FILES.getlist("file")
     if not files:
         return _attachment_error(
@@ -175,7 +205,6 @@ def upload(request: Request, ticket_number: str) -> Response:
             )
         validated_files.append((uploaded_file, filename, content_type))
 
-    actor = _authenticated_user(request).keycloak_subject
     validated_content: list[tuple[str, str, bytes]] = []
     actual_batch_size = 0
     for uploaded_file, filename, content_type in validated_files:
@@ -210,36 +239,84 @@ def upload(request: Request, ticket_number: str) -> Response:
             )
         validated_content.append((filename, content_type, data))
 
-    prepared: list[_PreparedAttachment] = []
-    for filename, content_type, data in validated_content:
-        scan_status, signature = scan_with_clamav(data)
-        if scan_status == "infected":
-            object_key = f"quarantine/{ticket.number}/{uuid.uuid4().hex}"
-        else:
-            object_key = f"attachments/{ticket.number}/{uuid.uuid4().hex}"
-        prepared.append(
-            _PreparedAttachment(
-                filename=filename,
-                content_type=content_type,
-                data=data,
-                checksum_sha256=__import__("hashlib").sha256(data).hexdigest(),
-                scan_status=scan_status,
-                scan_signature=signature or "",
-                object_key=object_key,
-            )
-        )
-
     stored_objects: list[StoredObject] = []
+    attachments: list[Attachment] = []
     try:
-        for item in prepared:
-            stored_objects.append(
-                upload_to_minio(
-                    key=item.object_key,
-                    data=item.data,
-                    content_type=item.content_type,
-                )
+        with transaction.atomic():
+            fresh_actor = _reload_actor_authority(actor)
+            fresh_authority = get_authority_snapshot(fresh_actor, request=request)
+            locked_ticket = get_object_or_404(
+                scope_ticket_queryset(
+                    fresh_actor,
+                    Ticket.objects.select_for_update(of=("self",)),
+                    request=request,
+                    snapshot=fresh_authority,
+                ),
+                id=ticket.id,
             )
-    except Exception:
+            if not can_add_ticket_content(
+                fresh_actor,
+                locked_ticket,
+                request=request,
+            ):
+                raise PermissionDenied(
+                    detail="You cannot perform this ticket action.",
+                    code="ticket_action_forbidden",
+                )
+
+            prepared: list[_PreparedAttachment] = []
+            for filename, content_type, data in validated_content:
+                scan_status, signature = scan_with_clamav(data)
+                if scan_status == "infected":
+                    object_key = (
+                        f"quarantine/{locked_ticket.number}/{uuid.uuid4().hex}"
+                    )
+                else:
+                    object_key = (
+                        f"attachments/{locked_ticket.number}/{uuid.uuid4().hex}"
+                    )
+                prepared.append(
+                    _PreparedAttachment(
+                        filename=filename,
+                        content_type=content_type,
+                        data=data,
+                        checksum_sha256=__import__("hashlib")
+                        .sha256(data)
+                        .hexdigest(),
+                        scan_status=scan_status,
+                        scan_signature=signature or "",
+                        object_key=object_key,
+                    )
+                )
+
+            try:
+                for item in prepared:
+                    stored_objects.append(
+                        upload_to_minio(
+                            key=item.object_key,
+                            data=item.data,
+                            content_type=item.content_type,
+                        )
+                    )
+            except Exception as exc:
+                raise _AttachmentStorageError from exc
+
+            for item in prepared:
+                attachments.append(
+                    record_attachment(
+                        ticket=locked_ticket,
+                        message=None,
+                        object_key=item.object_key,
+                        filename=item.filename,
+                        content_type=item.content_type,
+                        size_bytes=len(item.data),
+                        checksum_sha256=item.checksum_sha256,
+                        scan_status=item.scan_status,
+                        scan_signature=item.scan_signature,
+                        actor_subject=fresh_actor.keycloak_subject,
+                    )
+                )
+    except _AttachmentStorageError:
         logger.exception("minio_upload_failed")
         _cleanup_stored_objects(stored_objects)
         return _attachment_error(
@@ -249,25 +326,8 @@ def upload(request: Request, ticket_number: str) -> Response:
             fields={},
             response_status=status.HTTP_502_BAD_GATEWAY,
         )
-
-    attachments: list[Attachment] = []
-    try:
-        with transaction.atomic():
-            for item in prepared:
-                attachments.append(
-                    record_attachment(
-                        ticket=ticket,
-                        message=None,
-                        object_key=item.object_key,
-                        filename=item.filename,
-                        content_type=item.content_type,
-                        size_bytes=len(item.data),
-                        checksum_sha256=item.checksum_sha256,
-                        scan_status=item.scan_status,
-                        scan_signature=item.scan_signature,
-                        actor_subject=actor,
-                    )
-                )
+    except (Http404, PermissionDenied):
+        raise
     except Exception:
         logger.exception("attachment_persistence_failed")
         _cleanup_stored_objects(stored_objects)
