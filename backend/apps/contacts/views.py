@@ -1,16 +1,21 @@
 """Contact API views."""
 from __future__ import annotations
 
-from rest_framework import viewsets
-from rest_framework.decorators import action
-from rest_framework.permissions import IsAuthenticated
+import hashlib
+
+from rest_framework import status, viewsets
+from rest_framework.decorators import action, api_view, permission_classes
+from rest_framework.permissions import AllowAny, IsAuthenticated
 from rest_framework.response import Response
 
 from apps.identity_access.authentication import KeycloakJWTAuthentication
 from apps.identity_access.scope import ScopePermission
+from apps.tickets.api import TicketMessageSerializer
+from apps.tickets.models import Ticket
+from apps.tickets.services import add_message
 
 from .api import ContactCreateSerializer, ContactSerializer
-from .models import Contact
+from .models import Contact, VerificationToken
 
 
 class ContactViewSet(viewsets.ModelViewSet):
@@ -57,18 +62,6 @@ class ContactViewSet(viewsets.ModelViewSet):
 
 # --- Requester-facing magic-link endpoints (FR-071/073/075) -----------------
 
-import hashlib
-
-from rest_framework import status
-from rest_framework.decorators import api_view, permission_classes
-from rest_framework.permissions import AllowAny
-
-from apps.tickets.api import TicketMessageSerializer
-from apps.tickets.models import Ticket
-from apps.tickets.services import add_message
-
-from .models import VerificationToken
-
 
 def _hash(raw: str) -> str:
     return hashlib.sha256(raw.encode()).hexdigest()
@@ -81,14 +74,20 @@ def requester_status(request, token: str):
     h = _hash(token)
     vt = VerificationToken.objects.filter(token_hash=h).first()
     if not vt or not vt.is_valid():
-        return Response({"detail": "Link is invalid or has expired."}, status=status.HTTP_404_NOT_FOUND)
+        return Response(
+            {"detail": "Link is invalid or has expired."},
+            status=status.HTTP_404_NOT_FOUND,
+        )
     ticket = (
         Ticket.objects.filter(requester=vt.contact)
         .order_by("-created_at")
         .first()
     )
     if ticket is None:
-        return Response({"detail": "Link is invalid or has expired."}, status=status.HTTP_404_NOT_FOUND)
+        return Response(
+            {"detail": "Link is invalid or has expired."},
+            status=status.HTTP_404_NOT_FOUND,
+        )
     safe_messages = [
         m for m in ticket.messages.all() if m.direction in ("outbound", "inbound")
     ]
@@ -111,7 +110,10 @@ def requester_reply(request, token: str):
     h = _hash(token)
     vt = VerificationToken.objects.filter(token_hash=h).first()
     if not vt or not vt.is_valid():
-        return Response({"detail": "Link is invalid or has expired."}, status=status.HTTP_404_NOT_FOUND)
+        return Response(
+            {"detail": "Link is invalid or has expired."},
+            status=status.HTTP_404_NOT_FOUND,
+        )
     body = (request.data or {}).get("body_text", "").strip()
     if not body:
         return Response({"detail": "body_text is required"}, status=status.HTTP_400_BAD_REQUEST)
@@ -121,7 +123,10 @@ def requester_reply(request, token: str):
         .first()
     )
     if ticket is None:
-        return Response({"detail": "Link is invalid or has expired."}, status=status.HTTP_404_NOT_FOUND)
+        return Response(
+            {"detail": "Link is invalid or has expired."},
+            status=status.HTTP_404_NOT_FOUND,
+        )
     msg = add_message(
         ticket=ticket,
         direction="inbound",

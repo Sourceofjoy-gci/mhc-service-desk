@@ -44,7 +44,10 @@ def inbound_email(request):
     )
     if outcome.get("status") == "error":
         return Response(outcome, status=status.HTTP_400_BAD_REQUEST)
-    return Response(outcome, status=status.HTTP_201_CREATED if outcome.get("status") == "created" else 200)
+    response_status = (
+        status.HTTP_201_CREATED if outcome.get("status") == "created" else 200
+    )
+    return Response(outcome, status=response_status)
 
 
 @api_view(["POST"])

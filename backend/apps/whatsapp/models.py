@@ -28,9 +28,19 @@ class WhatsappMessage(models.Model):
 
     id = models.UUIDField(primary_key=True, default=uuid.uuid4, editable=False)
     ticket = models.ForeignKey(
-        "tickets.Ticket", on_delete=models.SET_NULL, null=True, blank=True, related_name="whatsapp_messages"
+        "tickets.Ticket",
+        on_delete=models.SET_NULL,
+        null=True,
+        blank=True,
+        related_name="whatsapp_messages",
     )
-    account = models.ForeignKey(WhatsappAccount, on_delete=models.SET_NULL, null=True, blank=True, related_name="messages")
+    account = models.ForeignKey(
+        WhatsappAccount,
+        on_delete=models.SET_NULL,
+        null=True,
+        blank=True,
+        related_name="messages",
+    )
     from_number = models.CharField(max_length=32, blank=True)
     to_number = models.CharField(max_length=32, blank=True)
     direction = models.CharField(max_length=16, choices=Direction.choices)

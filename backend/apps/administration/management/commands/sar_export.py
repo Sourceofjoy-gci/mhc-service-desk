@@ -91,8 +91,14 @@ class Command(BaseCommand):
             ],
         }
         Path(opts["out"]).mkdir(parents=True, exist_ok=True)
-        out_path = Path(opts["out"]) / f"sar-{contact.id}-{datetime.now(tz=timezone.utc).strftime('%Y%m%dT%H%M%SZ')}.json"
-        out_path.write_text(json.dumps(payload, indent=2, sort_keys=True, default=str), encoding="utf-8")
+        out_path = Path(opts["out"]) / (
+            f"sar-{contact.id}-"
+            f"{datetime.now(tz=timezone.utc).strftime('%Y%m%dT%H%M%SZ')}.json"
+        )
+        out_path.write_text(
+            json.dumps(payload, indent=2, sort_keys=True, default=str),
+            encoding="utf-8",
+        )
         self.stdout.write(self.style.SUCCESS(f"SAR export written to {out_path}"))
 
     def _find_contact(self, opts):

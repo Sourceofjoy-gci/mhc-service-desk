@@ -59,7 +59,11 @@ def monitoring_webhook(request):
         if Ticket.objects.filter(external_message_id=ext_id).exists():
             continue
         service = Service.objects.filter(domain="it", is_active=True).first()
-        request_type = RequestType.objects.filter(service=service, is_active=True).first() if service else None
+        request_type = (
+            RequestType.objects.filter(service=service, is_active=True).first()
+            if service
+            else None
+        )
         office = Office.objects.filter(is_active=True).first()
         requester, _ = Contact.objects.get_or_create(
             email="monitoring@mhc.local",

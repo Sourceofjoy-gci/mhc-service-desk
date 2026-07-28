@@ -5,6 +5,7 @@ Includes the dev auth bypass, ``runserver``-style autoreload, and the
 convenience defaults that hide real production warnings.
 """
 from .base import *  # noqa: F401,F403
+from .base import env
 
 DEBUG = True
 ENVIRONMENT = "development"

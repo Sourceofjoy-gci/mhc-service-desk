@@ -17,7 +17,16 @@ class RequestTypeSerializer(serializers.ModelSerializer):
 
     class Meta:
         model = RequestType
-        fields = ("id", "service", "code", "name", "description", "default_priority", "is_active", "fields")
+        fields = (
+            "id",
+            "service",
+            "code",
+            "name",
+            "description",
+            "default_priority",
+            "is_active",
+            "fields",
+        )
 
 
 class ServiceSerializer(serializers.ModelSerializer):

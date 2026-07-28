@@ -12,7 +12,7 @@ import sys
 from django.core.exceptions import ImproperlyConfigured
 
 from .base import *  # noqa: F401,F403
-from .base import env
+from .base import DATABASES, env
 
 DEBUG = False
 ENVIRONMENT = "production"

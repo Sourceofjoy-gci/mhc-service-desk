@@ -13,7 +13,12 @@ import multiprocessing
 import os
 
 bind = os.environ.get("GUNICORN_BIND", "0.0.0.0:8000")
-workers = int(os.environ.get("GUNICORN_WORKERS", str(min(4, (multiprocessing.cpu_count() * 2) + 1))))
+workers = int(
+    os.environ.get(
+        "GUNICORN_WORKERS",
+        str(min(4, (multiprocessing.cpu_count() * 2) + 1)),
+    )
+)
 worker_class = "sync"
 threads = int(os.environ.get("GUNICORN_THREADS", "4"))
 timeout = int(os.environ.get("GUNICORN_TIMEOUT", "60"))

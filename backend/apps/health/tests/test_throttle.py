@@ -61,8 +61,12 @@ def test_public_form_rate_limit_returns_429_after_threshold(client, settings, mo
         "consent": True,
     }
     last = None
-    for i in range(20):
-        r = client.post("/api/v1/tickets/public/intake/", data=json.dumps(body), content_type="application/json")
+    for _ in range(20):
+        r = client.post(
+            "/api/v1/tickets/public/intake/",
+            data=json.dumps(body),
+            content_type="application/json",
+        )
         last = r
         if r.status_code == 429:
             break

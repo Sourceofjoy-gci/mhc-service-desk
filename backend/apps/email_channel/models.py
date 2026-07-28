@@ -13,7 +13,8 @@ class Mailbox(models.Model):
     address = models.EmailField(unique=True)
     domain = models.CharField(max_length=16, choices=[("operational", "Operational"), ("it", "IT")])
     is_active = models.BooleanField(default=True)
-    provider = models.CharField(max_length=32, default="generic")  # graph | mailgun | sendgrid | generic
+    # Supported values: graph, mailgun, sendgrid, generic.
+    provider = models.CharField(max_length=32, default="generic")
     secret = models.CharField(max_length=128, blank=True)
     created_at = models.DateTimeField(auto_now_add=True)
 

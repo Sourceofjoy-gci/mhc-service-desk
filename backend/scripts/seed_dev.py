@@ -38,7 +38,12 @@ def ensure_service(code: str, name: str, domain: str) -> Service:
     return obj
 
 
-def ensure_request_type(service: Service, code: str, name: str, priority: str = "P3") -> RequestType:
+def ensure_request_type(
+    service: Service,
+    code: str,
+    name: str,
+    priority: str = "P3",
+) -> RequestType:
     obj, _ = RequestType.objects.get_or_create(
         service=service, code=code,
         defaults={"name": name, "default_priority": priority},

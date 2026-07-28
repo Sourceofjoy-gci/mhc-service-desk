@@ -132,6 +132,7 @@ class Command(BaseCommand):
             ).hexdigest(),
         )
         self.stdout.write(
-            f"  {table:<32} cutoff={cutoff.date()} disposed={rows_disposed} hold_kept={rows_preserved_legal_hold}"
+            f"  {table:<32} cutoff={cutoff.date()} disposed={rows_disposed} "
+            f"hold_kept={rows_preserved_legal_hold}"
         )
         return cert.to_json()

@@ -12,6 +12,9 @@ import logging
 import os
 
 import requests
+from django.db import transaction
+
+from apps.email_channel.services import process_inbound_email
 
 logger = logging.getLogger(__name__)
 
@@ -97,10 +100,6 @@ class CloudProvider(BaseProvider):
 
 # --- Inbound webhook processing -------------------------------------------
 
-from django.db import transaction
-
-from apps.email_channel.services import process_inbound_email  # noqa: E402  (re-use)
-
 
 @transaction.atomic
 def process_inbound_whatsapp(
@@ -121,7 +120,12 @@ def process_inbound_whatsapp(
     from .models import WhatsappMessage
 
     # Prevent duplicate delivery using provider id
-    if external_message_id and WhatsappMessage.objects.filter(external_message_id=external_message_id).exists():
+    if (
+        external_message_id
+        and WhatsappMessage.objects.filter(
+            external_message_id=external_message_id
+        ).exists()
+    ):
         return {"status": "duplicate"}
 
     contact, _ = Contact.objects.get_or_create(
