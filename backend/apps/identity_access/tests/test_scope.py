@@ -33,7 +33,12 @@ def _user_with_scopes(*scopes: Scope):
     user = type(
         "U",
         (),
-        {"is_authenticated": True, "is_superuser": False, "_scopes": list(scopes)},
+        {
+            "is_active": True,
+            "is_authenticated": True,
+            "is_superuser": False,
+            "_scopes": list(scopes),
+        },
     )()
     return user
 
@@ -69,6 +74,7 @@ def test_security_responder_scopes_are_restricted_only():
         "U",
         (),
         {
+            "is_active": True,
             "is_authenticated": True,
             "is_superuser": False,
             "_groups": ["security-responders"],
@@ -89,6 +95,7 @@ def test_broader_group_wins_over_restricted_only_scope():
         "U",
         (),
         {
+            "is_active": True,
             "is_authenticated": True,
             "is_superuser": False,
             "_groups": ["security-responders", "ops-agents"],
@@ -150,7 +157,12 @@ def test_ticket_queryset_enforces_restricted_only_and_privileged_access(basic_wo
         user = type(
             "U",
             (),
-            {"is_authenticated": True, "is_superuser": False, "_groups": groups},
+            {
+                "is_active": True,
+                "is_authenticated": True,
+                "is_superuser": False,
+                "_groups": groups,
+            },
         )()
         queryset = scope_ticket_queryset(user, Ticket.objects.all())
         return set(queryset.values_list("title", flat=True))
@@ -170,7 +182,12 @@ def test_auditors_are_read_only():
     user = type(
         "U",
         (),
-        {"is_authenticated": True, "is_superuser": False, "_groups": ["auditors"]},
+        {
+            "is_active": True,
+            "is_authenticated": True,
+            "is_superuser": False,
+            "_groups": ["auditors"],
+        },
     )()
     permission = ScopePermission()
     view = SimpleNamespace()
@@ -186,6 +203,38 @@ def _persisted_user(*, groups):
     )
     user._groups = groups
     return user
+
+
+def test_inactive_superuser_has_no_authority_across_canonical_scope_entry_points(
+    basic_world,
+):
+    ticket = _ticket(
+        basic_world=basic_world,
+        number="OP-202607-000099",
+        domain="operational",
+        title="Inactive user must not see this",
+        confidentiality="normal",
+    )
+    user = User.objects.create(
+        username="inactive-scope-user",
+        keycloak_subject="inactive-scope-subject",
+        is_active=False,
+        is_superuser=True,
+        keycloak_groups=["system-admins"],
+    )
+    vars(user)["_groups"] = ["system-admins"]
+    vars(user)["_scopes"] = [Scope(domain="admin")]
+    permission = ScopePermission()
+    request = SimpleNamespace(user=user, method="GET")
+
+    assert get_user_scopes(user, request=request) == []
+    assert not has_scope(user, Scope(domain="operational"))
+    assert not permission.has_permission(request, SimpleNamespace())
+    assert not scope_ticket_queryset(
+        user,
+        Ticket.objects.filter(pk=ticket.pk),
+        request=request,
+    ).exists()
 
 
 def _operational_service(*, code):
@@ -793,6 +842,7 @@ def test_ticket_scope_decision_uses_one_immutable_authority_snapshot():
     )
     manager = _ChangingAssignmentManager(assignment)
     user = SimpleNamespace(
+        is_active=True,
         is_authenticated=True,
         is_superuser=False,
         pk=uuid4(),
@@ -817,6 +867,7 @@ def test_reused_user_gets_fresh_authority_snapshot_on_the_next_request():
     )
     manager = _RevocableAssignmentManager(assignment)
     user = SimpleNamespace(
+        is_active=True,
         is_authenticated=True,
         is_superuser=False,
         pk=uuid4(),

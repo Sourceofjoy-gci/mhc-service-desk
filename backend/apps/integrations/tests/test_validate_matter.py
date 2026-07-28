@@ -113,3 +113,21 @@ def test_validate_matter_allows_a_scoped_restricted_ticket_and_records_validatio
         "matter_number": "EST-2026-000123",
         "by": response.wsgi_request.user.keycloak_subject,
     }
+
+
+def test_validate_matter_rejects_an_inactive_user_before_provider_or_outbox_access(
+    basic_world,
+    monkeypatch,
+):
+    ticket = _ticket(basic_world)
+    user = _user(["ops-agents"])
+    user.is_active = False
+    user.save(update_fields=["is_active"])
+    monkeypatch.setattr(views, "_FAKE_ESTATES", _DeniedProvider())
+    client = APIClient()
+    client.force_authenticate(user=user)
+
+    response = client.get(reverse("validate-matter", args=[ticket.number]))
+
+    assert response.status_code == 403
+    assert not OutboxEvent.objects.exists()

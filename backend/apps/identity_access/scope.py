@@ -93,6 +93,14 @@ def _is_authenticated(user: object) -> bool:
     return bool(getattr(user, "is_authenticated", False))
 
 
+def _is_active(user: object) -> bool:
+    return bool(getattr(user, "is_active", False))
+
+
+def _has_active_identity(user: object) -> bool:
+    return _is_authenticated(user) and _is_active(user)
+
+
 def _is_superuser(user: object) -> bool:
     return bool(getattr(user, "is_superuser", False))
 
@@ -134,7 +142,7 @@ class AuthoritySnapshot:
 
 
 def has_scope(user: object, required: Scope) -> bool:
-    if not _is_authenticated(user):
+    if not _has_active_identity(user):
         return False
     if _is_superuser(user):
         return True
@@ -342,7 +350,7 @@ def _snapshot_from_groups(user: object) -> AuthoritySnapshot:
 
 
 def _build_authority_snapshot(user: object) -> AuthoritySnapshot:
-    if not user or not _is_authenticated(user):
+    if not user or not _has_active_identity(user):
         return AuthoritySnapshot()
 
     assignments = _active_persisted_assignments(user)
@@ -368,11 +376,18 @@ def get_authority_snapshot(
     request: object | None = None,
 ) -> AuthoritySnapshot:
     """Resolve authority once per request, or freshly for a standalone caller."""
+    if not _has_active_identity(user):
+        inactive_snapshot = AuthoritySnapshot()
+        if request is not None:
+            vars(request)["_authority_snapshot"] = inactive_snapshot
+            vars(request)["_authority_snapshot_user"] = user
+        return inactive_snapshot
+
     if request is not None:
-        snapshot = getattr(request, "_authority_snapshot", None)
+        cached_snapshot: object = getattr(request, "_authority_snapshot", None)
         snapshot_user = getattr(request, "_authority_snapshot_user", None)
-        if isinstance(snapshot, AuthoritySnapshot) and snapshot_user is user:
-            return snapshot
+        if isinstance(cached_snapshot, AuthoritySnapshot) and snapshot_user is user:
+            return cached_snapshot
 
     snapshot = _build_authority_snapshot(user)
     if request is not None:
@@ -517,6 +532,8 @@ class ScopePermission(permissions.BasePermission):
     def has_permission(self, request: Request, view: APIView) -> bool:
         if getattr(view, "_public", False):
             return True
+        if not _has_active_identity(request.user):
+            return False
         snapshot = get_authority_snapshot(request.user, request=request)
         if (
             is_auditor(request.user, snapshot=snapshot)
