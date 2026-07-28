@@ -28,7 +28,8 @@ bearer tokens, requester details, raw provider payloads, or full logs.
 | `python manage.py migrate --check` | Exit 0; no unapplied migrations |
 | `python manage.py check` | Exit 0; no Django system-check issues |
 | `pip check` | Exit 0; no broken requirements |
-| `pytest -q` in the freshly built current-source backend image | Exit 0; 540 tests passed |
+| `pytest -q` on final `HEAD` | Exit 0; 541 tests passed in 255.91s |
+| Focused email-channel migration verification | Exit 0; 28 tests passed, including forward, reverse, and reapply round-trip coverage |
 | `mypy apps config` | Exit 0; no issues in 164 source files |
 | `ruff check .` against the explicitly authorized dirty worktree | Exit 0; no findings |
 | `python scripts/permission_audit.py` | Exit 0; 64 route actions across 48 API paths |
