@@ -60,6 +60,22 @@ Open:
 - MinIO console: <http://localhost:9001>
 - Grafana: <http://localhost:3000>
 
+## Development quality commands
+
+Run these targets from the repository root against the local development
+Docker Compose stack:
+
+- `make test` runs the complete backend and frontend test suites.
+- `make lint` runs Ruff for the backend and ESLint for the frontend.
+- `make type` runs mypy against `/app/apps` and `/app/config`, then the
+  frontend TypeScript check.
+- `make verify` checks for Django migration drift, then runs the complete
+  backend test and Ruff gates plus the frontend test, type, lint, and build
+  gates. The target stops at the first failing command.
+- `make pilot-smoke` runs `/app/scripts/pilot_foundation_smoke.py` in the
+  backend container. It creates and mutates development-only ticket data, so
+  use it only with the local `config.settings.dev` stack.
+
 ## Current milestone
 
 **M1 — Platform Foundation** (in progress). Exit criteria: staff can authenticate via Keycloak, role/scope checks pass, full stack deploys from clean checkout, health endpoint reports healthy, backups and restore demonstrated.

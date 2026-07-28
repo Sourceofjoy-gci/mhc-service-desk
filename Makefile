@@ -1,4 +1,4 @@
-.PHONY: help up down logs build ps restart migrate seed backup restore test lint type fmt clean keycloak-export
+.PHONY: help up down logs build ps restart migrate seed backup restore test lint type verify pilot-smoke fmt clean keycloak-export
 
 help:
 	@echo "MHC e-Ticketing — make targets"
@@ -15,6 +15,8 @@ help:
 	@echo "  test          Run backend + frontend tests"
 	@echo "  lint          Run ruff + eslint"
 	@echo "  type          Run mypy + tsc"
+	@echo "  verify        Run the complete backend + frontend quality gate"
+	@echo "  pilot-smoke   Exercise the pilot workflow against development data"
 	@echo "  fmt           Auto-format"
 	@echo "  keycloak-export  Export current realm to infrastructure/keycloak/realm-export.json"
 
@@ -50,16 +52,28 @@ restore:
 	bash scripts/restore.sh
 
 test:
-	docker compose exec backend pytest
-	docker compose exec frontend npm test --silent
+	docker compose exec backend pytest -q
+	docker compose exec frontend npm test -- --run
 
 lint:
 	docker compose exec backend ruff check .
 	docker compose exec frontend npm run lint
 
 type:
-	docker compose exec backend mypy backend
+	docker compose exec backend mypy apps config
 	docker compose exec frontend npm run typecheck
+
+pilot-smoke:
+	docker compose exec backend python /app/scripts/pilot_foundation_smoke.py
+
+verify:
+	docker compose exec backend python manage.py makemigrations --check --dry-run
+	docker compose exec backend pytest -q
+	docker compose exec backend ruff check .
+	docker compose exec frontend npm test -- --run
+	docker compose exec frontend npm run typecheck
+	docker compose exec frontend npm run lint
+	docker compose exec frontend npm run build
 
 fmt:
 	docker compose exec backend ruff format .
