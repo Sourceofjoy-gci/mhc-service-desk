@@ -89,11 +89,12 @@ Latest evidence shows:
 - [x] Ruff passed against the explicitly authorized current dirty worktree.
 - [ ] Reproducible clean-checkout Ruff remains open: its fixes exist only in
   preserved, unstaged user-owned hunks. Exact findings are in the dated record.
-- [ ] Final current-source frontend tests, TypeScript, ESLint, and production
-  build rerun against the completed checkout is pending. An earlier run passed
-  all four gates and recorded non-fatal font and bundle-size warnings.
-- [ ] Final live Operational/IT pilot smoke rerun is pending. An earlier run
-  passed with fresh development tickets.
+- [x] The fresh verified backend image was recreated on host port 8001 and the
+  health endpoint became healthy.
+- [x] Final isolated current-source frontend tests, TypeScript, ESLint, and the
+  production build passed. Non-fatal font and bundle-size warnings remain.
+- [x] Final live Operational/IT pilot smoke passed with fresh development
+  tickets.
 
 The open items keep the automatic release gate open. See the dated evidence
 for exact totals and the dirty-worktree qualification; do not copy fixed totals
@@ -144,9 +145,8 @@ listed above.
 ## Decision
 
 **Pilot readiness is open.** The application must not be labelled pilot-ready
-until clean-checkout Ruff, the final frontend gates, the final live smoke,
-required browser checks, and owner-controlled prerequisites all have passing
-evidence.
+until clean-checkout Ruff, required browser checks, and owner-controlled
+prerequisites all have passing evidence.
 
 | Role | Name | Date | Decision/signature |
 |---|---|---|---|

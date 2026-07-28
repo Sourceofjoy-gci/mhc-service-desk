@@ -24,8 +24,8 @@ raw payloads, or full logs.
 This first run predates the backend remediation commits. Its backend pytest,
 Ruff, and mypy failures are retained as historical evidence and are superseded
 by the accepted remediation evidence below. The frontend and live-smoke rows
-show that those workflows passed at that point; their final closeout reruns
-against the completed checkout are still pending.
+show that those workflows passed at that point. Their final closeout reruns
+against the completed checkout are recorded below.
 
 | UTC start | Command | Exit | Concise result |
 |---|---|---:|---|
@@ -79,6 +79,20 @@ left unstaged. The committed checkout does not contain those hunks, so a fresh
 clone is not yet Ruff-clean. No unrelated user hunk was included in the
 backend remediation commits.
 
+## Final runtime closeout evidence
+
+Exact UTC start times were not captured with the supplied final results, so
+none are inferred here.
+
+| Command or runtime state | Recorded result |
+|---|---|
+| Fresh verified backend image recreated with `BACKEND_PORT=8001` | The service started on host port 8001 and `/api/v1/health` became healthy |
+| `docker compose run --rm --no-deps --build --volume /app/node_modules frontend env VITE_API_BASE_URL= npm test -- --run` | Exit 0; 16 test files and 216 tests passed |
+| Current-source frontend `npm run typecheck` gate | Exit 0 |
+| Current-source frontend `npm run lint` gate | Exit 0 |
+| Current-source frontend `npm run build` gate | Exit 0; Vite transformed 2,241 modules. Non-blocking warnings remain for unresolved Geist font files and a JavaScript chunk above 500 kB |
+| `docker compose exec backend python /app/scripts/pilot_foundation_smoke.py` | Passed; created `OP-202607-000076`, `OP-202607-000077`, and `IT-202607-000029` |
+
 ## Implemented
 
 - Debug-only development authentication and production `DEBUG=False` guard.
@@ -101,14 +115,16 @@ Implementation is a code-state statement, not a passing release verdict.
 - Permission-audit route inventory.
 - The inbound-email sanitizer regression through persisted message content.
 - Ruff only for the explicitly authorized current dirty worktree.
-- An earlier current-source frontend run passed unit/component tests,
-  TypeScript, ESLint, and the production build.
-- An earlier live Operational/IT smoke run passed, including cross-domain
-  `403` dashboards and `404` ticket isolation asserted by the script.
+- The fresh verified backend image was recreated on host port 8001 and its
+  health endpoint became healthy.
+- The final isolated current-source frontend unit/component tests, TypeScript,
+  ESLint, and production build passed.
+- The final live Operational/IT smoke passed, including cross-domain `403`
+  dashboards and `404` ticket isolation asserted by the script.
 
 The final release gate remains open. A clean committed checkout is not
-Ruff-clean, and the final frontend and live-smoke reruns against the completed
-checkout have not yet been recorded.
+Ruff-clean, browser verification is unavailable, and owner-controlled release
+prerequisites have not been supplied.
 
 ## Manual browser verification
 
@@ -120,8 +136,6 @@ permission, validation, or stale-conflict browser claim is made here.
 
 - Reproducible Ruff: committed `HEAD` still has the 73 findings itemized above;
   the zero-finding result currently depends on preserved, unstaged user work.
-- Final frontend tests, TypeScript, ESLint, and production build rerun: pending.
-- Final live Operational/IT pilot smoke rerun: pending.
 - Browser verification: unavailable and therefore not passed.
 - Production TLS certificates and production secret-manager integration: no
   operator evidence supplied.
