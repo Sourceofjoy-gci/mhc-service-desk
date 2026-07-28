@@ -121,6 +121,7 @@ export function TransitionActions({
     try {
       const refreshedTicket = await ticketsApi.get(ticket.number);
       onUpdated(refreshedTicket);
+      await onActivityChanged?.();
       setChosen(null);
     } catch (error) {
       setReloadError(error);

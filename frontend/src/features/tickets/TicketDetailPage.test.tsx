@@ -332,7 +332,7 @@ describe("ticket operator workspace", () => {
     );
   });
 
-  it("refetches only the exact ticket when an operator accepts a stale reload", async () => {
+  it("refetches the exact ticket and activity when an operator accepts a stale reload", async () => {
     const refreshed = {
       ...TICKET,
       title: "Estate follow-up reloaded",
@@ -350,6 +350,7 @@ describe("ticket operator workspace", () => {
     const user = userEvent.setup();
     const { queryClient } = renderDetail();
     const refetch = vi.spyOn(queryClient, "refetchQueries");
+    const invalidate = vi.spyOn(queryClient, "invalidateQueries");
 
     const team = await screen.findByRole("textbox", { name: "Team" });
     await user.clear(team);
@@ -362,6 +363,12 @@ describe("ticket operator workspace", () => {
       queryKey: ["ticket", TICKET.number],
       exact: true,
     });
+    expect(invalidate).toHaveBeenCalledTimes(1);
+    expect(invalidate).toHaveBeenCalledWith({
+      queryKey: ["ticket-activity", TICKET.number],
+      exact: true,
+    });
+    await waitFor(() => expect(harness.activity).toHaveBeenCalledTimes(2));
     expect(harness.get).toHaveBeenCalledTimes(2);
   });
 

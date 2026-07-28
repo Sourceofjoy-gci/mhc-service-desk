@@ -360,16 +360,18 @@ export default function TicketDetailPage() {
   const replaceTicket = (updatedTicket: TicketDetail) => {
     queryClient.setQueryData(["ticket", number], updatedTicket);
   };
-  const reloadTicket = () =>
-    queryClient.refetchQueries({
-      queryKey: ["ticket", number],
-      exact: true,
-    });
   const refreshActivity = () =>
     queryClient.invalidateQueries({
       queryKey: ["ticket-activity", number],
       exact: true,
     });
+  const reloadTicket = async () => {
+    await queryClient.refetchQueries({
+      queryKey: ["ticket", number],
+      exact: true,
+    });
+    await refreshActivity();
+  };
 
   return (
     <section className="flex flex-col gap-6">

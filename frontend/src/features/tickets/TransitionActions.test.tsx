@@ -132,11 +132,18 @@ function deferred<T>() {
   return { promise, resolve, reject };
 }
 
-function renderActions(onUpdated = vi.fn()) {
+function renderActions(
+  onUpdated = vi.fn(),
+  onActivityChanged = vi.fn(),
+) {
   renderWithProviders(
-    <TransitionActions ticket={TICKET} onUpdated={onUpdated} />,
+    <TransitionActions
+      ticket={TICKET}
+      onUpdated={onUpdated}
+      onActivityChanged={onActivityChanged}
+    />,
   );
-  return { onUpdated };
+  return { onUpdated, onActivityChanged };
 }
 
 async function openResolve(user: ReturnType<typeof userEvent.setup>) {
@@ -283,7 +290,7 @@ describe("server-driven transition actions", () => {
     );
     harness.get.mockResolvedValue(refreshed);
     const user = userEvent.setup();
-    const { onUpdated } = renderActions();
+    const { onUpdated, onActivityChanged } = renderActions();
 
     await user.click(screen.getByRole("button", { name: "Start work" }));
     await user.click(
@@ -297,6 +304,7 @@ describe("server-driven transition actions", () => {
 
     await waitFor(() => expect(harness.get).toHaveBeenCalledWith(TICKET.number));
     expect(onUpdated).toHaveBeenCalledWith(refreshed);
+    expect(onActivityChanged).toHaveBeenCalledTimes(1);
   });
 
   it("shows the correlation ID for an unexpected server error", async () => {
