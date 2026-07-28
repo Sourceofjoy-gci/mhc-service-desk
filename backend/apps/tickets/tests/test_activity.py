@@ -138,8 +138,12 @@ def test_activity_is_stable_typed_chronological_and_deduplicated(basic_world):
     ticket, message, note, transition, audit, attachment, relationship = _seed_activity(
         basic_world
     )
+    viewer = User.objects.get(keycloak_subject="agent-1")
+    viewer._groups = ["ops-agents"]
+    request = Request(APIRequestFactory().get(f"/tickets/{ticket.number}/activity/"))
+    request.user = viewer
 
-    activity = build_ticket_activity(ticket)
+    activity = build_ticket_activity(ticket, request=request)
 
     assert [item["id"] for item in activity] == [
         f"message:{message.id}",
@@ -191,6 +195,65 @@ def test_activity_is_stable_typed_chronological_and_deduplicated(basic_world):
         "ticket_number": ticket.links_from.get().to_ticket.number,
         "direction": "outgoing",
     }
+
+
+@pytest.mark.parametrize(
+    ("counterpart_domain", "counterpart_confidentiality"),
+    [
+        ("operational", "restricted"),
+        ("it", "normal"),
+    ],
+)
+def test_direct_activity_without_authority_omits_relationship_identifiers(
+    basic_world,
+    counterpart_domain,
+    counterpart_confidentiality,
+):
+    visible = _ticket(basic_world)
+    hidden = _ticket(basic_world, domain=counterpart_domain)
+    hidden.confidentiality = counterpart_confidentiality
+    hidden.save(update_fields=["confidentiality"])
+    TicketLink.objects.create(from_ticket=visible, to_ticket=hidden, kind="related")
+
+    activity = build_ticket_activity(visible)
+
+    assert hidden.number not in str(activity)
+    assert not [item for item in activity if item["type"] == "relationship"]
+
+
+@pytest.mark.parametrize(
+    ("counterpart_domain", "counterpart_confidentiality"),
+    [
+        ("operational", "restricted"),
+        ("it", "normal"),
+    ],
+)
+def test_relationship_override_cannot_bypass_authenticated_activity_scope(
+    basic_world,
+    counterpart_domain,
+    counterpart_confidentiality,
+):
+    visible = _ticket(basic_world)
+    hidden = _ticket(basic_world, domain=counterpart_domain)
+    hidden.confidentiality = counterpart_confidentiality
+    hidden.save(update_fields=["confidentiality"])
+    relationship = TicketLink.objects.create(
+        from_ticket=visible,
+        to_ticket=hidden,
+        kind="related",
+    )
+    actor = _user(["ops-agents"], subject=f"override-{counterpart_domain}")
+    request = Request(APIRequestFactory().get(f"/tickets/{visible.number}/activity/"))
+    request.user = actor
+
+    activity = build_ticket_activity(
+        visible,
+        request=request,
+        relationships=[relationship],
+    )
+
+    assert hidden.number not in str(activity)
+    assert not [item for item in activity if item["type"] == "relationship"]
 
 
 def test_activity_endpoint_is_staff_scoped_and_contains_message_and_note_bodies(

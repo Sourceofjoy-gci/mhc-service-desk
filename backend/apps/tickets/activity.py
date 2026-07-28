@@ -82,21 +82,27 @@ def build_ticket_activity(
         )
     )
     attachments = list(Attachment.objects.filter(ticket=ticket))
-    if relationships is None:
-        actor = getattr(request, "user", None)
-        if actor is not None and actor.is_authenticated:
-            relationships = scoped_ticket_relationships(
-                ticket,
-                actor,
-                request=request,
-                snapshot=snapshot,
-            )
-        else:
-            relationships = list(
-                TicketLink.objects.filter(
-                    Q(from_ticket=ticket) | Q(to_ticket=ticket)
-                ).select_related("from_ticket", "to_ticket")
-            )
+    supplied_relationship_ids = (
+        {relationship.id for relationship in relationships}
+        if relationships is not None
+        else None
+    )
+    actor = getattr(request, "user", None)
+    if actor is not None and actor.is_authenticated:
+        relationships = scoped_ticket_relationships(
+            ticket,
+            actor,
+            request=request,
+            snapshot=snapshot,
+        )
+        if supplied_relationship_ids is not None:
+            relationships = [
+                relationship
+                for relationship in relationships
+                if relationship.id in supplied_relationship_ids
+            ]
+    else:
+        relationships = []
 
     relationship_actors = {
         str(event.payload.get("after", {}).get("relationship_id")): event.actor_subject
