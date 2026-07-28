@@ -6,6 +6,7 @@ import uuid
 
 from rest_framework.decorators import api_view, permission_classes
 from rest_framework.permissions import AllowAny
+from rest_framework.request import Request
 from rest_framework.response import Response
 from rest_framework import status
 
@@ -17,7 +18,7 @@ logger = logging.getLogger(__name__)
 
 @api_view(["POST"])
 @permission_classes([AllowAny])
-def inbound_email(request):
+def inbound_email(request: Request) -> Response:
     """Provider-agnostic inbound email webhook.
 
     Real providers (Graph, Mailgun, etc.) translate their native format into
@@ -52,7 +53,7 @@ def inbound_email(request):
 
 @api_view(["POST"])
 @permission_classes([AllowAny])
-def outbound_bounce(request):
+def outbound_bounce(request: Request) -> Response:
     """Provider webhook for delivery failures (PRD §19.4)."""
     body = request.data or {}
     message_id = body.get("message_id", "")

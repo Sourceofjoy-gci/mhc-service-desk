@@ -3,9 +3,11 @@ from __future__ import annotations
 
 import hashlib
 
-from rest_framework import status, viewsets
+from django.db.models import QuerySet
+from rest_framework import serializers, status, viewsets
 from rest_framework.decorators import action, api_view, permission_classes
 from rest_framework.permissions import AllowAny, IsAuthenticated
+from rest_framework.request import Request
 from rest_framework.response import Response
 
 from apps.identity_access.authentication import KeycloakJWTAuthentication
@@ -18,18 +20,18 @@ from .api import ContactCreateSerializer, ContactSerializer
 from .models import Contact, VerificationToken
 
 
-class ContactViewSet(viewsets.ModelViewSet):
+class ContactViewSet(viewsets.ModelViewSet[Contact]):
     queryset = Contact.objects.all()
     serializer_class = ContactSerializer
     authentication_classes = [KeycloakJWTAuthentication]
     permission_classes = [IsAuthenticated, ScopePermission]
 
-    def get_serializer_class(self):
+    def get_serializer_class(self) -> type[serializers.BaseSerializer[Contact]]:
         if self.action == "create":
             return ContactCreateSerializer
         return ContactSerializer
 
-    def get_queryset(self):
+    def get_queryset(self) -> QuerySet[Contact]:
         qs = super().get_queryset()
         params = self.request.query_params
         if "search" in params:
@@ -43,7 +45,7 @@ class ContactViewSet(viewsets.ModelViewSet):
         return qs.order_by("full_name")[:100]
 
     @action(detail=False, methods=["get"], url_path="duplicates")
-    def duplicates(self, request):
+    def duplicates(self, request: Request) -> Response:
         """Suggest possible duplicate contacts (FR-007) without merging."""
         from django.db.models import Q
         params = request.query_params
@@ -69,7 +71,7 @@ def _hash(raw: str) -> str:
 
 @api_view(["GET"])
 @permission_classes([AllowAny])
-def requester_status(request, token: str):
+def requester_status(request: Request, token: str) -> Response:
     """Public ticket status / history. Requires a valid token."""
     h = _hash(token)
     vt = VerificationToken.objects.filter(token_hash=h).first()
@@ -105,7 +107,7 @@ def requester_status(request, token: str):
 
 @api_view(["POST"])
 @permission_classes([AllowAny])
-def requester_reply(request, token: str):
+def requester_reply(request: Request, token: str) -> Response:
     """Public reply from a verified requester (FR-075)."""
     h = _hash(token)
     vt = VerificationToken.objects.filter(token_hash=h).first()

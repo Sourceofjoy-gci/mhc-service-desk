@@ -5,6 +5,7 @@ import logging
 
 from rest_framework.decorators import api_view, authentication_classes, permission_classes
 from rest_framework.permissions import AllowAny, IsAuthenticated
+from rest_framework.request import Request
 from rest_framework.response import Response
 from rest_framework import status
 
@@ -18,7 +19,7 @@ logger = logging.getLogger(__name__)
 
 @api_view(["POST"])
 @permission_classes([AllowAny])
-def inbound_webhook(request):
+def inbound_webhook(request: Request) -> Response:
     """Inbound WhatsApp webhook (Meta Cloud API webhook format)."""
     body = request.data or {}
     entry = body.get("entry", [{}])[0]
@@ -45,7 +46,7 @@ def inbound_webhook(request):
 @api_view(["GET"])
 @authentication_classes([KeycloakJWTAuthentication])
 @permission_classes([IsAuthenticated, ScopePermission])
-def list_templates(request):
+def list_templates(request: Request) -> Response:
     """Return the templates known to the configured provider."""
     provider = get_provider()
     return Response({"templates": provider.fetch_templates()})
@@ -54,7 +55,7 @@ def list_templates(request):
 @api_view(["POST"])
 @authentication_classes([KeycloakJWTAuthentication])
 @permission_classes([IsAuthenticated, ScopePermission])
-def send_text(request):
+def send_text(request: Request) -> Response:
     """Outbound text — used by agent replies (subject to template rules)."""
     data = request.data or {}
     to = data.get("to", "")

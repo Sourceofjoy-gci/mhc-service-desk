@@ -15,6 +15,7 @@ mypy==1.13.0
 django-stubs[compatible-mypy]==5.1.1
 djangorestframework-stubs==3.15.2
 types-requests==2.32.0.20240914
+types-bleach==6.4.0.20260607
 
 # Dev utilities
 ipython==8.28.0

@@ -9,10 +9,11 @@ from __future__ import annotations
 
 import json
 import uuid
+from collections.abc import Mapping
 from datetime import datetime, timezone
 from pathlib import Path
 
-from django.core.management.base import BaseCommand, CommandError
+from django.core.management.base import BaseCommand, CommandError, CommandParser
 
 from apps.audit.models import AuditEvent
 from apps.contacts.models import Contact
@@ -22,13 +23,13 @@ from apps.tickets.models import Ticket, TicketMessage, TicketNote
 class Command(BaseCommand):
     help = "Export every record linked to a contact as a Subject Access Request."
 
-    def add_arguments(self, parser):
+    def add_arguments(self, parser: CommandParser) -> None:
         parser.add_argument("--email", required=False)
         parser.add_argument("--phone", required=False)
         parser.add_argument("--contact-id", required=False)
         parser.add_argument("--out", default="backups")
 
-    def handle(self, *args, **opts):
+    def handle(self, *args: object, **opts: object) -> None:
         contact = self._find_contact(opts)
         if contact is None:
             raise CommandError("No matching contact found")
@@ -90,8 +91,11 @@ class Command(BaseCommand):
                 for a in audit
             ],
         }
-        Path(opts["out"]).mkdir(parents=True, exist_ok=True)
-        out_path = Path(opts["out"]) / (
+        output_directory = opts.get("out")
+        if not isinstance(output_directory, str):
+            raise CommandError("Output directory must be a string")
+        Path(output_directory).mkdir(parents=True, exist_ok=True)
+        out_path = Path(output_directory) / (
             f"sar-{contact.id}-"
             f"{datetime.now(tz=timezone.utc).strftime('%Y%m%dT%H%M%SZ')}.json"
         )
@@ -101,15 +105,17 @@ class Command(BaseCommand):
         )
         self.stdout.write(self.style.SUCCESS(f"SAR export written to {out_path}"))
 
-    def _find_contact(self, opts):
+    def _find_contact(self, opts: Mapping[str, object]) -> Contact | None:
         cid = opts.get("contact_id")
-        if cid:
+        if isinstance(cid, str) and cid:
             try:
                 return Contact.objects.get(id=cid)
             except Contact.DoesNotExist:
                 return None
-        if opts.get("email"):
-            return Contact.objects.filter(email__iexact=opts["email"]).first()
-        if opts.get("phone"):
-            return Contact.objects.filter(phone_e164=opts["phone"]).first()
+        email = opts.get("email")
+        if isinstance(email, str) and email:
+            return Contact.objects.filter(email__iexact=email).first()
+        phone = opts.get("phone")
+        if isinstance(phone, str) and phone:
+            return Contact.objects.filter(phone_e164=phone).first()
         return None

@@ -22,12 +22,13 @@ _REDACT_PATTERNS = [
 ]
 
 
-def _scrub(value):
+def _scrub(value: object) -> object:
     if isinstance(value, dict):
-        return {
-            k: ("[REDACTED]" if k.lower() in REDACT_KEYS else _scrub(v))
-            for k, v in value.items()
-        }
+        scrubbed: dict[object, object] = {}
+        for key, item in value.items():
+            should_redact = isinstance(key, str) and key.lower() in REDACT_KEYS
+            scrubbed[key] = "[REDACTED]" if should_redact else _scrub(item)
+        return scrubbed
     if isinstance(value, list):
         return [_scrub(v) for v in value]
     if isinstance(value, str):
@@ -39,7 +40,7 @@ def _scrub(value):
 
 class JSONFormatter(logging.Formatter):
     def format(self, record: logging.LogRecord) -> str:
-        payload = {
+        payload: dict[str, object] = {
             "ts": datetime.now(tz=timezone.utc).isoformat(),
             "level": record.levelname,
             "logger": record.name,

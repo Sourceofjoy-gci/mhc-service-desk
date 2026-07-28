@@ -15,10 +15,13 @@ from __future__ import annotations
 import secrets
 
 from rest_framework.decorators import api_view, permission_classes
+from rest_framework.exceptions import PermissionDenied
 from rest_framework.permissions import IsAuthenticated
+from rest_framework.request import Request
 from rest_framework.response import Response
 
 from apps.identity_access.authentication import KeycloakJWTAuthentication
+from apps.identity_access.models import User
 from apps.identity_access.scope import ScopePermission
 from apps.tickets.models import OutboxEvent, Ticket
 
@@ -47,8 +50,13 @@ _FAKE_ESTATES = {
 
 @api_view(["GET"])
 @permission_classes([IsAuthenticated, ScopePermission])
-def validate_matter(request, ticket_number):
+def validate_matter(request: Request, ticket_number: str) -> Response:
     """Validate the matter reference on a ticket against the e-Estate stub."""
+    if not isinstance(request.user, User):
+        raise PermissionDenied(
+            detail="Authentication credentials were not provided.",
+            code="not_authenticated",
+        )
     try:
         ticket = Ticket.objects.get(number=ticket_number)
     except Ticket.DoesNotExist:

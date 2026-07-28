@@ -8,6 +8,7 @@ from __future__ import annotations
 
 import logging
 import re
+from datetime import datetime
 
 import bleach
 from django.db import transaction
@@ -85,9 +86,9 @@ def process_inbound_email(
     message_id: str = "",
     in_reply_to: str = "",
     references: str = "",
-    received_at=None,
-    raw_headers: dict | None = None,
-) -> dict:
+    received_at: datetime | None = None,
+    raw_headers: dict[str, object] | None = None,
+) -> dict[str, str]:
     """Handle an inbound email. Returns a small dict with the outcome.
 
     Idempotency: if a TicketMessage with the same `message_id` exists, we

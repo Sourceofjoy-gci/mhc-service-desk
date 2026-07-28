@@ -3,15 +3,19 @@ from __future__ import annotations
 
 import logging
 import uuid
+from collections.abc import Mapping, Sequence
+from uuid import UUID
 
 from django.shortcuts import get_object_or_404
 from rest_framework import status
 from rest_framework.decorators import api_view, permission_classes
 from rest_framework.exceptions import PermissionDenied
 from rest_framework.permissions import IsAuthenticated
+from rest_framework.request import Request
 from rest_framework.response import Response
 
 from apps.identity_access.authentication import KeycloakJWTAuthentication
+from apps.identity_access.models import User
 from apps.identity_access.scope import ScopePermission, scope_ticket_queryset
 from apps.tickets.models import Ticket
 
@@ -27,7 +31,23 @@ from .services import (
 logger = logging.getLogger(__name__)
 
 
-def _attachment_error(request, *, code, detail, fields, response_status):
+def _authenticated_user(request: Request) -> User:
+    if isinstance(request.user, User):
+        return request.user
+    raise PermissionDenied(
+        detail="Authentication credentials were not provided.",
+        code="not_authenticated",
+    )
+
+
+def _attachment_error(
+    request: Request,
+    *,
+    code: str,
+    detail: str,
+    fields: Mapping[str, Sequence[str]],
+    response_status: int,
+) -> Response:
     return Response(
         {
             "code": code,
@@ -55,7 +75,7 @@ def attachment_metadata(attachment: Attachment) -> dict[str, object]:
 
 @api_view(["GET", "POST"])
 @permission_classes([IsAuthenticated, ScopePermission])
-def upload(request, ticket_number):
+def upload(request: Request, ticket_number: str) -> Response:
     """Upload one or more files for a ticket.
 
     Multipart form: files=...
@@ -88,8 +108,8 @@ def upload(request, ticket_number):
             response_status=status.HTTP_400_BAD_REQUEST,
         )
 
-    actor = request.user.keycloak_subject
-    created = []
+    actor = _authenticated_user(request).keycloak_subject
+    created: list[dict[str, object]] = []
     for f in files:
         data = f.read()
         checksum = __import__("hashlib").sha256(data).hexdigest()
@@ -133,7 +153,7 @@ def upload(request, ticket_number):
 
 @api_view(["GET"])
 @permission_classes([IsAuthenticated, ScopePermission])
-def download(request, attachment_id):
+def download(request: Request, attachment_id: UUID) -> Response:
     """Return a short-lived signed download URL (FR-095)."""
     scoped_tickets = scope_ticket_queryset(
         request.user,
@@ -151,7 +171,7 @@ def download(request, attachment_id):
         )
     log_attachment_access(
         attachment=att,
-        actor_subject=request.user.keycloak_subject,
+        actor_subject=_authenticated_user(request).keycloak_subject,
         ip=request.META.get("REMOTE_ADDR"),
         user_agent=request.META.get("HTTP_USER_AGENT", ""),
     )

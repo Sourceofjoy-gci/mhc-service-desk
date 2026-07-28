@@ -10,6 +10,7 @@ from __future__ import annotations
 
 import logging
 import os
+from typing import TypedDict
 
 import requests
 from django.db import transaction
@@ -19,7 +20,19 @@ from apps.email_channel.services import process_inbound_email
 logger = logging.getLogger(__name__)
 
 
-def get_provider(name: str | None = None):
+class _CloudMessage(TypedDict, total=False):
+    id: str
+
+
+class _CloudSendResponse(TypedDict, total=False):
+    messages: list[_CloudMessage]
+
+
+class _CloudTemplatesResponse(TypedDict, total=False):
+    data: list[dict[str, object]]
+
+
+def get_provider(name: str | None = None) -> BaseProvider:
     name = (name or os.environ.get("WHATSAPP_PROVIDER") or "mock").lower()
     if name == "cloud":
         return CloudProvider()
@@ -27,24 +40,36 @@ def get_provider(name: str | None = None):
 
 
 class BaseProvider:
-    def send_text(self, *, to: str, body: str, account_token: str = "") -> dict:
+    def send_text(
+        self,
+        *,
+        to: str,
+        body: str,
+        account_token: str = "",
+    ) -> dict[str, str]:
         raise NotImplementedError
 
-    def fetch_templates(self) -> list[dict]:
+    def fetch_templates(self) -> list[dict[str, object]]:
         raise NotImplementedError
 
 
 class MockProvider(BaseProvider):
     """In-process provider. Records the call and returns a fake id."""
 
-    def send_text(self, *, to: str, body: str, account_token: str = "") -> dict:
+    def send_text(
+        self,
+        *,
+        to: str,
+        body: str,
+        account_token: str = "",
+    ) -> dict[str, str]:
         return {
             "status": "sent",
             "external_message_id": f"mock-{abs(hash((to, body))) % 10**10}",
             "provider": "mock",
         }
 
-    def fetch_templates(self) -> list[dict]:
+    def fetch_templates(self) -> list[dict[str, object]]:
         return [
             {"name": "ticket_ack_en", "language": "en", "category": "utility",
              "body": "Your request {{1}} has been received. Reference: {{2}}."},
@@ -62,7 +87,13 @@ class CloudProvider(BaseProvider):
 
     BASE = "https://graph.facebook.com/v20.0"
 
-    def send_text(self, *, to: str, body: str, account_token: str = "") -> dict:
+    def send_text(
+        self,
+        *,
+        to: str,
+        body: str,
+        account_token: str = "",
+    ) -> dict[str, str]:
         if not account_token:
             return {"status": "failed", "error": "missing access token"}
         r = requests.post(
@@ -77,7 +108,7 @@ class CloudProvider(BaseProvider):
             timeout=5,
         )
         if r.ok:
-            data = r.json()
+            data: _CloudSendResponse = r.json()
             return {
                 "status": "sent",
                 "external_message_id": data.get("messages", [{}])[0].get("id", ""),
@@ -85,7 +116,7 @@ class CloudProvider(BaseProvider):
             }
         return {"status": "failed", "error": r.text[:300]}
 
-    def fetch_templates(self) -> list[dict]:
+    def fetch_templates(self) -> list[dict[str, object]]:
         if not os.environ.get("WHATSAPP_ACCESS_TOKEN"):
             return []
         r = requests.get(
@@ -95,7 +126,8 @@ class CloudProvider(BaseProvider):
         )
         if not r.ok:
             return []
-        return r.json().get("data", [])
+        data: _CloudTemplatesResponse = r.json()
+        return data.get("data", [])
 
 
 # --- Inbound webhook processing -------------------------------------------
@@ -108,8 +140,8 @@ def process_inbound_whatsapp(
     to_number: str,
     body: str,
     external_message_id: str = "",
-    raw: dict | None = None,
-) -> dict:
+    raw: dict[str, object] | None = None,
+) -> dict[str, str]:
     """Reuse the email channel's idempotency / threading / sanitisation path
     by treating the WhatsApp message as an email from the same person.
 

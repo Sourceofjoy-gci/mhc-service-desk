@@ -6,6 +6,7 @@ from datetime import datetime, timezone
 
 from rest_framework.decorators import api_view, permission_classes
 from rest_framework.permissions import AllowAny
+from rest_framework.request import Request
 from rest_framework.response import Response
 from rest_framework import status
 
@@ -18,7 +19,7 @@ def _hash(token: str) -> str:
 
 @api_view(["POST"])
 @permission_classes([AllowAny])
-def submit_csat(request, token: str):
+def submit_csat(request: Request, token: str) -> Response:
     h = _hash(token)
     try:
         csat = CsatResponse.objects.get(survey_token_hash=h)

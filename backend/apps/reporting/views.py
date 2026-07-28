@@ -2,11 +2,13 @@
 from __future__ import annotations
 
 import csv
+from collections.abc import Iterator
 
 from django.http import StreamingHttpResponse
 from rest_framework.decorators import api_view, permission_classes
 from rest_framework.exceptions import PermissionDenied
 from rest_framework.permissions import IsAuthenticated
+from rest_framework.request import Request
 from rest_framework.response import Response
 
 from apps.identity_access.authentication import KeycloakJWTAuthentication
@@ -22,13 +24,13 @@ from apps.tickets.models import Ticket
 class Echo:
     """File-like object that echoes writes to a stream."""
 
-    def write(self, value):
+    def write(self, value: str) -> str:
         return value
 
 
 @api_view(["GET"])
 @permission_classes([IsAuthenticated, ScopePermission])
-def export_tickets_csv(request):
+def export_tickets_csv(request: Request) -> StreamingHttpResponse:
     """Stream a CSV of the tickets visible to the caller (FR-087)."""
     qs = scope_ticket_queryset(
         request.user,
@@ -50,7 +52,7 @@ def export_tickets_csv(request):
             raise PermissionDenied(code="domain_scope_required")
         qs = qs.filter(domain=params["domain"])
 
-    def rows():
+    def rows() -> Iterator[str]:
         writer = csv.writer(Echo())
         yield writer.writerow([
             "number", "domain", "title", "status", "priority",
@@ -73,7 +75,7 @@ def export_tickets_csv(request):
 
 @api_view(["GET"])
 @permission_classes([IsAuthenticated, ScopePermission])
-def operational_dashboard(request):
+def operational_dashboard(request: Request) -> Response:
     """Live KPIs for the operational service desk."""
     from django.db.models import Count, Q
     from django.utils import timezone
@@ -115,7 +117,7 @@ def operational_dashboard(request):
 
 @api_view(["GET"])
 @permission_classes([IsAuthenticated, ScopePermission])
-def it_dashboard(request):
+def it_dashboard(request: Request) -> Response:
     """Live KPIs for the IT service desk."""
     from django.db.models import Count, Q
     from django.utils import timezone

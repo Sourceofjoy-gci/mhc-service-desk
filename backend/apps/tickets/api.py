@@ -23,13 +23,13 @@ from .permissions import (
 from .workflow import available_transitions
 
 
-class StatusRefSerializer(serializers.ModelSerializer):
+class StatusRefSerializer(serializers.ModelSerializer[Status]):
     class Meta:
         model = Status
         fields = ("id", "code", "name", "public_label", "is_terminal", "is_initial", "order")
 
 
-class TicketMessageSerializer(serializers.ModelSerializer):
+class TicketMessageSerializer(serializers.ModelSerializer[TicketMessage]):
     class Meta:
         model = TicketMessage
         fields = (
@@ -39,21 +39,21 @@ class TicketMessageSerializer(serializers.ModelSerializer):
         read_only_fields = fields
 
 
-class TicketNoteSerializer(serializers.ModelSerializer):
+class TicketNoteSerializer(serializers.ModelSerializer[TicketNote]):
     class Meta:
         model = TicketNote
         fields = ("id", "author_subject", "body", "created_at")
         read_only_fields = ("id", "created_at")
 
 
-class TicketLinkSerializer(serializers.ModelSerializer):
+class TicketLinkSerializer(serializers.ModelSerializer[TicketLink]):
     class Meta:
         model = TicketLink
         fields = ("id", "to_ticket", "kind", "created_at")
         read_only_fields = ("id", "created_at")
 
 
-class TicketListSerializer(serializers.ModelSerializer):
+class TicketListSerializer(serializers.ModelSerializer[Ticket]):
     """Compact view used in queues, Kanban and search results (FR-042)."""
 
     status_code = serializers.CharField(source="status.code", read_only=True)
@@ -68,14 +68,14 @@ class TicketListSerializer(serializers.ModelSerializer):
 
     class Meta:
         model = Ticket
-        fields = (
+        fields: tuple[str, ...] = (
             "id", "number", "domain", "title", "channel", "priority", "confidentiality",
             "status_code", "status_name", "status_public",
             "requester_name", "office_code", "service_code",
             "assignee", "waiting_reason", "created_at", "updated_at",
             "age_hours", "sla_health", "available_transition_codes",
         )
-        read_only_fields = fields
+        read_only_fields: tuple[str, ...] = fields
 
     def get_age_hours(self, obj: Ticket) -> float:
         from django.utils import timezone
@@ -150,11 +150,12 @@ class TicketDetailSerializer(TicketListSerializer):
     available_transitions = serializers.SerializerMethodField()
 
     def get_assignee_detail(self, obj: Ticket) -> dict[str, str] | None:
-        if obj.assignee_id is None:
+        assignee = obj.assignee
+        if assignee is None:
             return None
         return {
             "id": str(obj.assignee_id),
-            "display_name": obj.assignee.display_name or obj.assignee.username,
+            "display_name": assignee.display_name or assignee.username,
         }
 
     def get_relationships(self, obj: Ticket) -> list[dict[str, str]]:
@@ -249,7 +250,7 @@ class TicketDetailSerializer(TicketListSerializer):
         )
 
 
-class TransitionRequestSerializer(serializers.Serializer):
+class TransitionRequestSerializer(serializers.Serializer[dict[str, object]]):
     to_status = serializers.CharField()
     updated_at = serializers.DateTimeField()
     reason = serializers.CharField(required=False, allow_blank=True)
@@ -257,18 +258,18 @@ class TransitionRequestSerializer(serializers.Serializer):
     resolution_summary = serializers.CharField(required=False, allow_blank=True)
 
 
-class MessageCreateSerializer(serializers.Serializer):
+class MessageCreateSerializer(serializers.Serializer[dict[str, object]]):
     body_text = serializers.CharField()
     body_html = serializers.CharField(required=False, allow_blank=True)
     template_key = serializers.CharField(required=False, allow_blank=True)
     template_version = serializers.CharField(required=False, allow_blank=True)
 
 
-class NoteCreateSerializer(serializers.Serializer):
+class NoteCreateSerializer(serializers.Serializer[dict[str, object]]):
     body = serializers.CharField()
 
 
-class WorkStateRequestSerializer(serializers.Serializer):
+class WorkStateRequestSerializer(serializers.Serializer[dict[str, object]]):
     updated_at = serializers.DateTimeField()
     assignee = serializers.UUIDField(required=False, allow_null=True)
     team = serializers.CharField(required=False, allow_blank=True, max_length=128)
@@ -282,7 +283,7 @@ class WorkStateRequestSerializer(serializers.Serializer):
     )
 
 
-class PublicIntakeSerializer(serializers.Serializer):
+class PublicIntakeSerializer(serializers.Serializer[dict[str, object]]):
     """Public form intake (FR-002, FR-003, FR-005, FR-073).
 
     No authentication required. Rate-limited at the view layer.

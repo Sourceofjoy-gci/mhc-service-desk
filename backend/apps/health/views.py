@@ -9,7 +9,7 @@ from __future__ import annotations
 
 import socket
 import time
-from typing import Callable
+from typing import Callable, NotRequired, TypedDict
 
 import redis
 from django.conf import settings
@@ -17,6 +17,7 @@ from django.db import connections
 from django.http import JsonResponse
 from rest_framework.decorators import api_view, permission_classes
 from rest_framework.permissions import AllowAny
+from rest_framework.request import Request
 
 from apps.identity_access.scope import public_endpoint  # noqa: F401  (used for type hint)
 
@@ -79,10 +80,16 @@ CHECKS: dict[str, Callable[[], tuple[bool, str | None]]] = {
 }
 
 
+class HealthCheckResult(TypedDict):
+    ok: bool
+    latency_ms: float
+    error: NotRequired[str]
+
+
 @api_view(["GET"])
 @permission_classes([AllowAny])
-def health(_request):
-    results: dict[str, dict] = {}
+def health(_request: Request) -> JsonResponse:
+    results: dict[str, HealthCheckResult] = {}
     overall_ok = True
     started = time.perf_counter()
     for name, fn in CHECKS.items():
@@ -105,5 +112,5 @@ def health(_request):
 
 @api_view(["GET"])
 @permission_classes([AllowAny])
-def liveness(_request):
+def liveness(_request: Request) -> JsonResponse:
     return JsonResponse({"status": "alive"})

@@ -13,6 +13,7 @@ from django.db.models import Count
 from rest_framework.decorators import api_view, permission_classes
 from rest_framework.exceptions import PermissionDenied
 from rest_framework.permissions import IsAuthenticated
+from rest_framework.request import Request
 from rest_framework.response import Response
 
 from apps.identity_access.authentication import KeycloakJWTAuthentication
@@ -27,7 +28,7 @@ from apps.workflow.models import Status
 
 @api_view(["GET"])
 @permission_classes([IsAuthenticated, ScopePermission])
-def flow_metrics(request):
+def flow_metrics(request: Request) -> Response:
     """Compute flow metrics for a domain over a window."""
     domain = request.query_params.get("domain")
     if domain and not has_unrestricted_domain_scope(
@@ -50,8 +51,8 @@ def flow_metrics(request):
     if domain:
         qs = qs.filter(domain=domain)
     closed = qs.filter(status__is_terminal=True)
-    lead_times = []
-    cycle_times = []
+    lead_times: list[float] = []
+    cycle_times: list[float] = []
     for t in closed[:500]:  # cap for performance
         if t.resolved_at and t.created_at:
             cycle_times.append((t.resolved_at - t.created_at).total_seconds())
@@ -63,7 +64,7 @@ def flow_metrics(request):
         qs.values("status__code", "status__name").annotate(count=Count("id"))
     )
 
-    def pctile(values, p):
+    def pctile(values: list[float], p: int) -> float | None:
         if not values:
             return None
         value = (

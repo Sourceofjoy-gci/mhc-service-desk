@@ -6,6 +6,7 @@ import io
 import logging
 import socket
 from datetime import timedelta
+from typing import Protocol, TypedDict, Unpack
 from urllib.parse import urlparse
 
 import boto3
@@ -16,23 +17,48 @@ from django.db import transaction
 from django.utils import timezone
 
 from apps.tickets.events import record_ticket_event
+from apps.tickets.models import Ticket, TicketMessage
 
 from .models import Attachment, AttachmentAccessLog
 
 logger = logging.getLogger(__name__)
 
 
-def _s3_client():
+class _PutObjectArguments(TypedDict):
+    Bucket: str
+    Key: str
+    Body: bytes
+    ContentType: str
+
+
+class _PresignArguments(TypedDict):
+    Params: dict[str, str]
+    ExpiresIn: int
+
+
+class _S3Client(Protocol):
+    def put_object(self, **kwargs: Unpack[_PutObjectArguments]) -> object: ...
+
+    def generate_presigned_url(
+        self,
+        client_method: str,
+        /,
+        **kwargs: Unpack[_PresignArguments],
+    ) -> str: ...
+
+
+def _s3_client() -> _S3Client:
     """Build a fresh S3 client. The endpoint is the internal MinIO URL."""
     endpoint = settings.AWS_S3_ENDPOINT_URL
-    return boto3.client(
+    client: _S3Client = boto3.client(
         "s3",
         endpoint_url=endpoint,
-        aws_access_key_id=settings.AWS_ACCESS_KEY_ID or settings.MINIO_ROOT_USER,
-        aws_secret_access_key=settings.AWS_SECRET_ACCESS_KEY or settings.MINIO_ROOT_PASSWORD,
+        aws_access_key_id=settings.AWS_ACCESS_KEY_ID,
+        aws_secret_access_key=settings.AWS_SECRET_ACCESS_KEY,
         region_name=settings.AWS_S3_REGION_NAME,
         config=Config(signature_version=settings.AWS_S3_SIGNATURE_VERSION or "s3v4"),
     )
+    return client
 
 
 def scan_with_clamav(data: bytes) -> tuple[str, str | None]:
@@ -95,8 +121,8 @@ def generate_signed_url(*, key: str, expires: int = 60) -> str:
 @transaction.atomic
 def record_attachment(
     *,
-    ticket,
-    message,
+    ticket: Ticket,
+    message: TicketMessage | None,
     object_key: str,
     filename: str,
     content_type: str,
