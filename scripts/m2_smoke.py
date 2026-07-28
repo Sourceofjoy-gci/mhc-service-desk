@@ -7,36 +7,21 @@ Exercises:
   * transition — `/api/v1/tickets/{number}/transition/`
   * scope denial — IT agent should not see operational tickets
 """
+import importlib
 import sys
+from pathlib import Path
 
 import requests
+
+REPOSITORY_ROOT = str(Path(__file__).resolve().parents[1])
+if REPOSITORY_ROOT not in sys.path:
+    sys.path.insert(0, REPOSITORY_ROOT)
+pilot_helpers = importlib.import_module("backend.scripts.pilot_foundation_smoke")
 
 BASE = "http://localhost:8000/api/v1"
 REQUEST_TIMEOUT = 10
 OPS_HEADERS = {"Authorization": "Bearer dev:alice:ops-agents"}
-
-
-def correlation_id(resp):
-    value = resp.headers.get("X-Correlation-ID", "")
-    if value:
-        return value
-    try:
-        payload = resp.json()
-    except (requests.JSONDecodeError, ValueError):
-        return "unavailable"
-    if isinstance(payload, dict):
-        return str(payload.get("correlation_id") or "unavailable")
-    return "unavailable"
-
-
-def must(resp, expected=200, label=""):
-    if resp.status_code != expected:
-        print(
-            f"FAIL {label}: HTTP {resp.status_code}; "
-            f"correlation_id={correlation_id(resp)}"
-        )
-        sys.exit(2)
-    print(f"OK   {label}: HTTP {resp.status_code}")
+must = pilot_helpers.legacy_must
 
 
 def main():

@@ -35,7 +35,7 @@ _AWARE_ISO_DATETIME = re.compile(
 )
 
 
-def _correlation_id(response: requests.Response) -> str:
+def response_correlation_id(response: requests.Response) -> str:
     correlation_id = response.headers.get("X-Correlation-ID", "")
     if correlation_id:
         return correlation_id
@@ -57,9 +57,24 @@ def expect_response(
     if response.status_code != expected_status:
         raise SmokeError(
             f"{label}: HTTP {response.status_code}; "
-            f"correlation_id={_correlation_id(response)}"
+            f"correlation_id={response_correlation_id(response)}"
         )
     return response
+
+
+def legacy_must(
+    response: requests.Response,
+    expected_status: int = 200,
+    label: str = "",
+) -> None:
+    """Validate a legacy smoke response without disclosing its body."""
+    if response.status_code != expected_status:
+        print(
+            f"FAIL {label}: HTTP {response.status_code}; "
+            f"correlation_id={response_correlation_id(response)}"
+        )
+        raise SystemExit(2)
+    print(f"OK   {label}: HTTP {response.status_code}")
 
 
 def _json_object(response: requests.Response, label: str) -> dict[str, Any]:
@@ -239,6 +254,16 @@ def add_reply_and_note(
         headers=OPS_HEADERS,
         label="Operational detail after conversation",
     )
+
+
+def email_message_ids() -> dict[str, str]:
+    """Return one unique, internally related email message-ID family."""
+    suffix = uuid4().hex
+    return {
+        "initial": f"<m3-{suffix}-initial@example.com>",
+        "reply": f"<m3-{suffix}-reply@example.com>",
+        "subject_reply": f"<m3-{suffix}-subject@example.com>",
+    }
 
 
 def _intake_payload(suffix: str, *, child_parent: bool = False) -> dict[str, Any]:

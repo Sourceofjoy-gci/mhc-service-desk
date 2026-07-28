@@ -1,30 +1,12 @@
 """Behavioral contract for the development pilot smoke client."""
 from __future__ import annotations
 
-import importlib.util
-from pathlib import Path
 from types import MappingProxyType
 from unittest.mock import Mock, call
 
 import pytest
 
 from scripts import pilot_foundation_smoke as smoke
-
-REPOSITORY_ROOT = Path(__file__).resolve().parents[4]
-
-
-def _load_legacy_smoke(name: str):
-    path = REPOSITORY_ROOT / "scripts" / f"{name}_smoke.py"
-    spec = importlib.util.spec_from_file_location(f"legacy_{name}_smoke", path)
-    assert spec is not None
-    assert spec.loader is not None
-    module = importlib.util.module_from_spec(spec)
-    spec.loader.exec_module(module)
-    return module
-
-
-m2_smoke = _load_legacy_smoke("m2")
-m3_smoke = _load_legacy_smoke("m3")
 
 
 def _response(*, status: int = 200, payload: dict | None = None) -> Mock:
@@ -158,8 +140,8 @@ def test_validator_reports_only_safe_status_and_correlation_context():
 
 
 def test_legacy_m3_email_ids_are_unique_per_run_and_related_within_a_run():
-    first = m3_smoke.email_message_ids()
-    second = m3_smoke.email_message_ids()
+    first = smoke.email_message_ids()
+    second = smoke.email_message_ids()
 
     assert set(first) == {"initial", "reply", "subject_reply"}
     assert len(set(first.values())) == 3
@@ -169,14 +151,13 @@ def test_legacy_m3_email_ids_are_unique_per_run_and_related_within_a_run():
 
 
 @pytest.mark.parametrize(
-    ("legacy_smoke", "headers", "json_payload"),
+    ("headers", "json_payload"),
     [
-        (m2_smoke, {"X-Correlation-ID": "corr-safe"}, {}),
-        (m3_smoke, {}, {"correlation_id": "corr-safe"}),
+        ({"X-Correlation-ID": "corr-safe"}, {"correlation_id": "ignored"}),
+        ({}, {"correlation_id": "corr-safe"}),
     ],
 )
 def test_legacy_validators_report_only_safe_correlation_context(
-    legacy_smoke,
     headers,
     json_payload,
     capsys,
@@ -189,7 +170,7 @@ def test_legacy_validators_report_only_safe_correlation_context(
     response.json.return_value = json_payload
 
     with pytest.raises(SystemExit):
-        legacy_smoke.must(response, 200, "safe label")
+        smoke.legacy_must(response, 200, "safe label")
 
     output = capsys.readouterr().out
     assert "safe label" in output
@@ -198,9 +179,9 @@ def test_legacy_validators_report_only_safe_correlation_context(
     assert "PRIVATE-TICKET-BODY" not in output
 
 
-@pytest.mark.parametrize("legacy_smoke", [m2_smoke, m3_smoke])
+@pytest.mark.parametrize("json_payload", [ValueError("not JSON"), ["not", "an", "object"]])
 def test_legacy_validators_handle_non_json_errors_without_body_disclosure(
-    legacy_smoke,
+    json_payload,
     capsys,
 ):
     response = Mock(
@@ -208,15 +189,30 @@ def test_legacy_validators_handle_non_json_errors_without_body_disclosure(
         headers={},
         text="PRIVATE-TICKET-BODY",
     )
-    response.json.side_effect = ValueError("not JSON")
+    if isinstance(json_payload, Exception):
+        response.json.side_effect = json_payload
+    else:
+        response.json.return_value = json_payload
 
     with pytest.raises(SystemExit):
-        legacy_smoke.must(response, 200, "safe label")
+        smoke.legacy_must(response, 200, "safe label")
 
     output = capsys.readouterr().out
     assert "HTTP 500" in output
     assert "correlation_id=unavailable" in output
     assert "PRIVATE-TICKET-BODY" not in output
+
+
+def test_legacy_validator_success_output_is_minimal(capsys):
+    response = Mock(
+        status_code=200,
+        headers={"X-Correlation-ID": "corr-safe"},
+        text="PRIVATE-TICKET-BODY",
+    )
+
+    smoke.legacy_must(response, 200, "safe label")
+
+    assert capsys.readouterr().out == "OK   safe label: HTTP 200\n"
 
 
 def test_work_state_validation_accepts_equivalent_aware_timestamps():

@@ -1,45 +1,21 @@
 """M3 smoke: IT child-ticket pattern + email intake + scope guard."""
+import importlib
 import sys
-from uuid import uuid4
+from pathlib import Path
 
 import requests
+
+REPOSITORY_ROOT = str(Path(__file__).resolve().parents[1])
+if REPOSITORY_ROOT not in sys.path:
+    sys.path.insert(0, REPOSITORY_ROOT)
+pilot_helpers = importlib.import_module("backend.scripts.pilot_foundation_smoke")
 
 BASE = "http://localhost:8000/api/v1"
 REQUEST_TIMEOUT = 10
 OPS_HEADERS = {"Authorization": "Bearer dev:alice:ops-agents"}
 IT_HEADERS = {"Authorization": "Bearer dev:bob:it-agents"}
-
-
-def email_message_ids():
-    suffix = uuid4().hex
-    return {
-        "initial": f"<m3-{suffix}-initial@example.com>",
-        "reply": f"<m3-{suffix}-reply@example.com>",
-        "subject_reply": f"<m3-{suffix}-subject@example.com>",
-    }
-
-
-def correlation_id(resp):
-    value = resp.headers.get("X-Correlation-ID", "")
-    if value:
-        return value
-    try:
-        payload = resp.json()
-    except (requests.JSONDecodeError, ValueError):
-        return "unavailable"
-    if isinstance(payload, dict):
-        return str(payload.get("correlation_id") or "unavailable")
-    return "unavailable"
-
-
-def must(resp, expected, label):
-    if resp.status_code != expected:
-        print(
-            f"FAIL {label}: HTTP {resp.status_code}; "
-            f"correlation_id={correlation_id(resp)}"
-        )
-        sys.exit(2)
-    print(f"OK   {label}: HTTP {resp.status_code}")
+must = pilot_helpers.legacy_must
+email_message_ids = pilot_helpers.email_message_ids
 
 
 def main():
