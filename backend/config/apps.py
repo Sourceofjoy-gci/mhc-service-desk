@@ -2,7 +2,11 @@
 
 Used to wire up the dev-bypass auth in development only.
 """
+import logging
+
 from django.apps import AppConfig
+
+logger = logging.getLogger(__name__)
 
 
 class ConfigConfig(AppConfig):
@@ -18,5 +22,5 @@ class ConfigConfig(AppConfig):
                 _patch_dev_auth()
             except Exception:
                 # never block startup on dev hooks
-                pass
+                logger.exception("Development auth hook setup failed")
         return super().ready()

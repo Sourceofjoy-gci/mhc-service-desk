@@ -65,6 +65,18 @@ def ensure_contact(name: str, email: str, phone: str = "") -> Contact:
     return obj
 
 
+def ensure_local_admin() -> User:
+    existing = User.objects.filter(username="local-admin").first()
+    if existing is not None:
+        return existing
+    return User.objects.create_superuser(
+        username="local-admin",
+        email="local-admin@mhc.local",
+        password=os.environ.get("DEV_LOCAL_ADMIN_PASSWORD") or None,
+        keycloak_subject="local-admin",
+    )
+
+
 def main():
     mbabane = ensure_region("Hhohho", "Hhohho Region")
     manzini = ensure_region("Manzini", "Manzini Region")
@@ -98,13 +110,7 @@ def main():
     ensure_contact("Test Requester", "requester@example.com", "+26876123456")
     ensure_contact("Walk-in Visitor", "walkin@example.com")
 
-    if not User.objects.filter(username="local-admin").exists():
-        User.objects.create_superuser(
-            username="local-admin",
-            email="local-admin@mhc.local",
-            password="change-me-locally",
-            keycloak_subject="local-admin",
-        )
+    ensure_local_admin()
 
     seed_workflow()
     seed_sla()

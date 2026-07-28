@@ -53,6 +53,82 @@ class DisposalCertificate:
         return json.dumps(asdict(self), indent=2, sort_keys=True)
 
 
+@dataclass(frozen=True)
+class RetentionSqlPlan:
+    count_sql: str
+    delete_sql: str
+    legal_hold_count_sql: str | None = None
+
+
+RETENTION_SQL_PLANS = {
+    "ticket": RetentionSqlPlan(
+        count_sql="SELECT count(*) FROM ticket WHERE created_at < %s",
+        delete_sql=(
+            "DELETE FROM ticket WHERE created_at < %s "
+            "AND legal_hold IS NOT TRUE"
+        ),
+        legal_hold_count_sql=(
+            "SELECT count(*) FROM ticket "
+            "WHERE created_at < %s AND legal_hold = TRUE"
+        ),
+    ),
+    "ticket_message": RetentionSqlPlan(
+        count_sql="SELECT count(*) FROM ticket_message WHERE created_at < %s",
+        delete_sql=(
+            "DELETE FROM ticket_message AS candidate "
+            "WHERE candidate.created_at < %s AND NOT EXISTS ("
+            "SELECT 1 FROM ticket AS held_ticket "
+            "WHERE held_ticket.id = candidate.ticket_id "
+            "AND held_ticket.legal_hold = TRUE)"
+        ),
+        legal_hold_count_sql=(
+            "SELECT count(*) FROM ticket_message AS candidate "
+            "WHERE candidate.created_at < %s AND EXISTS ("
+            "SELECT 1 FROM ticket AS held_ticket "
+            "WHERE held_ticket.id = candidate.ticket_id "
+            "AND held_ticket.legal_hold = TRUE)"
+        ),
+    ),
+    "ticket_note": RetentionSqlPlan(
+        count_sql="SELECT count(*) FROM ticket_note WHERE created_at < %s",
+        delete_sql=(
+            "DELETE FROM ticket_note AS candidate "
+            "WHERE candidate.created_at < %s AND NOT EXISTS ("
+            "SELECT 1 FROM ticket AS held_ticket "
+            "WHERE held_ticket.id = candidate.ticket_id "
+            "AND held_ticket.legal_hold = TRUE)"
+        ),
+        legal_hold_count_sql=(
+            "SELECT count(*) FROM ticket_note AS candidate "
+            "WHERE candidate.created_at < %s AND EXISTS ("
+            "SELECT 1 FROM ticket AS held_ticket "
+            "WHERE held_ticket.id = candidate.ticket_id "
+            "AND held_ticket.legal_hold = TRUE)"
+        ),
+    ),
+    "auditevent": RetentionSqlPlan(
+        count_sql="SELECT count(*) FROM auditevent WHERE created_at < %s",
+        delete_sql="DELETE FROM auditevent WHERE created_at < %s",
+    ),
+    "whatsapp_message": RetentionSqlPlan(
+        count_sql="SELECT count(*) FROM whatsapp_message WHERE created_at < %s",
+        delete_sql="DELETE FROM whatsapp_message WHERE created_at < %s",
+    ),
+    "integrationevent": RetentionSqlPlan(
+        count_sql="SELECT count(*) FROM integrationevent WHERE created_at < %s",
+        delete_sql="DELETE FROM integrationevent WHERE created_at < %s",
+    ),
+    "email_delivery": RetentionSqlPlan(
+        count_sql="SELECT count(*) FROM email_delivery WHERE created_at < %s",
+        delete_sql="DELETE FROM email_delivery WHERE created_at < %s",
+    ),
+    "csat_response": RetentionSqlPlan(
+        count_sql="SELECT count(*) FROM csat_response WHERE created_at < %s",
+        delete_sql="DELETE FROM csat_response WHERE created_at < %s",
+    ),
+}
+
+
 def get_retention_policy() -> dict:
     """Read the operator-tuned retention policy from ConfigItem, falling
     back to the defaults baked into this module."""
@@ -83,6 +159,9 @@ class Command(BaseCommand):
         for table, rule in policy.items():
             if only and table not in only:
                 continue
+            if table not in RETENTION_SQL_PLANS:
+                self.stdout.write(f"[skip] {table}: unsupported retention table")
+                continue
             days = rule.get("days")
             if not isinstance(days, int) or days <= 0:
                 self.stdout.write(f"[skip] {table}: invalid days={days!r}")
@@ -99,24 +178,20 @@ class Command(BaseCommand):
     @transaction.atomic
     def _dispose_table(self, table: str, cutoff, rule: dict, dry: bool) -> dict:
         from django.db import connection
+        plan = RETENTION_SQL_PLANS.get(table)
+        if plan is None:
+            self.stdout.write(f"[skip] {table}: unsupported retention table")
+            return {}
         rows_preserved_legal_hold = 0
         rows_disposed = 0
-        if table in ("ticket", "ticket_message", "ticket_note"):
-            # Honour legal hold: skip tickets that are under hold.
-            sql_hold = f"SELECT count(*) FROM {table} WHERE legal_hold = TRUE AND created_at < %s"
-        else:
-            sql_hold = "SELECT 0"
         with connection.cursor() as cur:
-            cur.execute(sql_hold, [cutoff])
-            rows_preserved_legal_hold = cur.fetchone()[0]
-            sql_count = f"SELECT count(*) FROM {table} WHERE created_at < %s"
-            cur.execute(sql_count, [cutoff])
+            if plan.legal_hold_count_sql is not None:
+                cur.execute(plan.legal_hold_count_sql, [cutoff])
+                rows_preserved_legal_hold = cur.fetchone()[0]
+            cur.execute(plan.count_sql, [cutoff])
             total_old = cur.fetchone()[0]
             if not dry:
-                sql_delete = f"DELETE FROM {table} WHERE created_at < %s"
-                if rows_preserved_legal_hold:
-                    sql_delete += " AND legal_hold IS NOT TRUE"
-                cur.execute(sql_delete, [cutoff])
+                cur.execute(plan.delete_sql, [cutoff])
                 rows_disposed = cur.rowcount
             else:
                 rows_disposed = total_old - rows_preserved_legal_hold
@@ -135,4 +210,4 @@ class Command(BaseCommand):
             f"  {table:<32} cutoff={cutoff.date()} disposed={rows_disposed} "
             f"hold_kept={rows_preserved_legal_hold}"
         )
-        return cert.to_json()
+        return asdict(cert)
