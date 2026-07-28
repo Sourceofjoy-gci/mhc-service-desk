@@ -29,7 +29,11 @@ from apps.tickets.permissions import can_add_ticket_content
 from apps.tickets.services import add_message
 
 from .models import WhatsappAccount, WhatsappMessage
-from .services import get_provider, process_inbound_whatsapp
+from .services import (
+    ProviderTemplateDiscoveryError,
+    get_provider,
+    process_inbound_whatsapp,
+)
 from .webhook_security import authenticate_meta_request, is_recent_meta_timestamp
 
 logger = logging.getLogger(__name__)
@@ -55,6 +59,13 @@ class _MetaDeliveryStatus:
 
 _MetaEvent = _InboundMetaMessage | _MetaDeliveryStatus
 _META_DELIVERY_STATUSES = {"sent", "delivered", "read", "failed"}
+_META_DELIVERY_RANK = {
+    "pending": 0,
+    "sent": 1,
+    "failed": 2,
+    "delivered": 3,
+    "read": 4,
+}
 
 
 def _authenticated_user(request: Request) -> User:
@@ -145,18 +156,26 @@ def _render_template(template: Mapping[str, object], parameters: list[str]) -> s
 
 def _meta_events(parsed: dict[str, object]) -> tuple[list[_MetaEvent], str | None]:
     """Validate every event before any event in the signed batch is mutated."""
+    if parsed.get("object") != "whatsapp_business_account":
+        return [], "invalid_payload"
     entries = parsed.get("entry")
-    if not isinstance(entries, list):
-        return [], None
+    if not isinstance(entries, list) or not entries:
+        return [], "invalid_payload"
     events: list[_MetaEvent] = []
     for entry in entries:
         if not isinstance(entry, dict):
             return [], "invalid_payload"
+        business_id = entry.get("id")
+        if not isinstance(business_id, str) or not business_id.strip():
+            return [], "invalid_payload"
         changes = entry.get("changes")
-        if not isinstance(changes, list):
+        if not isinstance(changes, list) or not changes:
             return [], "invalid_payload"
         for change in changes:
-            if not isinstance(change, dict):
+            if (
+                not isinstance(change, dict)
+                or change.get("field") != "messages"
+            ):
                 return [], "invalid_payload"
             value = change.get("value")
             if not isinstance(value, dict):
@@ -164,9 +183,12 @@ def _meta_events(parsed: dict[str, object]) -> tuple[list[_MetaEvent], str | Non
             metadata = value.get("metadata")
             if not isinstance(metadata, dict):
                 return [], "invalid_payload"
-            phone_number_id = str(metadata.get("phone_number_id", ""))
+            phone_number_id = metadata.get("phone_number_id")
+            if not isinstance(phone_number_id, str) or not phone_number_id:
+                return [], "invalid_payload"
             account = WhatsappAccount.objects.filter(
                 phone_number_id=phone_number_id,
+                business_id=business_id,
                 is_active=True,
             ).first()
             if account is None:
@@ -174,7 +196,10 @@ def _meta_events(parsed: dict[str, object]) -> tuple[list[_MetaEvent], str | Non
             to_number = str(metadata.get("display_phone_number", ""))
 
             messages = value.get("messages", [])
-            if not isinstance(messages, list):
+            statuses = value.get("statuses", [])
+            if not isinstance(messages, list) or not isinstance(statuses, list):
+                return [], "invalid_payload"
+            if not messages and not statuses:
                 return [], "invalid_payload"
             for message in messages:
                 if not isinstance(message, dict):
@@ -184,33 +209,44 @@ def _meta_events(parsed: dict[str, object]) -> tuple[list[_MetaEvent], str | Non
                 text_payload = message.get("text")
                 if not isinstance(text_payload, dict):
                     return [], "invalid_payload"
+                from_number = message.get("from")
+                external_message_id = message.get("id")
+                message_type = message.get("type")
+                body = text_payload.get("body")
+                if not isinstance(from_number, str) or not from_number:
+                    return [], "invalid_payload"
+                if not isinstance(external_message_id, str) or not external_message_id:
+                    return [], "invalid_payload"
+                if not isinstance(message_type, str) or not message_type:
+                    return [], "invalid_payload"
+                if not isinstance(body, str) or not body:
+                    return [], "invalid_payload"
                 event = _InboundMetaMessage(
                     account=account,
-                    from_number=str(message.get("from", "")),
+                    from_number=from_number,
                     to_number=to_number,
-                    body=str(text_payload.get("body", "")),
-                    external_message_id=str(message.get("id", "")),
-                    message_type=str(message.get("type", "")),
+                    body=body,
+                    external_message_id=external_message_id,
+                    message_type=message_type,
                 )
-                if not event.from_number or not event.body or not event.external_message_id:
-                    return [], "invalid_payload"
                 events.append(event)
 
-            statuses = value.get("statuses", [])
-            if not isinstance(statuses, list):
-                return [], "invalid_payload"
             for delivery in statuses:
                 if not isinstance(delivery, dict):
                     return [], "invalid_payload"
                 timestamp_value = delivery.get("timestamp")
                 if not is_recent_meta_timestamp(timestamp_value):
                     return [], "stale_timestamp"
-                external_message_id = str(delivery.get("id", ""))
-                delivery_status = str(delivery.get("status", "")).lower()
+                external_message_id = delivery.get("id")
+                raw_delivery_status = delivery.get("status")
                 if (
-                    not external_message_id
-                    or delivery_status not in _META_DELIVERY_STATUSES
+                    not isinstance(external_message_id, str)
+                    or not external_message_id
+                    or not isinstance(raw_delivery_status, str)
                 ):
+                    return [], "invalid_payload"
+                delivery_status = raw_delivery_status.lower()
+                if delivery_status not in _META_DELIVERY_STATUSES:
                     return [], "invalid_payload"
                 events.append(
                     _MetaDeliveryStatus(
@@ -239,15 +275,43 @@ def _record_meta_delivery_status(event: _MetaDeliveryStatus) -> dict[str, str]:
                 "status": "unknown_message_id",
                 "external_message_id": event.external_message_id,
             }
-        prior_timestamp = channel_message.raw_payload.get("status_timestamp", 0)
+        raw_payload = (
+            channel_message.raw_payload
+            if isinstance(channel_message.raw_payload, dict)
+            else {}
+        )
+        prior_timestamp = raw_payload.get("status_timestamp", 0)
         try:
             prior_timestamp_int = int(str(prior_timestamp))
         except ValueError:
             prior_timestamp_int = 0
-        if (
-            channel_message.delivery_status == event.delivery_status
-            or event.timestamp <= prior_timestamp_int
-        ):
+        current_rank = _META_DELIVERY_RANK.get(
+            channel_message.delivery_status,
+            0,
+        )
+        candidate_rank = _META_DELIVERY_RANK[event.delivery_status]
+        if event.timestamp < prior_timestamp_int or candidate_rank < current_rank:
+            return {
+                "status": "ignored",
+                "external_message_id": event.external_message_id,
+            }
+        if channel_message.delivery_status == event.delivery_status:
+            if event.timestamp > prior_timestamp_int:
+                channel_message.raw_payload = {
+                    **raw_payload,
+                    "status_timestamp": event.timestamp,
+                    "status_rank": candidate_rank,
+                }
+                channel_message.save(update_fields=["raw_payload"])
+                return {
+                    "status": "timestamp_advanced",
+                    "external_message_id": event.external_message_id,
+                }
+            return {
+                "status": "duplicate",
+                "external_message_id": event.external_message_id,
+            }
+        if event.timestamp == prior_timestamp_int and candidate_rank <= current_rank:
             return {
                 "status": "duplicate",
                 "external_message_id": event.external_message_id,
@@ -256,8 +320,9 @@ def _record_meta_delivery_status(event: _MetaDeliveryStatus) -> dict[str, str]:
         previous_status = channel_message.delivery_status
         channel_message.delivery_status = event.delivery_status
         channel_message.raw_payload = {
-            **channel_message.raw_payload,
+            **raw_payload,
             "status_timestamp": event.timestamp,
+            "status_rank": candidate_rank,
         }
         channel_message.save(update_fields=["delivery_status", "raw_payload"])
         if channel_message.ticket_id is not None:
@@ -285,13 +350,66 @@ def _record_meta_delivery_status(event: _MetaDeliveryStatus) -> dict[str, str]:
         }
 
 
+def _persist_discovery_attempt(
+    *,
+    ticket: Ticket,
+    account: WhatsappAccount,
+    template_name: str,
+    language: str,
+    parameters: list[str],
+) -> WhatsappMessage:
+    with transaction.atomic():
+        return WhatsappMessage.objects.create(
+            ticket=ticket,
+            account=account,
+            from_number="",
+            to_number=ticket.requester.phone_e164,
+            direction=WhatsappMessage.Direction.OUTBOUND,
+            body="",
+            delivery_status="pending",
+            raw_payload={
+                "phase": "template_discovery",
+                "template_name": template_name,
+                "template_language": language,
+                "template_parameters": parameters,
+                "retryable": True,
+            },
+        )
+
+
+def _mark_discovery_attempt(
+    attempt: WhatsappMessage,
+    *,
+    phase: str,
+    error_code: str,
+    retryable: bool,
+) -> None:
+    with transaction.atomic():
+        locked_attempt = WhatsappMessage.objects.select_for_update().get(pk=attempt.pk)
+        raw_payload = (
+            locked_attempt.raw_payload
+            if isinstance(locked_attempt.raw_payload, dict)
+            else {}
+        )
+        locked_attempt.delivery_status = "pending" if retryable else "failed"
+        locked_attempt.raw_payload = {
+            **raw_payload,
+            "phase": phase,
+            "error_code": error_code,
+            "retryable": retryable,
+        }
+        locked_attempt.save(update_fields=["delivery_status", "raw_payload"])
+
+
 def _persist_pending_outbound(
     *,
     ticket: Ticket,
     account: WhatsappAccount,
+    channel_message: WhatsappMessage,
     rendered: str,
     template_name: str,
     language: str,
+    parameters: list[str],
     actor: User,
     request: Request,
 ) -> tuple[TicketMessage, WhatsappMessage]:
@@ -315,19 +433,18 @@ def _persist_pending_outbound(
             actor=actor,
             request=request,
         )
-        channel_message = WhatsappMessage.objects.create(
-            ticket=ticket,
-            account=account,
-            from_number="",
-            to_number=ticket.requester.phone_e164,
-            direction=WhatsappMessage.Direction.OUTBOUND,
-            body=rendered,
-            delivery_status="pending",
-            raw_payload={
-                "template_name": template_name,
-                "template_language": language,
-            },
+        channel_message = WhatsappMessage.objects.select_for_update().get(
+            pk=channel_message.pk
         )
+        channel_message.body = rendered
+        channel_message.raw_payload = {
+            "phase": "ready_to_send",
+            "template_name": template_name,
+            "template_language": language,
+            "template_parameters": parameters,
+            "retryable": True,
+        }
+        channel_message.save(update_fields=["body", "raw_payload"])
     return ticket_message, channel_message
 
 
@@ -509,13 +626,25 @@ def list_templates(request: Request) -> Response:
             status=status.HTTP_503_SERVICE_UNAVAILABLE,
         )
     provider = get_provider()
+    try:
+        templates = provider.fetch_templates(
+            account_token=account.access_token,
+            business_id=account.business_id,
+        )
+    except ProviderTemplateDiscoveryError as exc:
+        return Response(
+            {
+                "code": "whatsapp_template_discovery_unavailable",
+                "retryable": exc.retryable,
+            },
+            status=(
+                status.HTTP_503_SERVICE_UNAVAILABLE
+                if exc.retryable
+                else status.HTTP_502_BAD_GATEWAY
+            ),
+        )
     return Response(
-        {
-            "templates": provider.fetch_templates(
-                account_token=account.access_token,
-                business_id=account.business_id,
-            )
-        }
+        {"templates": templates}
     )
 
 
@@ -557,34 +686,74 @@ def send_text(request: Request) -> Response:
             {"code": "whatsapp_account_unavailable"},
             status=status.HTTP_503_SERVICE_UNAVAILABLE,
         )
-    provider = get_provider()
-    templates = provider.fetch_templates(
-        account_token=account.access_token,
-        business_id=account.business_id,
+    actor = _authenticated_user(request)
+    channel_message = _persist_discovery_attempt(
+        ticket=ticket,
+        account=account,
+        template_name=template_name,
+        language=language,
+        parameters=parameters,
     )
+    provider = get_provider()
+    try:
+        templates = provider.fetch_templates(
+            account_token=account.access_token,
+            business_id=account.business_id,
+        )
+    except ProviderTemplateDiscoveryError as exc:
+        _mark_discovery_attempt(
+            channel_message,
+            phase="template_discovery_failed",
+            error_code="whatsapp_template_discovery_unavailable",
+            retryable=exc.retryable,
+        )
+        return Response(
+            {
+                "code": "whatsapp_template_discovery_unavailable",
+                "retryable": exc.retryable,
+            },
+            status=(
+                status.HTTP_503_SERVICE_UNAVAILABLE
+                if exc.retryable
+                else status.HTTP_502_BAD_GATEWAY
+            ),
+        )
     template = _approved_template(
         templates,
         name=template_name,
         language=language,
     )
     if template is None:
+        _mark_discovery_attempt(
+            channel_message,
+            phase="template_rejected",
+            error_code="whatsapp_template_not_approved",
+            retryable=False,
+        )
         return Response(
             {"code": "whatsapp_template_not_approved"},
             status=status.HTTP_409_CONFLICT,
         )
     rendered = _render_template(template, parameters)
     if rendered is None:
+        _mark_discovery_attempt(
+            channel_message,
+            phase="template_rejected",
+            error_code="whatsapp_template_parameters_invalid",
+            retryable=False,
+        )
         return Response(
             {"code": "whatsapp_template_parameters_invalid"},
             status=status.HTTP_400_BAD_REQUEST,
         )
-    actor = _authenticated_user(request)
     ticket_message, channel_message = _persist_pending_outbound(
         ticket=ticket,
         account=account,
+        channel_message=channel_message,
         rendered=rendered,
         template_name=template_name,
         language=language,
+        parameters=parameters,
         actor=actor,
         request=request,
     )

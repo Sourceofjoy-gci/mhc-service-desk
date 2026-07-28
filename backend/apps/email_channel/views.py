@@ -12,6 +12,8 @@ from rest_framework.request import Request
 from rest_framework.response import Response
 from rest_framework import status
 
+from apps.tickets.events import record_ticket_event
+
 from .services import process_inbound_email
 from .models import EmailDelivery, EmailWebhookEvent
 from .webhook_security import authenticate_email_adapter
@@ -82,6 +84,11 @@ def inbound_email(request: Request) -> Response:
             {"status": "error", "detail": f"missing fields: {', '.join(missing)}"},
             status=status.HTTP_400_BAD_REQUEST,
         )
+    if body.get("sender_verified") is not True:
+        return Response(
+            {"status": "error", "detail": "sender verification required"},
+            status=status.HTTP_400_BAD_REQUEST,
+        )
     message_id = str(body["message_id"])
     with transaction.atomic():
         if not _claim_event(
@@ -119,18 +126,73 @@ def outbound_bounce(request: Request) -> Response:
     if failure is not None:
         return failure
     assert body is not None
-    message_id = str(body.get("message_id", ""))
-    delivery = EmailDelivery.objects.filter(message_id=message_id).first()
-    if not delivery:
-        return Response({"status": "unknown_message_id"}, status=status.HTTP_404_NOT_FOUND)
+    raw_message_id = body.get("message_id")
+    message_id = raw_message_id.strip() if isinstance(raw_message_id, str) else ""
+    if not message_id:
+        return Response(
+            {"status": "invalid_message_id"},
+            status=status.HTTP_400_BAD_REQUEST,
+        )
+    event_type = body.get("type")
+    event_mapping = {
+        "failure": (
+            EmailWebhookEvent.EventType.DELIVERY_FAILURE,
+            EmailDelivery.Status.FAILED,
+        ),
+        "bounce": (
+            EmailWebhookEvent.EventType.DELIVERY_BOUNCE,
+            EmailDelivery.Status.BOUNCED,
+        ),
+    }
+    if not isinstance(event_type, str) or event_type not in event_mapping:
+        return Response(
+            {"status": "invalid_event_type"},
+            status=status.HTTP_400_BAD_REQUEST,
+        )
+    receipt_type, delivery_status = event_mapping[event_type]
     with transaction.atomic():
+        try:
+            delivery = (
+                EmailDelivery.objects.select_for_update()
+                .select_related("ticket_message__ticket")
+                .get(message_id=message_id)
+            )
+        except EmailDelivery.DoesNotExist:
+            return Response(
+                {"status": "unknown_message_id"},
+                status=status.HTTP_404_NOT_FOUND,
+            )
+        except EmailDelivery.MultipleObjectsReturned:
+            return Response(
+                {"status": "ambiguous_message_id"},
+                status=status.HTTP_409_CONFLICT,
+            )
         if not _claim_event(
             event_id=event_id,
-            event_type="bounce",
+            event_type=receipt_type,
             message_id=message_id,
         ):
             return Response({"status": "duplicate"})
-        delivery.status = "bounced" if body.get("type") == "bounce" else "failed"
+        if (
+            delivery.status == EmailDelivery.Status.BOUNCED
+            and delivery_status == EmailDelivery.Status.FAILED
+        ):
+            return Response({"status": "ignored"})
+        previous_status = delivery.ticket_message.delivery_status
+        delivery.status = delivery_status
         delivery.error = str(body.get("error", ""))[:2000]
         delivery.save(update_fields=["status", "error"])
+        delivery.ticket_message.delivery_status = delivery_status
+        delivery.ticket_message.save(update_fields=["delivery_status"])
+        record_ticket_event(
+            ticket=delivery.ticket_message.ticket,
+            actor_subject="email:adapter",
+            action="ticket.message.delivery_updated",
+            before={"delivery_status": previous_status},
+            after={"delivery_status": delivery_status},
+            metadata={
+                "channel": "email",
+                "provider_message_id": message_id,
+            },
+        )
     return Response({"status": "recorded"})

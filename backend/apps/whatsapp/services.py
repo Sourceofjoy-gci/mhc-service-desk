@@ -37,6 +37,14 @@ class _CloudTemplatesResponse(TypedDict, total=False):
     data: list[dict[str, object]]
 
 
+class ProviderTemplateDiscoveryError(RuntimeError):
+    """Sanitized provider failure that preserves whether retry is appropriate."""
+
+    def __init__(self, *, retryable: bool) -> None:
+        super().__init__("WhatsApp template discovery is unavailable")
+        self.retryable = retryable
+
+
 def get_provider(name: str | None = None) -> BaseProvider:
     name = (name or os.environ.get("WHATSAPP_PROVIDER") or "mock").lower()
     if name == "cloud":
@@ -224,7 +232,7 @@ class CloudProvider(BaseProvider):
         business_id: str = "",
     ) -> list[dict[str, object]]:
         if not account_token or not business_id:
-            return []
+            raise ProviderTemplateDiscoveryError(retryable=False)
         try:
             r = requests.get(
                 f"{self.BASE}/{business_id}/message_templates",
@@ -232,11 +240,21 @@ class CloudProvider(BaseProvider):
                 timeout=5,
             )
         except requests.RequestException:
-            return []
+            raise ProviderTemplateDiscoveryError(retryable=True) from None
         if not r.ok:
-            return []
-        data: _CloudTemplatesResponse = r.json()
-        return data.get("data", [])
+            raise ProviderTemplateDiscoveryError(
+                retryable=r.status_code == 429 or r.status_code >= 500,
+            )
+        try:
+            data: _CloudTemplatesResponse = r.json()
+        except ValueError:
+            raise ProviderTemplateDiscoveryError(retryable=True) from None
+        templates = data.get("data") if isinstance(data, dict) else None
+        if not isinstance(templates, list) or not all(
+            isinstance(template, dict) for template in templates
+        ):
+            raise ProviderTemplateDiscoveryError(retryable=True)
+        return templates
 
 
 # --- Inbound webhook processing -------------------------------------------

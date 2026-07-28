@@ -19,17 +19,20 @@ signing and sending it.
 
 The normalized payload may set `sender_verified` to JSON `true` only after the
 adapter has validated the envelope sender and the deployment's SPF/DKIM/DMARC
-policy. Unverified messages can create a new ticket but cannot thread into an
-existing requester ticket. Unknown or inactive destination mailboxes are
-rejected.
+policy. The application rejects unverified sender payloads before resolving,
+creating, or renaming any contact and before creating a ticket or message.
+Unknown or inactive destination mailboxes are rejected.
 
 Requests are rejected when the secret is not configured, the signature is
 invalid, or the timestamp differs from server time by more than
 `CHANNEL_WEBHOOK_MAX_AGE_SECONDS` (300 seconds by default). A successfully
-claimed event ID cannot be replayed. Nonblank provider message IDs are also
-claimed at the database boundary where applicable. Reply threading is limited
-to the resolved mailbox domain and the same requester; a subject token or
-message reference cannot cross either boundary.
+claimed event ID cannot be replayed. Failure and terminal-bounce receipts use
+distinct claims for the same nonblank provider message ID, while a replay of
+either subtype is idempotent. A terminal bounce cannot be downgraded by a later
+failure. Delivery updates change both the email-delivery row and linked ticket
+message and emit one matching audit/outbox pair. Reply threading is limited to
+the resolved mailbox domain and the same requester; a subject token or message
+reference cannot cross either boundary.
 
 ## Meta WhatsApp
 
@@ -39,15 +42,18 @@ using `WHATSAPP_APP_SECRET`, formatted as `sha256=<lowercase hex digest>`.
 Inbound message timestamps must also be within the configured age window.
 
 Meta's `GET` verification challenge requires `WHATSAPP_VERIFY_TOKEN`. The
-signed payload's `metadata.phone_number_id` must match an active local
-WhatsApp account before any ticket or message is created.
+signed payload's `entry.id` WABA ID and `metadata.phone_number_id` must match
+the same active local WhatsApp account before any ticket or message is created.
 
 All entries, changes, messages, and delivery statuses in a signed Meta batch
 are validated before the batch is processed. Each provider message ID is
 claimed independently. Delivery-status updates are account-bound, ordered by
 their signed timestamp, and emit matching audit and transactional-outbox
-events. An unknown account/message combination returns `503` so Meta can retry
-after an outbound provider ID has been linked.
+events. Same-second events use a deterministic status rank, newer repeats of
+the same status advance the stored timestamp without duplicate events, and
+older or lower-rank states cannot regress delivery. An unknown account/message
+combination returns `503` so Meta can retry after an outbound provider ID has
+been linked.
 
 ## Outbound WhatsApp capability
 
@@ -62,11 +68,14 @@ Each `WhatsappAccount` stores its own Meta business/WABA ID. Template discovery
 always uses that account's WABA ID and access token; no global business ID is
 used across Operational and IT domains.
 
-An authorized outbound message, delivery attempt, audit record, and outbox
-event are committed with `pending` delivery state before the provider request
-is made. The provider result then advances both message records and emits a
-delivery-update event. This preserves a durable retry/reconciliation record if
-the provider is unavailable or final persistence fails.
+An authorized channel attempt is committed with `pending` delivery state and
+the template retry inputs before template discovery. Discovery transport or
+provider outages return a sanitized retryable `503`, leave the attempt pending
+for reconciliation, and never call the provider send operation. A successful
+discovery promotes that attempt into the requester-visible outbound message;
+the ticket message, audit record, and outbox event are then committed before
+the send call. The provider result advances both message records and emits a
+delivery-update event.
 
 ## Known pilot-readiness blocker
 

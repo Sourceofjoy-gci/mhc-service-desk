@@ -10,6 +10,7 @@ from typing import Any
 from uuid import uuid4
 
 import pytest
+from django.db import connection
 from django.utils import timezone
 from rest_framework.test import APIClient
 
@@ -18,6 +19,7 @@ from apps.contacts.models import Contact
 from apps.identity_access.models import User
 from apps.tickets.models import OutboxEvent, Ticket, TicketMessage
 from apps.whatsapp.models import WhatsappAccount, WhatsappMessage
+from apps.whatsapp.services import ProviderTemplateDiscoveryError
 from apps.workflow.models import Status
 
 META_APP_SECRET = "meta-app-secret-for-tests"
@@ -135,7 +137,7 @@ def _meta_raw(
         "object": "whatsapp_business_account",
         "entry": [
             {
-                "id": "business-id",
+                "id": account.business_id,
                 "changes": [
                     {
                         "field": "messages",
@@ -182,7 +184,7 @@ def _meta_status_raw(
         "object": "whatsapp_business_account",
         "entry": [
             {
-                "id": "business-id",
+                "id": account.business_id,
                 "changes": [
                     {
                         "field": "messages",
@@ -283,6 +285,108 @@ def test_meta_webhook_rejects_stale_signed_message_before_mutation(
 
     assert response.status_code == 401
     assert WhatsappMessage.objects.count() == 0
+
+
+@pytest.mark.django_db
+@pytest.mark.parametrize(
+    "malformation",
+    [
+        "wrong_object",
+        "entry_not_list",
+        "empty_entry",
+        "changes_not_list",
+        "empty_changes",
+        "wrong_change_field",
+        "empty_change_events",
+    ],
+)
+def test_meta_webhook_rejects_malformed_envelope_before_mutation(
+    basic_world: dict[str, Any],
+    malformation: str,
+) -> None:
+    account = _account()
+    payload = json.loads(_meta_raw(account, message_id="wamid.malformed"))
+    entry = payload["entry"][0]
+    change = entry["changes"][0]
+    if malformation == "wrong_object":
+        payload["object"] = "page"
+    elif malformation == "entry_not_list":
+        payload["entry"] = {}
+    elif malformation == "empty_entry":
+        payload["entry"] = []
+    elif malformation == "changes_not_list":
+        entry["changes"] = {}
+    elif malformation == "empty_changes":
+        entry["changes"] = []
+    elif malformation == "wrong_change_field":
+        change["field"] = "account_update"
+    else:
+        change["value"].pop("messages")
+    raw_body = json.dumps(payload, separators=(",", ":")).encode()
+
+    response = APIClient().generic(
+        "POST",
+        "/api/v1/integrations/whatsapp/webhook/",
+        raw_body,
+        content_type="application/json",
+        HTTP_X_HUB_SIGNATURE_256=_meta_signature(raw_body),
+    )
+
+    assert response.status_code == 400
+    assert response.json() == {"status": "invalid_payload"}
+    assert WhatsappMessage.objects.count() == 0
+    assert TicketMessage.objects.count() == 0
+
+
+@pytest.mark.django_db
+def test_meta_webhook_requires_waba_and_phone_number_to_match_same_account(
+    basic_world: dict[str, Any],
+) -> None:
+    account = _account()
+    other_account = _account()
+    payload = json.loads(_meta_raw(account, message_id="wamid.waba-mismatch"))
+    payload["entry"][0]["id"] = other_account.business_id
+    raw_body = json.dumps(payload, separators=(",", ":")).encode()
+
+    response = APIClient().generic(
+        "POST",
+        "/api/v1/integrations/whatsapp/webhook/",
+        raw_body,
+        content_type="application/json",
+        HTTP_X_HUB_SIGNATURE_256=_meta_signature(raw_body),
+    )
+
+    assert response.status_code == 503
+    assert response.json() == {"status": "account_unavailable"}
+    assert WhatsappMessage.objects.count() == 0
+    assert TicketMessage.objects.count() == 0
+
+
+@pytest.mark.django_db
+def test_meta_webhook_prevalidates_entire_batch_before_mutation(
+    basic_world: dict[str, Any],
+) -> None:
+    account = _account()
+    payload = json.loads(_meta_raw(account, message_id="wamid.valid-first"))
+    payload["entry"].append(
+        {
+            "id": account.business_id,
+            "changes": [{"field": "not_messages", "value": {}}],
+        }
+    )
+    raw_body = json.dumps(payload, separators=(",", ":")).encode()
+
+    response = APIClient().generic(
+        "POST",
+        "/api/v1/integrations/whatsapp/webhook/",
+        raw_body,
+        content_type="application/json",
+        HTTP_X_HUB_SIGNATURE_256=_meta_signature(raw_body),
+    )
+
+    assert response.status_code == 400
+    assert WhatsappMessage.objects.count() == 0
+    assert TicketMessage.objects.count() == 0
 
 
 @pytest.mark.django_db
@@ -421,6 +525,152 @@ def test_meta_delivery_status_is_account_bound_idempotent_and_audited(
         aggregate_id=str(ticket.id),
         event_type="ticket.message.delivery_updated",
     ).count() == 1
+
+
+@pytest.mark.django_db
+def test_meta_statuses_use_rank_to_order_events_with_same_timestamp(
+    basic_world: dict[str, Any],
+) -> None:
+    ticket = _ticket(basic_world)
+    account = _account()
+    issued_at = int(time.time())
+    ticket_message = TicketMessage.objects.create(
+        ticket=ticket,
+        direction=TicketMessage.Direction.OUTBOUND,
+        body_text="Template body",
+        external_message_id="wamid.same-second",
+        delivery_status="sent",
+    )
+    channel_message = WhatsappMessage.objects.create(
+        ticket=ticket,
+        account=account,
+        direction=WhatsappMessage.Direction.OUTBOUND,
+        body="Template body",
+        external_message_id="wamid.same-second",
+        delivery_status="sent",
+        raw_payload={"status_timestamp": issued_at},
+    )
+    client = APIClient()
+
+    for delivery_status in ("delivered", "read"):
+        raw_body = _meta_status_raw(
+            account,
+            message_id="wamid.same-second",
+            delivery_status=delivery_status,
+            issued_at=issued_at,
+        )
+        response = client.generic(
+            "POST",
+            "/api/v1/integrations/whatsapp/webhook/",
+            raw_body,
+            content_type="application/json",
+            HTTP_X_HUB_SIGNATURE_256=_meta_signature(raw_body),
+        )
+        assert response.status_code == 200
+
+    channel_message.refresh_from_db()
+    ticket_message.refresh_from_db()
+    assert channel_message.delivery_status == "read"
+    assert ticket_message.delivery_status == "read"
+    assert AuditEvent.objects.filter(
+        object_id=str(ticket.id),
+        action="ticket.message.delivery_updated",
+    ).count() == 2
+
+
+@pytest.mark.django_db
+def test_meta_newer_same_status_advances_watermark_without_duplicate_event(
+    basic_world: dict[str, Any],
+) -> None:
+    ticket = _ticket(basic_world)
+    account = _account()
+    prior_timestamp = int(time.time()) - 10
+    channel_message = WhatsappMessage.objects.create(
+        ticket=ticket,
+        account=account,
+        direction=WhatsappMessage.Direction.OUTBOUND,
+        body="Template body",
+        external_message_id="wamid.watermark",
+        delivery_status="delivered",
+        raw_payload={"status_timestamp": prior_timestamp},
+    )
+    newer_timestamp = prior_timestamp + 5
+    raw_body = _meta_status_raw(
+        account,
+        message_id="wamid.watermark",
+        delivery_status="delivered",
+        issued_at=newer_timestamp,
+    )
+
+    response = APIClient().generic(
+        "POST",
+        "/api/v1/integrations/whatsapp/webhook/",
+        raw_body,
+        content_type="application/json",
+        HTTP_X_HUB_SIGNATURE_256=_meta_signature(raw_body),
+    )
+
+    assert response.status_code == 200
+    assert response.json()["results"][0]["status"] == "timestamp_advanced"
+    channel_message.refresh_from_db()
+    assert channel_message.raw_payload["status_timestamp"] == newer_timestamp
+    assert AuditEvent.objects.filter(
+        object_id=str(ticket.id),
+        action="ticket.message.delivery_updated",
+    ).count() == 0
+    assert OutboxEvent.objects.filter(
+        aggregate_id=str(ticket.id),
+        event_type="ticket.message.delivery_updated",
+    ).count() == 0
+
+
+@pytest.mark.django_db
+def test_meta_status_never_regresses_or_accepts_an_older_higher_rank(
+    basic_world: dict[str, Any],
+) -> None:
+    ticket = _ticket(basic_world)
+    account = _account()
+    prior_timestamp = int(time.time()) - 5
+    channel_message = WhatsappMessage.objects.create(
+        ticket=ticket,
+        account=account,
+        direction=WhatsappMessage.Direction.OUTBOUND,
+        body="Template body",
+        external_message_id="wamid.monotonic",
+        delivery_status="delivered",
+        raw_payload={"status_timestamp": prior_timestamp},
+    )
+    client = APIClient()
+
+    newer_lower = _meta_status_raw(
+        account,
+        message_id="wamid.monotonic",
+        delivery_status="sent",
+        issued_at=prior_timestamp + 1,
+    )
+    older_higher = _meta_status_raw(
+        account,
+        message_id="wamid.monotonic",
+        delivery_status="read",
+        issued_at=prior_timestamp - 1,
+    )
+    for raw_body in (newer_lower, older_higher):
+        response = client.generic(
+            "POST",
+            "/api/v1/integrations/whatsapp/webhook/",
+            raw_body,
+            content_type="application/json",
+            HTTP_X_HUB_SIGNATURE_256=_meta_signature(raw_body),
+        )
+        assert response.status_code == 200
+
+    channel_message.refresh_from_db()
+    assert channel_message.delivery_status == "delivered"
+    assert channel_message.raw_payload["status_timestamp"] == prior_timestamp
+    assert AuditEvent.objects.filter(
+        object_id=str(ticket.id),
+        action="ticket.message.delivery_updated",
+    ).count() == 0
 
 
 @pytest.mark.django_db
@@ -677,6 +927,110 @@ def test_authorized_send_is_durable_before_the_provider_is_called(
     assert provider.observed_pending_attempt is True
 
 
+@pytest.mark.django_db(transaction=True)
+def test_authorized_send_commits_attempt_before_template_discovery(
+    basic_world: dict[str, Any],
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    ticket = _ticket(basic_world)
+    _account()
+
+    class ObservingDiscoveryProvider(StubProvider):
+        observed_discovery_attempt = False
+
+        def fetch_templates(
+            self,
+            *,
+            account_token: str = "",
+            business_id: str = "",
+        ) -> list[dict[str, object]]:
+            assert connection.in_atomic_block is False
+            attempt = WhatsappMessage.objects.get(ticket=ticket)
+            assert attempt.delivery_status == "pending"
+            assert attempt.body == ""
+            assert attempt.raw_payload == {
+                "phase": "template_discovery",
+                "template_name": "case_update",
+                "template_language": "en",
+                "template_parameters": ["ready"],
+                "retryable": True,
+            }
+            assert TicketMessage.objects.filter(ticket=ticket).count() == 0
+            self.observed_discovery_attempt = True
+            return super().fetch_templates(
+                account_token=account_token,
+                business_id=business_id,
+            )
+
+    provider = ObservingDiscoveryProvider()
+    monkeypatch.setattr("apps.whatsapp.views.get_provider", lambda: provider)
+
+    response = _authenticated_client(
+        "durable-discovery-agent",
+        "ops-agents",
+    ).post(
+        "/api/v1/integrations/whatsapp/send/",
+        {
+            "ticket_number": ticket.number,
+            "template_name": "case_update",
+            "language": "en",
+            "parameters": ["ready"],
+        },
+        format="json",
+    )
+
+    assert response.status_code == 200
+    assert provider.observed_discovery_attempt is True
+
+
+@pytest.mark.django_db(transaction=True)
+def test_template_discovery_outage_leaves_retryable_durable_attempt_without_send(
+    basic_world: dict[str, Any],
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    ticket = _ticket(basic_world)
+    _account()
+
+    class UnavailableDiscoveryProvider(StubProvider):
+        def fetch_templates(
+            self,
+            *,
+            account_token: str = "",
+            business_id: str = "",
+        ) -> list[dict[str, object]]:
+            raise ProviderTemplateDiscoveryError(retryable=True)
+
+    provider = UnavailableDiscoveryProvider()
+    monkeypatch.setattr("apps.whatsapp.views.get_provider", lambda: provider)
+
+    response = _authenticated_client("discovery-outage-agent", "ops-agents").post(
+        "/api/v1/integrations/whatsapp/send/",
+        {
+            "ticket_number": ticket.number,
+            "template_name": "case_update",
+            "language": "en",
+            "parameters": ["sensitive request value"],
+        },
+        format="json",
+    )
+
+    assert response.status_code == 503
+    assert response.json() == {
+        "code": "whatsapp_template_discovery_unavailable",
+        "retryable": True,
+    }
+    attempt = WhatsappMessage.objects.get(ticket=ticket)
+    assert attempt.delivery_status == "pending"
+    assert attempt.raw_payload["phase"] == "template_discovery_failed"
+    assert attempt.raw_payload["retryable"] is True
+    assert attempt.raw_payload["error_code"] == (
+        "whatsapp_template_discovery_unavailable"
+    )
+    assert provider.sent == []
+    assert TicketMessage.objects.filter(ticket=ticket).count() == 0
+    assert "provider timeout with sensitive detail" not in str(attempt.raw_payload)
+
+
 @pytest.mark.django_db
 def test_provider_failure_is_persisted_without_sensitive_error_details(
     basic_world: dict[str, Any],
@@ -750,7 +1104,11 @@ def test_send_rejects_unapproved_or_malformed_template_before_delivery(
     assert response.json()["code"] == expected_code
     assert provider.fetch_count == 1
     assert provider.sent == []
-    assert WhatsappMessage.objects.count() == 0
+    attempt = WhatsappMessage.objects.get(ticket=ticket)
+    assert attempt.delivery_status == "failed"
+    assert attempt.raw_payload["phase"] == "template_rejected"
+    assert attempt.raw_payload["retryable"] is False
+    assert attempt.raw_payload["error_code"] == expected_code
     assert TicketMessage.objects.filter(ticket=ticket).count() == 0
 
 
@@ -776,6 +1134,40 @@ def test_templates_require_ticket_scope_and_configured_domain_account(
     assert denied.status_code == 404
     assert allowed.status_code == 200
     assert allowed.json() == {"templates": provider.templates}
+
+
+@pytest.mark.django_db
+def test_templates_endpoint_reports_provider_discovery_outage(
+    basic_world: dict[str, Any],
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    ticket = _ticket(basic_world)
+    _account()
+
+    class UnavailableDiscoveryProvider(StubProvider):
+        def fetch_templates(
+            self,
+            *,
+            account_token: str = "",
+            business_id: str = "",
+        ) -> list[dict[str, object]]:
+            raise ProviderTemplateDiscoveryError(retryable=True)
+
+    monkeypatch.setattr(
+        "apps.whatsapp.views.get_provider",
+        UnavailableDiscoveryProvider,
+    )
+
+    response = _authenticated_client("template-outage", "ops-agents").get(
+        "/api/v1/integrations/whatsapp/templates/",
+        {"ticket_number": ticket.number},
+    )
+
+    assert response.status_code == 503
+    assert response.json() == {
+        "code": "whatsapp_template_discovery_unavailable",
+        "retryable": True,
+    }
 
 
 @pytest.mark.django_db

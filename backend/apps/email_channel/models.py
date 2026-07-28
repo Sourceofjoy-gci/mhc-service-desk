@@ -62,9 +62,14 @@ class EmailDelivery(models.Model):
 class EmailWebhookEvent(models.Model):
     """Authenticated adapter event claimed before channel mutation."""
 
+    class EventType(models.TextChoices):
+        INBOUND = "inbound", "Inbound"
+        DELIVERY_FAILURE = "delivery_failure", "Delivery failure"
+        DELIVERY_BOUNCE = "delivery_bounce", "Delivery bounce"
+
     id = models.UUIDField(primary_key=True, default=uuid.uuid4, editable=False)
     event_id = models.CharField(max_length=255, unique=True)
-    event_type = models.CharField(max_length=32)
+    event_type = models.CharField(max_length=32, choices=EventType.choices)
     message_id = models.CharField(max_length=255, blank=True)
     received_at = models.DateTimeField(auto_now_add=True)
 
@@ -74,8 +79,22 @@ class EmailWebhookEvent(models.Model):
             models.UniqueConstraint(
                 fields=("event_type", "message_id"),
                 condition=~models.Q(message_id=""),
-                name="uniq_email_webhook_type_message_when_set",
-            )
+                name="uniq_email_event_type_message_when_set_v2",
+            ),
+            models.CheckConstraint(
+                condition=models.Q(
+                    event_type__in=(
+                        "inbound",
+                        "delivery_failure",
+                        "delivery_bounce",
+                    )
+                ),
+                name="email_event_type_is_supported",
+            ),
+            models.CheckConstraint(
+                condition=~models.Q(message_id=""),
+                name="email_event_message_id_not_blank",
+            ),
         ]
 
     def __str__(self) -> str:
