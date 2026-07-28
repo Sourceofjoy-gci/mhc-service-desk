@@ -9,8 +9,11 @@ matches the actual code. Drift should be caught in PR review.
 """
 from __future__ import annotations
 
+import inspect
 import os
+import re
 import sys
+from dataclasses import dataclass
 
 # Ensure /app is on sys.path so `config.urls` is importable inside the
 # container (where the CWD is /app but sys.path is not set automatically
@@ -19,47 +22,163 @@ sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
 os.environ.setdefault("DJANGO_SETTINGS_MODULE", "config.settings.dev")
 
-import django
+import django  # noqa: I001
 django.setup()
 
-import inspect
+# These imports consume configured Django/DRF settings and must follow setup.
+from rest_framework.permissions import AllowAny  # noqa: E402, I001
+from rest_framework.views import APIView  # noqa: E402
+from django.urls import URLPattern, URLResolver, get_resolver  # noqa: E402
 
-from rest_framework.views import APIView
-from django.urls import get_resolver
+
+@dataclass(frozen=True)
+class AuditedRoute:
+    path: str
+    method: str
+    action: str
+    authentication_classes: tuple[str, ...]
+    permission_classes: tuple[str, ...]
+    required_scope: str | None
+    is_public: bool
+
+
+REQUIRED_ROUTE_FAMILIES = {
+    "lifecycle": (
+        ("PATCH", "work_state", "api/v1/tickets/<number>/work-state/"),
+        ("GET", "assignees", "api/v1/tickets/<number>/assignees/"),
+        ("POST", "transition", "api/v1/tickets/<number>/transition/"),
+        ("GET", "activity", "api/v1/tickets/<number>/activity/"),
+    ),
+    "attachment": (
+        ("GET", "ticket-attachments", "api/v1/tickets/<ticket_number>/attachments/"),
+        ("POST", "ticket-attachments", "api/v1/tickets/<ticket_number>/attachments/"),
+        ("GET", "attachment-download", "api/v1/attachments/<attachment_id>/download/"),
+    ),
+    "reporting": (
+        ("GET", "export-tickets-csv", "api/v1/reports/tickets.csv"),
+        ("GET", "dashboard-operational", "api/v1/reports/dashboard/operational"),
+        ("GET", "dashboard-it", "api/v1/reports/dashboard/it"),
+        ("GET", "flow-metrics", "api/v1/reports/flow"),
+    ),
+}
+
+
+def _normalise_path(path: str) -> str:
+    path = path.replace("^", "").replace("$", "").replace("\\Z", "")
+    path = re.sub(r"\(\?P<([^>]+)>[^)]+\)", r"<\1>", path)
+    path = re.sub(r"<(?:[^:>]+:)?([^>]+)>", r"<\1>", path)
+    return path.replace("\\.", ".").replace("/?", "/")
+
+
+def _class_names(classes) -> tuple[str, ...]:
+    return tuple(item.__name__ for item in classes)
+
+
+def _route_methods(callback, cls, pattern_name):
+    actions = getattr(callback, "actions", None)
+    if actions:
+        yield from sorted(
+            (method.upper(), action) for method, action in actions.items()
+        )
+        return
+
+    for method in cls.http_method_names:
+        if method == "options" or not hasattr(cls, method):
+            continue
+        yield method.upper(), pattern_name or method
+
+
+def _walk_patterns(patterns, prefix=""):
+    for pattern in patterns:
+        full_path = f"{prefix}{pattern.pattern}"
+        if isinstance(pattern, URLResolver):
+            yield from _walk_patterns(pattern.url_patterns, full_path)
+            continue
+        if not isinstance(pattern, URLPattern):
+            continue
+
+        callback = pattern.callback
+        cls = getattr(callback, "cls", None)
+        if not (inspect.isclass(cls) and issubclass(cls, APIView)):
+            continue
+
+        path = _normalise_path(full_path)
+        if not path.startswith("api/v1/") or "<format>" in path:
+            continue
+        initkwargs = getattr(callback, "initkwargs", {})
+        permissions = tuple(
+            initkwargs.get("permission_classes", cls.permission_classes)
+        )
+        authentication = initkwargs.get(
+            "authentication_classes",
+            cls.authentication_classes,
+        )
+        required_scope = initkwargs.get(
+            "required_scope",
+            getattr(cls, "required_scope", None),
+        )
+        is_public = bool(
+            getattr(callback, "_public", False)
+            or getattr(cls, "_public", False)
+            or any(issubclass(permission, AllowAny) for permission in permissions)
+        )
+        for method, action in _route_methods(callback, cls, pattern.name):
+            yield AuditedRoute(
+                path=path,
+                method=method,
+                action=action,
+                authentication_classes=_class_names(authentication),
+                permission_classes=_class_names(permissions),
+                required_scope=str(required_scope) if required_scope else None,
+                is_public=is_public,
+            )
 
 
 def _walk_views():
-    resolver = get_resolver()
-    for prefix, viewset_or_callable in resolver.reverse_dict.items():
-        if not isinstance(prefix, str):
-            continue
-        if not prefix.startswith("api/v1/"):
-            continue
-        cls = getattr(viewset_or_callable, "cls", None)
-        if cls is None:
-            continue
-        if not (inspect.isclass(cls) and issubclass(cls, APIView)):
-            continue
-        yield prefix, cls
+    yield from _walk_patterns(get_resolver().url_patterns)
+
+
+def _missing_required_routes(routes):
+    observed = {(route.method, route.action, route.path) for route in routes}
+    return {
+        family: [required for required in requirements if required not in observed]
+        for family, requirements in REQUIRED_ROUTE_FAMILIES.items()
+        if any(required not in observed for required in requirements)
+    }
 
 
 def main():
-    print(f"{'PATH':<55} {'PERMISSION_CLASSES':<35} SCOPE / PUBLIC")
-    print("-" * 110)
-    found = 0
-    for path, cls in sorted(_walk_views()):
-        perms = ", ".join(p.__name__ for p in getattr(cls, "permission_classes", []))
-        scope = getattr(cls, "required_scope", None)
-        is_public = getattr(cls, "_public", False)
-        suffix = "PUBLIC" if is_public else (str(scope) if scope else "any auth")
-        print(f"{path:<55} {perms:<35} {suffix}")
-        found += 1
-    # The @api_view-decorated function-based views do not show up in
-    # the class-based resolver walk. Print a one-liner summary of the
-    # views that were introspected.
-    print(f"\nintrospected {found} class-based views (function-based views "
-          f"are listed in docs/permission-matrix.md manually)")
+    routes = sorted(
+        _walk_views(),
+        key=lambda item: (item.path, item.method, item.action),
+    )
+    print("METHOD ACTION PATH | AUTHENTICATION | PERMISSIONS | SCOPE / PUBLIC")
+    print("-" * 120)
+    for route in routes:
+        authentication = ", ".join(route.authentication_classes) or "none"
+        permissions = ", ".join(route.permission_classes) or "none"
+        access = "PUBLIC" if route.is_public else (route.required_scope or "any auth")
+        print(
+            f"{route.method} {route.action} {route.path} "
+            f"| AUTH={authentication} | PERMISSIONS={permissions} | ACCESS={access}"
+        )
+
+    if not routes:
+        print("\nERROR: no API views found")
+        return 1
+
+    missing = _missing_required_routes(routes)
+    if missing:
+        for family, requirements in missing.items():
+            print(f"\nERROR: missing required {family} routes")
+            for method, action, path in requirements:
+                print(f"  {method} {path} (action={action})")
+        return 1
+
+    path_count = len({route.path for route in routes})
+    print(f"\naudit passed: {len(routes)} route actions across {path_count} API paths")
+    return 0
 
 
 if __name__ == "__main__":
-    main()
+    raise SystemExit(main())
