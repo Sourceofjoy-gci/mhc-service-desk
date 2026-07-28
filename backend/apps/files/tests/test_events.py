@@ -4,7 +4,7 @@ from __future__ import annotations
 import pytest
 
 from apps.audit.models import AuditEvent
-from apps.files.services import record_attachment
+from apps.files.services import StoredObject, record_attachment
 from apps.tickets import services
 from apps.tickets.models import OutboxEvent
 
@@ -35,7 +35,17 @@ def test_record_attachment_records_metadata_without_object_key_or_checksum(basic
         scan_status="clean",
         scan_signature="",
         actor_subject="agent-1",
+        stored_object=StoredObject(
+            bucket="mhc-attachments",
+            key="attachments/secret-storage-key",
+            etag="secret-etag",
+            version_id="secret-version",
+        ),
     )
+
+    assert attachment.object_bucket == "mhc-attachments"
+    assert attachment.object_version_id == "secret-version"
+    assert attachment.object_etag == "secret-etag"
 
     audit = AuditEvent.objects.get(
         object_id=str(ticket.id),
@@ -54,4 +64,5 @@ def test_record_attachment_records_metadata_without_object_key_or_checksum(basic
         "scan_status": "clean",
     }
     assert "secret-storage-key" not in str(audit.payload)
+    assert "secret-version" not in str(audit.payload)
     assert "a" * 64 not in str(audit.payload)

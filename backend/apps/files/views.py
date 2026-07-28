@@ -301,7 +301,7 @@ def upload(request: Request, ticket_number: str) -> Response:
             except Exception as exc:
                 raise _AttachmentStorageError from exc
 
-            for item in prepared:
+            for item, stored_object in zip(prepared, stored_objects, strict=True):
                 attachments.append(
                     record_attachment(
                         ticket=locked_ticket,
@@ -314,6 +314,7 @@ def upload(request: Request, ticket_number: str) -> Response:
                         scan_status=item.scan_status,
                         scan_signature=item.scan_signature,
                         actor_subject=fresh_actor.keycloak_subject,
+                        stored_object=stored_object,
                     )
                 )
     except _AttachmentStorageError:

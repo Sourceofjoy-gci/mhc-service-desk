@@ -108,7 +108,15 @@ def test_attachment_post_returns_common_metadata_and_scan_signature(
         "apps.files.views.scan_with_clamav",
         lambda _data: ("clean", "verified-signature"),
     )
-    monkeypatch.setattr("apps.files.views.upload_to_minio", lambda **_kwargs: object())
+    monkeypatch.setattr(
+        "apps.files.views.upload_to_minio",
+        lambda **kwargs: file_services.StoredObject(
+            bucket="mhc-attachments",
+            key=kwargs["key"],
+            etag="test-etag",
+            version_id="test-version",
+        ),
+    )
 
     response = _client(_user(["ops-agents"])).post(
         reverse("ticket-attachments", args=[ticket.number]),
@@ -319,10 +327,16 @@ def test_attachment_storage_key_excludes_the_user_supplied_filename(
         "apps.files.views.scan_with_clamav",
         lambda _data: ("clean", None),
     )
-    monkeypatch.setattr(
-        "apps.files.views.upload_to_minio",
-        lambda *, key, **_kwargs: stored_keys.append(key),
-    )
+    def store_and_capture(*, key, **_kwargs):
+        stored_keys.append(key)
+        return file_services.StoredObject(
+            bucket="mhc-attachments",
+            key=key,
+            etag="test-etag",
+            version_id="test-version",
+        )
+
+    monkeypatch.setattr("apps.files.views.upload_to_minio", store_and_capture)
 
     response = _client(_user(["ops-agents"])).post(
         reverse("ticket-attachments", args=[ticket.number]),

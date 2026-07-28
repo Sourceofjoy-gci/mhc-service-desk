@@ -121,18 +121,33 @@ mitigations, the key-rotation schedule, and the access-review cadence.
   preview schedule are not an approval and are never used for deletion.
 * `manage.py apply_retention --dry-run` — previews what would be disposed. If
   no policy is configured, it clearly labels the built-in schedule as an
-  unapproved preview.
+  unapproved preview. Preview artifacts use the distinct
+  `disposal-preview-<timestamp>.json` name and the
+  `mhc.retention.preview.v1` schema with `mode=preview`,
+  `status=not_executed`, and `rows_selected`; they never claim rows were
+  disposed.
 * `manage.py apply_retention` — refuses to run without a valid configured
-  policy. It validates every selected PostgreSQL query before deleting, applies
-  the complete run in one transaction, and atomically publishes the disposal
-  certificate to `backups/disposal-<timestamp>.json` before commit. A later
-  table or certificate-write failure rolls back every deletion; a database
-  commit failure may leave a certificate for a run that did not delete data and
-  should be investigated.
+  policy. It preflights raw SQL and ORM candidate queries, locks candidate
+  tickets and all hold-bearing message/note rows, revalidates legal holds, and
+  applies the complete database run in one transaction. A held ticket, message,
+  or note preserves the whole ticket graph. A parent is not selected while a
+  cascade or `SET NULL` dependent is still inside its own retention window.
+* The committed `DisposalEvent` row is the source of truth. Attachment metadata
+  is removed only after an exact bucket/key/version deletion job has been
+  enqueued in that same transaction; legacy attachment rows without exact
+  version ownership fail closed. The minute-scheduled retention side-effects
+  worker retries those jobs idempotently and never falls back to a key-only
+  delete.
+* A final `mhc.retention.disposal-certificate.v1` certificate is exported only
+  after the database commit and all object cleanup jobs complete. Its filename
+  includes the committed event UUID. A commit failure therefore cannot publish
+  a final certificate. Export/link/`fsync` failures leave the committed event
+  retriable with `manage.py apply_retention --retry-event <uuid>` and do not
+  repeat deletion.
 * The certificate output directory must support same-filesystem hard links and
-  `fsync` for both files and directories. The command flushes the certificate
-  file and then its parent-directory entry before the database can commit; an
-  unsupported or failed durability operation aborts and rolls back the run.
+  `fsync` for both files and directories. A retry accepts an existing file only
+  when its canonical contents exactly match the committed event; a mismatched
+  path is treated as a hard collision.
 * Schedule monthly via cron only after the policy has been formally approved
   and configured.
 * `manage.py sar_export --email <addr>` — produces a Subject Access

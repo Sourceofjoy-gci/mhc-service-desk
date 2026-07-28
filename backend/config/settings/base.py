@@ -280,6 +280,10 @@ CELERY_BEAT_SCHEDULE = {
         "task": "apps.audit.tasks.rotate_export_artefacts",
         "schedule": 3600.0,  # hourly
     },
+    "retention-side-effects": {
+        "task": "apps.administration.tasks.process_retention_side_effects",
+        "schedule": 60.0,
+    },
 }
 
 # -----------------------------------------------------------------------------

@@ -202,11 +202,19 @@ def record_attachment(
     scan_status: str,
     scan_signature: str,
     actor_subject: str,
+    stored_object: StoredObject,
 ) -> Attachment:
+    if stored_object.key != object_key:
+        raise ValueError("Stored-object ownership key does not match attachment key.")
+    if not stored_object.bucket or not stored_object.version_id:
+        raise ValueError("Stored-object ownership metadata is incomplete.")
     attachment = Attachment.objects.create(
         ticket=ticket,
         message=message,
         object_key=object_key,
+        object_bucket=stored_object.bucket,
+        object_version_id=stored_object.version_id,
+        object_etag=stored_object.etag,
         filename=filename,
         content_type=content_type,
         size_bytes=size_bytes,

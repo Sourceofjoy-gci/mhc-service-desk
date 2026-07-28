@@ -31,6 +31,11 @@ class Attachment(models.Model):
         related_name="attachments",
     )
     object_key = models.CharField(max_length=512, unique=True)
+    # Exact ownership coordinates returned by a versioned object-store write.
+    # Blank values identify legacy rows and retention must preserve them.
+    object_bucket = models.CharField(max_length=255, blank=True)
+    object_version_id = models.CharField(max_length=255, blank=True)
+    object_etag = models.CharField(max_length=255, blank=True)
     filename = models.CharField(max_length=255)
     content_type = models.CharField(max_length=128)
     size_bytes = models.BigIntegerField()
@@ -73,3 +78,37 @@ class AttachmentAccessLog(models.Model):
 
     def __str__(self) -> str:
         return f"attachment-access:{self.pk}"
+
+
+class ObjectDeleteJob(models.Model):
+    """Durable request to remove one exact object-store version."""
+
+    id = models.UUIDField(primary_key=True, default=uuid.uuid4, editable=False)
+    disposal_event = models.ForeignKey(
+        "administration.DisposalEvent",
+        on_delete=models.PROTECT,
+        related_name="object_delete_jobs",
+    )
+    source_attachment_id = models.UUIDField()
+    bucket = models.CharField(max_length=255)
+    object_key = models.CharField(max_length=512)
+    version_id = models.CharField(max_length=255)
+    etag = models.CharField(max_length=255, blank=True)
+    attempts = models.PositiveIntegerField(default=0)
+    next_attempt_at = models.DateTimeField()
+    last_error_code = models.CharField(max_length=128, blank=True)
+    created_at = models.DateTimeField(auto_now_add=True)
+    completed_at = models.DateTimeField(null=True, blank=True)
+
+    class Meta:
+        db_table = "file_object_delete_job"
+        constraints = [
+            models.UniqueConstraint(
+                fields=("bucket", "object_key", "version_id"),
+                name="uniq_object_delete_exact_version",
+            )
+        ]
+        indexes = [models.Index(fields=("completed_at", "next_attempt_at"))]
+
+    def __str__(self) -> str:
+        return f"object-delete-job:{self.pk}"
