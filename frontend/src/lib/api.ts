@@ -36,6 +36,67 @@ export function configureApiAuth(adapter: ApiAuthAdapter): () => void {
 export type Domain = "operational" | "it";
 export type Priority = "P1" | "P2" | "P3" | "P4";
 
+export interface TicketCapabilities {
+  can_update_work_state: boolean;
+  can_self_assign: boolean;
+  self_assignee_id: string | null;
+  can_reassign: boolean;
+  can_change_confidentiality: boolean;
+}
+
+export interface AvailableTransition {
+  to_status: string;
+  label: string;
+  requires_resolution: boolean;
+  requires_reason: boolean;
+}
+
+export interface SlaClock {
+  state: "not_started" | "running" | "paused" | "met" | "breached";
+  due_at: string | null;
+  remaining_seconds: number;
+  overdue_seconds: number;
+}
+
+export interface AttachmentMetadata {
+  id: string;
+  filename: string;
+  size_bytes: number;
+  content_type: string;
+  uploaded_by: string;
+  uploaded_at: string;
+  scan_status: "pending" | "clean" | "infected" | "error";
+  download_available: boolean;
+}
+
+export interface ActivityItem {
+  id: string;
+  type:
+    | "message"
+    | "internal_note"
+    | "status_transition"
+    | "work_state"
+    | "attachment"
+    | "relationship";
+  occurred_at: string;
+  actor: { subject: string; display_name: string } | null;
+  visibility: "requester" | "internal";
+  payload: Record<string, unknown>;
+}
+
+export interface TicketAssignee {
+  id: string;
+  username: string;
+  display_name: string;
+}
+
+export interface TicketRelationship {
+  id: string;
+  kind: string;
+  ticket_number: string;
+  direction: "incoming" | "outgoing";
+}
+
 export interface TicketSummary {
   id: string;
   number: string;
@@ -56,6 +117,7 @@ export interface TicketSummary {
   updated_at: string;
   age_hours: number;
   sla_health: "on_track" | "at_risk" | "breached" | "paused" | "none";
+  available_transition_codes?: string[];
 }
 
 export interface TicketMessage {
@@ -89,6 +151,20 @@ export interface TicketDetail extends TicketSummary {
   first_responded_at: string | null;
   resolved_at: string | null;
   closed_at: string | null;
+  reopened_at: string | null;
+  assignee_detail: { id: string; display_name: string } | null;
+  team: string;
+  blocked_reason: string;
+  next_action: string;
+  next_action_at: string | null;
+  available_transitions: AvailableTransition[];
+  capabilities: TicketCapabilities;
+  sla_clocks: {
+    first_response: SlaClock;
+    resolution: SlaClock;
+  };
+  relationships: TicketRelationship[];
+  attachments: AttachmentMetadata[];
   messages: TicketMessage[];
   notes: TicketNote[];
 }
@@ -106,16 +182,44 @@ export interface DashboardData {
   p1p2?: number;
 }
 
-export interface AttachmentUploadResult {
-  id: string;
-  filename: string;
-  size_bytes: number;
-  scan_status: "pending" | "clean" | "infected" | "error";
+export interface AttachmentUploadResult extends AttachmentMetadata {
   scan_signature: string;
 }
 
 export interface AttachmentUploadResponse {
   results: AttachmentUploadResult[];
+}
+
+export interface ApiProblem {
+  code: string;
+  detail: string;
+  fields: Record<string, string[]>;
+  correlation_id: string;
+}
+
+export interface TicketWorkStateUpdate {
+  updated_at: string;
+  assignee?: string | null;
+  team?: string;
+  waiting_reason?: string;
+  blocked_reason?: string;
+  next_action?: string;
+  next_action_at?: string | null;
+  confidentiality?: string;
+}
+
+export interface TicketTransitionRequest {
+  to_status: string;
+  updated_at: string;
+  reason?: string;
+  resolution_code?: string;
+  resolution_summary?: string;
+}
+
+export interface AttachmentDownload {
+  url: string;
+  filename: string;
+  expires_in: number;
 }
 
 export class ApiError extends Error {
@@ -126,6 +230,32 @@ export class ApiError extends Error {
     this.status = status;
     this.body = body;
   }
+}
+
+function isApiProblem(value: unknown): value is ApiProblem {
+  if (typeof value !== "object" || value === null) return false;
+  const body = value as Record<string, unknown>;
+  if (
+    typeof body.code !== "string" ||
+    typeof body.detail !== "string" ||
+    typeof body.correlation_id !== "string" ||
+    typeof body.fields !== "object" ||
+    body.fields === null ||
+    Array.isArray(body.fields)
+  ) {
+    return false;
+  }
+  return Object.values(body.fields).every(
+    (messages) =>
+      Array.isArray(messages) &&
+      messages.every((message) => typeof message === "string"),
+  );
+}
+
+export function apiProblem(error: unknown): ApiProblem | null {
+  return error instanceof ApiError && isApiProblem(error.body)
+    ? error.body
+    : null;
 }
 
 export class ApiAuthUnavailableError extends Error {
@@ -238,6 +368,47 @@ function asBearerToken(token: string): string {
   return `Bearer ${token.replace(/^Bearer\s+/i, "")}`;
 }
 
+function transitionTicket(
+  number: string,
+  values: TicketTransitionRequest,
+): Promise<TicketDetail>;
+/** @deprecated Use the structured payload with `updated_at`. */
+function transitionTicket(
+  number: string,
+  toStatus: string,
+  reason?: string,
+): Promise<TicketDetail>;
+function transitionTicket(
+  number: string,
+  values: TicketTransitionRequest | string,
+  reason = "",
+): Promise<TicketDetail> {
+  return api<TicketDetail>(`/tickets/${number}/transition/`, {
+    method: "POST",
+    body:
+      typeof values === "string"
+        ? { to_status: values, reason }
+        : values,
+  });
+}
+
+export const attachmentsApi = {
+  list: (number: string) =>
+    api<{ results: AttachmentMetadata[] }>(
+      `/tickets/${number}/attachments/`,
+    ),
+  upload: (number: string, files: readonly File[]) => {
+    const form = new FormData();
+    for (const file of files) form.append("files", file);
+    return api<AttachmentUploadResponse>(`/tickets/${number}/attachments/`, {
+      method: "POST",
+      body: form,
+    });
+  },
+  download: (id: string) =>
+    api<AttachmentDownload>(`/attachments/${id}/download/`),
+};
+
 export const ticketsApi = {
   list: async (
     params: Record<string, string> = {},
@@ -250,11 +421,16 @@ export const ticketsApi = {
   },
   get: (number: string) => api<TicketDetail>(`/tickets/${number}/`),
   kanban: (domain: Domain) => api<KanbanData>(`/tickets/kanban/?domain=${domain}`),
-  transition: (number: string, to_status: string, reason = "") =>
-    api<TicketDetail>(`/tickets/${number}/transition/`, {
-      method: "POST",
-      body: { to_status, reason },
+  updateWorkState: (number: string, values: TicketWorkStateUpdate) =>
+    api<TicketDetail>(`/tickets/${number}/work-state/`, {
+      method: "PATCH",
+      body: values,
     }),
+  transition: transitionTicket,
+  activity: (number: string) =>
+    api<{ results: ActivityItem[] }>(`/tickets/${number}/activity/`),
+  assignees: (number: string) =>
+    api<{ results: TicketAssignee[] }>(`/tickets/${number}/assignees/`),
   addMessage: (number: string, body_text: string) =>
     api<{ id: string }>(`/tickets/${number}/messages/`, {
       method: "POST",
@@ -267,14 +443,7 @@ export const ticketsApi = {
     }),
   dashboard: (domain: Domain) =>
     api<DashboardData>(`/reports/dashboard/${domain}`),
-  uploadAttachments: (number: string, files: readonly File[]) => {
-    const form = new FormData();
-    for (const file of files) form.append("files", file);
-    return api<AttachmentUploadResponse>(`/tickets/${number}/attachments/`, {
-      method: "POST",
-      body: form,
-    });
-  },
+  uploadAttachments: attachmentsApi.upload,
   publicIntake: (data: {
     request_type_code: string;
     service_code: string;
