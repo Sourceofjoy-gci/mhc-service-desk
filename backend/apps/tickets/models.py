@@ -163,6 +163,9 @@ class TicketMessage(models.Model):
         db_table = "ticket_message"
         ordering = ("created_at",)
 
+    def __str__(self) -> str:
+        return f"{self.direction}-message:{self.pk} ticket:{self.ticket_id}"
+
 
 class TicketNote(models.Model):
     """An internal note — never visible to the requester (FR-015, FR-016)."""
@@ -177,6 +180,9 @@ class TicketNote(models.Model):
     class Meta:
         db_table = "ticket_note"
         ordering = ("created_at",)
+
+    def __str__(self) -> str:
+        return f"note:{self.pk} ticket:{self.ticket_id}"
 
 
 class TicketLink(models.Model):
@@ -206,6 +212,9 @@ class TicketLink(models.Model):
         db_table = "ticket_link"
         unique_together = [("from_ticket", "to_ticket", "kind")]
 
+    def __str__(self) -> str:
+        return f"{self.from_ticket_id} {self.kind} {self.to_ticket_id}"
+
 
 class Watcher(models.Model):
     """A user who follows a ticket without being a participant (FR-018)."""
@@ -220,6 +229,9 @@ class Watcher(models.Model):
     class Meta:
         db_table = "ticket_watcher"
         unique_together = [("ticket", "user")]
+
+    def __str__(self) -> str:
+        return f"watcher:{self.user_id} ticket:{self.ticket_id}"
 
 
 class OutboxEvent(models.Model):
@@ -248,3 +260,6 @@ class OutboxEvent(models.Model):
 
     class Meta:
         db_table = "ticket_outbox"
+
+    def __str__(self) -> str:
+        return f"{self.event_type}:{self.aggregate}/{self.aggregate_id}"

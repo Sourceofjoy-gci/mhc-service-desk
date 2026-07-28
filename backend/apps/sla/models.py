@@ -32,6 +32,9 @@ class BusinessCalendar(models.Model):
     class Meta:
         db_table = "sla_calendar"
 
+    def __str__(self) -> str:
+        return self.name
+
 
 class SlaPolicy(models.Model):
     """A named bundle of SLA targets for a domain/priority combination."""
@@ -56,6 +59,9 @@ class SlaPolicy(models.Model):
     class Meta:
         db_table = "sla_policy"
         unique_together = [("domain", "priority", "name")]
+
+    def __str__(self) -> str:
+        return f"{self.name} ({self.domain}/{self.priority})"
 
 
 class SlaInstance(models.Model):
@@ -98,6 +104,9 @@ class SlaInstance(models.Model):
             models.Index(fields=["ticket", "kind"]),
         ]
 
+    def __str__(self) -> str:
+        return f"{self.kind}:{self.ticket_id} ({self.state})"
+
 
 class SlaPauseHistory(models.Model):
     """Why and when an SLA was paused or resumed (PRD §17.1 audit)."""
@@ -114,3 +123,6 @@ class SlaPauseHistory(models.Model):
     class Meta:
         db_table = "sla_pause_history"
         ordering = ("-at",)
+
+    def __str__(self) -> str:
+        return f"sla-pause:{self.instance_id} ({self.state})"

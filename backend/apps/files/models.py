@@ -51,6 +51,9 @@ class Attachment(models.Model):
             models.Index(fields=["ticket", "-uploaded_at"]),
         ]
 
+    def __str__(self) -> str:
+        return f"attachment:{self.pk}"
+
 
 class AttachmentAccessLog(models.Model):
     """Every download is audited (FR-095, FR-097)."""
@@ -67,3 +70,6 @@ class AttachmentAccessLog(models.Model):
     class Meta:
         db_table = "file_attachment_access"
         ordering = ("-at",)
+
+    def __str__(self) -> str:
+        return f"attachment-access:{self.pk}"

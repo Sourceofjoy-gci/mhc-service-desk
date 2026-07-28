@@ -9,6 +9,10 @@ router.register(r"tickets", views.TicketViewSet, basename="tickets")
 
 urlpatterns = [
     path("tickets/public/intake/", views.public_intake, name="tickets-public-intake"),
-    path("tickets/dashboard/operational/", views.operational_dashboard, name="tickets-dashboard-operational"),
+    path(
+        "tickets/dashboard/operational/",
+        views.operational_dashboard,
+        name="tickets-dashboard-operational",
+    ),
     path("", include(router.urls)),
 ]
