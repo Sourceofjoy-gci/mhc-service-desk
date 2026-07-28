@@ -22,7 +22,7 @@ from rest_framework.response import Response
 
 from apps.identity_access.authentication import KeycloakJWTAuthentication
 from apps.identity_access.models import User
-from apps.identity_access.scope import ScopePermission
+from apps.identity_access.scope import ScopePermission, scope_ticket_queryset
 from apps.tickets.models import OutboxEvent, Ticket
 
 # Simulated estate registry. In production this is an API call.
@@ -57,9 +57,12 @@ def validate_matter(request: Request, ticket_number: str) -> Response:
             detail="Authentication credentials were not provided.",
             code="not_authenticated",
         )
-    try:
-        ticket = Ticket.objects.get(number=ticket_number)
-    except Ticket.DoesNotExist:
+    ticket = scope_ticket_queryset(
+        request.user,
+        Ticket.objects.all(),
+        request=request,
+    ).filter(number=ticket_number).first()
+    if ticket is None:
         return Response({"detail": "ticket not found"}, status=404)
     ref = ticket.matter_reference
     if not ref:

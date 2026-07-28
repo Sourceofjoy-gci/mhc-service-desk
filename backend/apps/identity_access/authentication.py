@@ -14,6 +14,7 @@ import requests
 from cryptography.hazmat.primitives.asymmetric.rsa import RSAPublicKey
 from django.conf import settings
 from django.core.cache import cache
+from django.db import IntegrityError, transaction
 from rest_framework import authentication, exceptions
 from rest_framework.request import Request
 from rest_framework_simplejwt.tokens import AccessToken
@@ -102,9 +103,11 @@ class KeycloakJWTAuthentication(authentication.BaseAuthentication):
             if len(parts) >= 2:
                 username = parts[1]
                 groups = parts[2].split(",") if len(parts) > 2 and parts[2] else []
-                dev_user, _ = User.objects.get_or_create(
-                    username=username,
-                    defaults={"keycloak_subject": f"dev:{username}"},
+                dev_user = _resolve_local_user(
+                    keycloak_subject=f"dev:{username}",
+                    preferred_username=username,
+                    email="",
+                    mfa_enabled=False,
                 )
                 groups = _normalize_groups(groups)
                 _synchronize_groups(dev_user, groups)
@@ -161,25 +164,13 @@ class KeycloakJWTAuthentication(authentication.BaseAuthentication):
         mfa_enabled = bool(payload.get("acr") in ("mfa", "urn:mace:incommon:iap:silver"))
 
         # Look up by keycloak_subject first (the stable link to the IdP).
-        user = User.objects.filter(keycloak_subject=sub).first()
-        if user is None:
-            # Fallback: a stale user with the same username (e.g. the IdP was
-            # re-bootstrapped and minted a new sub). Re-link them.
-            user = User.objects.filter(username=preferred_username).first()
-            if user is not None:
-                user.keycloak_subject = sub
-                user.email = email or user.email
-                user.mfa_enabled = mfa_enabled
-                user.save(update_fields=["keycloak_subject", "email", "mfa_enabled"])
-        if user is None:
-            # Brand-new IdP user — create the local mirror.
-            user = User.objects.create(
-                keycloak_subject=sub,
-                username=preferred_username,
-                email=email,
-                mfa_enabled=mfa_enabled,
-            )
-        elif email and email != user.email:
+        user = _resolve_local_user(
+            keycloak_subject=sub,
+            preferred_username=preferred_username,
+            email=email,
+            mfa_enabled=mfa_enabled,
+        )
+        if email and email != user.email:
             user.email = email
             user.save(update_fields=["email"])
         # Persist the IdP snapshot and retain a request-local copy for scope
@@ -193,6 +184,37 @@ class KeycloakJWTAuthentication(authentication.BaseAuthentication):
 
 
 # --- helpers ----------------------------------------------------------------
+
+
+def _resolve_local_user(
+    *,
+    keycloak_subject: str,
+    preferred_username: str,
+    email: str,
+    mfa_enabled: bool,
+) -> User:
+    user = User.objects.filter(keycloak_subject=keycloak_subject).first()
+    if user is None:
+        if User.objects.filter(username=preferred_username).exists():
+            raise exceptions.AuthenticationFailed(
+                "Local identity requires explicit reconciliation."
+            )
+        try:
+            with transaction.atomic():
+                user = User.objects.create(
+                    keycloak_subject=keycloak_subject,
+                    username=preferred_username,
+                    email=email,
+                    mfa_enabled=mfa_enabled,
+                )
+        except IntegrityError as exc:
+            raise exceptions.AuthenticationFailed(
+                "Local identity requires explicit reconciliation."
+            ) from exc
+    if not user.is_active:
+        raise exceptions.AuthenticationFailed("User account is disabled.")
+    return user
+
 
 def _normalize_groups(raw_groups: object) -> list[str]:
     if not isinstance(raw_groups, list | tuple):
