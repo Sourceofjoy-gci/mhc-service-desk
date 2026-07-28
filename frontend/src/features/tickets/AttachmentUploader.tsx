@@ -186,8 +186,10 @@ function AttachmentRow({ attachment }: { attachment: AttachmentMetadata }) {
 
 export default function AttachmentUploader({
   ticketNumber,
+  canUpload = true,
 }: {
   ticketNumber: string;
+  canUpload?: boolean;
 }) {
   const queryClient = useQueryClient();
   const uploadLock = useRef(false);
@@ -273,52 +275,54 @@ export default function AttachmentUploader({
           )}
         </section>
 
-        <div className="border-t pt-4">
-          <FieldGroup className="gap-3">
-            <Field>
-              <FieldLabel htmlFor="ticket-attachments">Choose files</FieldLabel>
-              <Input
-                key={inputKey}
-                id="ticket-attachments"
-                type="file"
-                multiple
-                disabled={upload.isPending}
-                onChange={(event) => {
-                  setFiles(Array.from(event.target.files ?? []));
-                  upload.reset();
-                }}
-              />
-            </Field>
-          </FieldGroup>
+        {canUpload ? (
+          <div className="border-t pt-4">
+            <FieldGroup className="gap-3">
+              <Field>
+                <FieldLabel htmlFor="ticket-attachments">Choose files</FieldLabel>
+                <Input
+                  key={inputKey}
+                  id="ticket-attachments"
+                  type="file"
+                  multiple
+                  disabled={upload.isPending}
+                  onChange={(event) => {
+                    setFiles(Array.from(event.target.files ?? []));
+                    upload.reset();
+                  }}
+                />
+              </Field>
+            </FieldGroup>
 
-          {files.length > 0 ? (
-            <ul
-              className="mt-3 flex flex-col gap-1 text-xs text-muted-foreground"
-              aria-label="Selected files"
+            {files.length > 0 ? (
+              <ul
+                className="mt-3 flex flex-col gap-1 text-xs text-muted-foreground"
+                aria-label="Selected files"
+              >
+                {files.map((file) => (
+                  <li key={`${file.name}:${file.size}:${file.lastModified}`}>
+                    {file.name} · {formatSize(file.size)}
+                  </li>
+                ))}
+              </ul>
+            ) : null}
+
+            <Button
+              className="mt-3"
+              onClick={submitFiles}
+              disabled={files.length === 0 || upload.isPending}
             >
-              {files.map((file) => (
-                <li key={`${file.name}:${file.size}:${file.lastModified}`}>
-                  {file.name} · {formatSize(file.size)}
-                </li>
-              ))}
-            </ul>
-          ) : null}
+              {upload.isPending ? (
+                <Spinner data-icon="inline-start" aria-hidden />
+              ) : (
+                <Upload data-icon="inline-start" aria-hidden />
+              )}
+              {upload.isPending ? "Uploading…" : "Upload"}
+            </Button>
+          </div>
+        ) : null}
 
-          <Button
-            className="mt-3"
-            onClick={submitFiles}
-            disabled={files.length === 0 || upload.isPending}
-          >
-            {upload.isPending ? (
-              <Spinner data-icon="inline-start" aria-hidden />
-            ) : (
-              <Upload data-icon="inline-start" aria-hidden />
-            )}
-            {upload.isPending ? "Uploading…" : "Upload"}
-          </Button>
-        </div>
-
-        {upload.isError ? (
+        {canUpload && upload.isError ? (
           <FailureAlert
             error={upload.error}
             deniedTitle="Upload unavailable"

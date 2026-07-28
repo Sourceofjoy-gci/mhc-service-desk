@@ -27,6 +27,7 @@ interface OperationsPanelProps {
   ticket: TicketDetail;
   onUpdated: (ticket: TicketDetail) => void;
   onReload: () => void;
+  onActivityChanged?: () => void | Promise<void>;
 }
 
 interface FormValues {
@@ -108,6 +109,7 @@ export function OperationsPanel({
   ticket,
   onUpdated,
   onReload,
+  onActivityChanged,
 }: OperationsPanelProps) {
   const initialValues = valuesFromTicket(ticket);
   const [values, setValues] = useState<FormValues>(initialValues);
@@ -124,12 +126,13 @@ export function OperationsPanel({
   const update = useMutation({
     mutationFn: (payload: TicketWorkStateUpdate) =>
       ticketsApi.updateWorkState(ticket.number, payload),
-    onSuccess: (refreshedTicket) => {
+    onSuccess: async (refreshedTicket) => {
       const refreshedValues = valuesFromTicket(refreshedTicket);
       setValues(refreshedValues);
       setBaseline(refreshedValues);
       setDirty({});
       onUpdated(refreshedTicket);
+      await onActivityChanged?.();
     },
     onSettled: () => {
       inFlight.current = false;

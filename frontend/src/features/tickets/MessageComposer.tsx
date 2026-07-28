@@ -11,6 +11,8 @@ import { apiProblem, type ApiProblem, ticketsApi } from "@/lib/api";
 interface MessageComposerProps {
   ticketNumber: string;
   onCreated: () => void | Promise<void>;
+  canAddMessage?: boolean;
+  canAddNote?: boolean;
 }
 
 type ComposerMode = "reply" | "note";
@@ -36,8 +38,10 @@ function MutationError({
 export function MessageComposer({
   ticketNumber,
   onCreated,
+  canAddMessage = true,
+  canAddNote = true,
 }: MessageComposerProps) {
-  const [mode, setMode] = useState<ComposerMode>("reply");
+  const [preferredMode, setPreferredMode] = useState<ComposerMode>("reply");
   const [reply, setReply] = useState("");
   const [note, setNote] = useState("");
   const replyLocked = useRef(false);
@@ -87,6 +91,16 @@ export function MessageComposer({
 
   const replyProblem = apiProblem(replyMutation.error);
   const noteProblem = apiProblem(noteMutation.error);
+  const mode =
+    preferredMode === "reply" && canAddMessage
+      ? "reply"
+      : preferredMode === "note" && canAddNote
+        ? "note"
+        : canAddMessage
+          ? "reply"
+          : "note";
+
+  if (!canAddMessage && !canAddNote) return null;
 
   return (
     <section
@@ -100,111 +114,119 @@ export function MessageComposer({
         className="mt-3"
         value={mode}
         onValueChange={(value) => {
-          if (value === "reply" || value === "note") setMode(value);
+          if (value === "reply" || value === "note") setPreferredMode(value);
         }}
       >
         <TabsList aria-label="Message type" variant="line">
-          <TabsTrigger value="reply">Reply</TabsTrigger>
-          <TabsTrigger value="note">Internal note</TabsTrigger>
+          {canAddMessage ? (
+            <TabsTrigger value="reply">Reply</TabsTrigger>
+          ) : null}
+          {canAddNote ? (
+            <TabsTrigger value="note">Internal note</TabsTrigger>
+          ) : null}
         </TabsList>
 
-        <TabsContent value="reply">
-          <form
-            className="space-y-3 pt-3"
-            onSubmit={(event) => {
-              event.preventDefault();
-              submitReply();
-            }}
-          >
-            <Field data-invalid={Boolean(replyProblem?.fields.body_text)}>
-              <FieldLabel htmlFor="ticket-reply">Reply message</FieldLabel>
-              <Textarea
-                id="ticket-reply"
-                value={reply}
-                disabled={replyMutation.isPending}
-                aria-invalid={Boolean(replyProblem?.fields.body_text)}
-                onChange={(event) => setReply(event.target.value)}
-              />
-              <p className="text-xs text-muted-foreground">
-                This message is visible to the requester.
-              </p>
-              <FieldError
-                errors={replyProblem?.fields.body_text?.map((message) => ({
-                  message,
-                }))}
-              />
-            </Field>
+        {canAddMessage ? (
+          <TabsContent value="reply">
+            <form
+              className="space-y-3 pt-3"
+              onSubmit={(event) => {
+                event.preventDefault();
+                submitReply();
+              }}
+            >
+              <Field data-invalid={Boolean(replyProblem?.fields.body_text)}>
+                <FieldLabel htmlFor="ticket-reply">Reply message</FieldLabel>
+                <Textarea
+                  id="ticket-reply"
+                  value={reply}
+                  disabled={replyMutation.isPending}
+                  aria-invalid={Boolean(replyProblem?.fields.body_text)}
+                  onChange={(event) => setReply(event.target.value)}
+                />
+                <p className="text-xs text-muted-foreground">
+                  This message is visible to the requester.
+                </p>
+                <FieldError
+                  errors={replyProblem?.fields.body_text?.map((message) => ({
+                    message,
+                  }))}
+                />
+              </Field>
 
-            {replyMutation.isError ? (
-              <MutationError
-                title="Could not send reply"
-                problem={replyProblem}
-              />
-            ) : null}
+              {replyMutation.isError ? (
+                <MutationError
+                  title="Could not send reply"
+                  problem={replyProblem}
+                />
+              ) : null}
 
-            <div className="flex justify-end">
-              <Button
-                type="submit"
-                disabled={!reply.trim() || replyMutation.isPending}
-              >
-                {replyMutation.isPending ? (
-                  <Spinner aria-hidden data-icon="inline-start" />
-                ) : null}
-                {replyMutation.isPending ? "Sending…" : "Send reply"}
-              </Button>
-            </div>
-          </form>
-        </TabsContent>
+              <div className="flex justify-end">
+                <Button
+                  type="submit"
+                  disabled={!reply.trim() || replyMutation.isPending}
+                >
+                  {replyMutation.isPending ? (
+                    <Spinner aria-hidden data-icon="inline-start" />
+                  ) : null}
+                  {replyMutation.isPending ? "Sending…" : "Send reply"}
+                </Button>
+              </div>
+            </form>
+          </TabsContent>
+        ) : null}
 
-        <TabsContent value="note">
-          <form
-            className="space-y-3 border-l-2 border-l-amber-500 pt-3 pl-4"
-            onSubmit={(event) => {
-              event.preventDefault();
-              submitNote();
-            }}
-          >
-            <Field data-invalid={Boolean(noteProblem?.fields.body)}>
-              <FieldLabel htmlFor="ticket-internal-note">
-                Internal note
-              </FieldLabel>
-              <Textarea
-                id="ticket-internal-note"
-                value={note}
-                disabled={noteMutation.isPending}
-                aria-invalid={Boolean(noteProblem?.fields.body)}
-                onChange={(event) => setNote(event.target.value)}
-              />
-              <p className="text-xs font-medium text-amber-800 dark:text-amber-300">
-                Internal notes are not visible to the requester.
-              </p>
-              <FieldError
-                errors={noteProblem?.fields.body?.map((message) => ({
-                  message,
-                }))}
-              />
-            </Field>
+        {canAddNote ? (
+          <TabsContent value="note">
+            <form
+              className="space-y-3 border-l-2 border-l-amber-500 pt-3 pl-4"
+              onSubmit={(event) => {
+                event.preventDefault();
+                submitNote();
+              }}
+            >
+              <Field data-invalid={Boolean(noteProblem?.fields.body)}>
+                <FieldLabel htmlFor="ticket-internal-note">
+                  Internal note
+                </FieldLabel>
+                <Textarea
+                  id="ticket-internal-note"
+                  value={note}
+                  disabled={noteMutation.isPending}
+                  aria-invalid={Boolean(noteProblem?.fields.body)}
+                  onChange={(event) => setNote(event.target.value)}
+                />
+                <p className="text-xs font-medium text-amber-800 dark:text-amber-300">
+                  Internal notes are not visible to the requester.
+                </p>
+                <FieldError
+                  errors={noteProblem?.fields.body?.map((message) => ({
+                    message,
+                  }))}
+                />
+              </Field>
 
-            {noteMutation.isError ? (
-              <MutationError
-                title="Could not save internal note"
-                problem={noteProblem}
-              />
-            ) : null}
+              {noteMutation.isError ? (
+                <MutationError
+                  title="Could not save internal note"
+                  problem={noteProblem}
+                />
+              ) : null}
 
-            <div className="flex justify-end">
-              <Button
-                type="submit"
-                disabled={!note.trim() || noteMutation.isPending}
-              >
-                {noteMutation.isPending ? (
-                  <Spinner aria-hidden data-icon="inline-start" />
-                ) : null}
-                {noteMutation.isPending ? "Saving…" : "Add internal note"}
-              </Button>
-            </div>
-          </form>
-        </TabsContent>
+              <div className="flex justify-end">
+                <Button
+                  type="submit"
+                  disabled={!note.trim() || noteMutation.isPending}
+                >
+                  {noteMutation.isPending ? (
+                    <Spinner aria-hidden data-icon="inline-start" />
+                  ) : null}
+                  {noteMutation.isPending ? "Saving…" : "Add internal note"}
+                </Button>
+              </div>
+            </form>
+          </TabsContent>
+        ) : null}
       </Tabs>
     </section>
   );

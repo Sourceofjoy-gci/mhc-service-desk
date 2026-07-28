@@ -74,10 +74,8 @@ class ProblemManager:
             office=office,
             channel="internal",
             actor_subject=opened_by,
+            tags=["problem"],
         )
-        # Mark the ticket as a problem by hijacking tags (no schema change needed)
-        ticket.tags = list(ticket.tags) + ["problem"]
-        ticket.save(update_fields=["tags", "updated_at"])
         if related_incident_ids:
             for incident_id in related_incident_ids:
                 try:
@@ -125,12 +123,10 @@ class ChangeManager:
             office=office,
             channel="internal",
             actor_subject=opened_by,
+            custom_fields={
+                "scheduled_at": scheduled_at.isoformat(),
+                "risk": risk,
+            },
+            tags=["change", f"risk:{risk}"],
         )
-        ticket.custom_fields = {
-            **ticket.custom_fields,
-            "scheduled_at": scheduled_at.isoformat(),
-            "risk": risk,
-        }
-        ticket.tags = list(ticket.tags) + ["change", f"risk:{risk}"]
-        ticket.save(update_fields=["custom_fields", "tags", "updated_at"])
         return ticket

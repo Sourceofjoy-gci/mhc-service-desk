@@ -11,9 +11,9 @@ from importlib import import_module
 from typing import Never, Protocol, runtime_checkable
 
 from django.db.models import Q, QuerySet
-from rest_framework import serializers, status, viewsets
+from rest_framework import mixins, serializers, status, viewsets
 from rest_framework.decorators import action, api_view, permission_classes, throttle_classes
-from rest_framework.exceptions import PermissionDenied
+from rest_framework.exceptions import NotFound, PermissionDenied
 from rest_framework.permissions import AllowAny, IsAuthenticated
 from rest_framework.request import Request
 from rest_framework.response import Response
@@ -45,7 +45,7 @@ from .api import (
     WorkStateRequestSerializer,
 )
 from .models import Ticket
-from .permissions import eligible_assignee_queryset
+from .permissions import can_add_ticket_content, eligible_assignee_queryset
 
 logger = logging.getLogger(__name__)
 
@@ -106,8 +106,13 @@ class PublicIntakeThrottle(AnonRateThrottle):
     scope = "public_intake"
 
 
-class TicketViewSet(viewsets.ModelViewSet[Ticket]):
-    """CRUD + transition endpoints for tickets."""
+class TicketViewSet(
+    mixins.CreateModelMixin,
+    mixins.ListModelMixin,
+    mixins.RetrieveModelMixin,
+    viewsets.GenericViewSet[Ticket],
+):
+    """Explicit create/read and lifecycle-safe ticket actions."""
 
     queryset = Ticket.objects.select_related(
         "status", "requester", "service", "request_type", "office", "assignee"
@@ -235,13 +240,6 @@ class TicketViewSet(viewsets.ModelViewSet[Ticket]):
                 fields={"updated_at": [current]},
                 response_status=status.HTTP_409_CONFLICT,
             )
-        # If an IT child reaches resolved, sync parent from waiting_it -> in_progress
-        if ticket.domain == "it" and ticket.status.code == "resolved":
-            from .it_child import sync_child_status_to_parent
-            sync_child_status_to_parent(
-                child=ticket,
-                actor_subject=actor.keycloak_subject,
-            )
         return Response(
             TicketDetailSerializer(ticket, context=self.get_serializer_context()).data
         )
@@ -277,7 +275,10 @@ class TicketViewSet(viewsets.ModelViewSet[Ticket]):
                 actor=actor,
                 expected_updated_at=expected_updated_at,
                 changes=changes,
+                request=request,
             )
+        except services.TicketScopeError as exc:
+            raise NotFound from exc
         except services.TicketValidationError as exc:
             return _ticket_action_error(
                 request,
@@ -362,6 +363,11 @@ class TicketViewSet(viewsets.ModelViewSet[Ticket]):
         ser = MessageCreateSerializer(data=request.data)
         ser.is_valid(raise_exception=True)
         actor = _authenticated_user(request)
+        if not can_add_ticket_content(actor, ticket, request=request):
+            raise PermissionDenied(
+                detail="You cannot perform this ticket action.",
+                code="ticket_action_forbidden",
+            )
         msg = services.add_message(
             ticket=ticket,
             direction="outbound",
@@ -388,6 +394,11 @@ class TicketViewSet(viewsets.ModelViewSet[Ticket]):
         ser = NoteCreateSerializer(data=request.data)
         ser.is_valid(raise_exception=True)
         actor = _authenticated_user(request)
+        if not can_add_ticket_content(actor, ticket, request=request):
+            raise PermissionDenied(
+                detail="You cannot perform this ticket action.",
+                code="ticket_action_forbidden",
+            )
         note = services.add_internal_note(
             ticket=ticket,
             body=ser.validated_data["body"],

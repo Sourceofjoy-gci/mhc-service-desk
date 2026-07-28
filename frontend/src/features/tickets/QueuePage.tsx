@@ -19,6 +19,8 @@ import {
 import { useAuth } from "@/features/auth/AuthProvider";
 import PermissionPage from "@/features/auth/PermissionPage";
 import {
+  ApiError,
+  apiProblem,
   domainCapabilities,
   ticketsApi,
   type Domain,
@@ -132,12 +134,18 @@ export default function QueuePage() {
   const canonicalParams = new URLSearchParams(searchParams);
   let hasStateCanonicalization = false;
 
-  if (
-    requestedDomain !== null &&
-    (searchParams.getAll("domain").length !== 1 || requestedDomain !== domain)
-  ) {
-    if (domain) canonicalParams.set("domain", domain);
-    else canonicalParams.delete("domain");
+  if (domain) {
+    if (
+      searchParams.getAll("domain").length !== 1 ||
+      requestedDomain !== domain
+    ) {
+      canonicalParams.set("domain", domain);
+      if (requestedDomain !== null && requestedDomain !== domain) {
+        hasStateCanonicalization = true;
+      }
+    }
+  } else if (searchParams.has("domain")) {
+    canonicalParams.delete("domain");
     hasStateCanonicalization = true;
   }
   if (
@@ -207,12 +215,13 @@ export default function QueuePage() {
 
   const page = data ?? EMPTY_PAGE;
   const items = page.results;
-  const activeFilters = [requestedDomain, status, priority, search].filter(
-    Boolean,
-  ).length;
+  const activeFilters = [status, priority, search].filter(Boolean).length;
 
   const clearFilters = () => {
-    setSearchParams(new URLSearchParams({ sort }));
+    const next = new URLSearchParams();
+    if (domain) next.set("domain", domain);
+    next.set("sort", sort);
+    setSearchParams(next);
   };
 
   const paginate = (serverCursor: string | null) => {
@@ -273,10 +282,7 @@ export default function QueuePage() {
       />
 
       {error ? (
-        <ErrorState
-          onRetry={() => refetch()}
-          message="Could not load tickets. Make sure the backend is running and you have a valid dev token (VITE_DEV_AUTH=1)."
-        />
+        <ErrorState error={error} onRetry={() => refetch()} />
       ) : isLoading ? (
         <QueueSkeleton />
       ) : items.length === 0 ? (
@@ -574,17 +580,30 @@ function QueueSkeleton() {
 }
 
 function ErrorState({
-  message,
+  error,
   onRetry,
 }: {
-  message: string;
+  error: unknown;
   onRetry: () => void;
 }) {
+  const problem = apiProblem(error);
+  const denied = error instanceof ApiError && error.status === 403;
+
   return (
     <Alert variant="destructive">
       <AlertCircle data-icon="inline-start" aria-hidden />
-      <AlertTitle>Could not load tickets</AlertTitle>
-      <AlertDescription>{message}</AlertDescription>
+      <AlertTitle>
+        {denied ? "Queue access denied" : "Could not load tickets"}
+      </AlertTitle>
+      <AlertDescription>
+        <p>
+          {problem?.detail ??
+            (denied
+              ? "You do not have permission to open this queue."
+              : "The ticket queue is unavailable. Please try again.")}
+        </p>
+        {problem ? <p>Reference: {problem.correlation_id}</p> : null}
+      </AlertDescription>
       <AlertAction>
         <Button variant="outline" size="sm" onClick={onRetry} data-icon>
           <RefreshCw data-icon="inline-start" />

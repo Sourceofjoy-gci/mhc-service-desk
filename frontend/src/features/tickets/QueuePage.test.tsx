@@ -5,7 +5,7 @@ import { MemoryRouter, Route, Routes, useLocation } from "react-router-dom";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import type { AuthContextValue, AuthUser } from "@/features/auth/AuthProvider";
 import type { Page } from "@/lib/collections";
-import type { TicketSummary } from "@/lib/api";
+import { ApiError, type TicketSummary } from "@/lib/api";
 import QueuePage from "./QueuePage";
 
 const harness = vi.hoisted(() => ({
@@ -99,13 +99,16 @@ function renderQueue({
   route = "/tickets",
   groups = ["ops-agents"],
   page = PAGE,
+  error,
 }: {
   route?: string;
   groups?: string[];
   page?: Page<TicketSummary>;
+  error?: unknown;
 } = {}) {
   harness.auth = makeAuth(groups);
-  harness.list.mockResolvedValue(page);
+  if (error) harness.list.mockRejectedValue(error);
+  else harness.list.mockResolvedValue(page);
   const queryClient = new QueryClient({
     defaultOptions: { queries: { retry: false } },
   });
@@ -144,6 +147,21 @@ beforeEach(() => {
 });
 
 describe("queue URL state", () => {
+  it("canonicalizes a missing domain into the URL before one scoped request", async () => {
+    renderQueue({ route: "/tickets?sort=updated" });
+
+    await waitFor(() =>
+      expect(harness.list).toHaveBeenCalledWith({
+        domain: "operational",
+        sort: "updated",
+      }),
+    );
+    expect(harness.list).toHaveBeenCalledTimes(1);
+    expect(screen.getByTestId("location")).toHaveTextContent(
+      "?sort=updated&domain=operational",
+    );
+  });
+
   it("hydrates controls from the URL and sends every server filter with the opaque cursor", async () => {
     renderQueue({
       route:
@@ -154,7 +172,9 @@ describe("queue URL state", () => {
     expect(screen.getByLabelText("Filter by status")).toHaveTextContent(
       "Triage",
     );
-    expect(screen.getByLabelText("Filter by priority")).toHaveTextContent("P1");
+    expect(screen.getByLabelText("Filter by priority")).toHaveTextContent(
+      "P1",
+    );
     expect(screen.getByLabelText("Sort tickets")).toHaveTextContent(
       "Recently updated",
     );
@@ -194,16 +214,18 @@ describe("queue URL state", () => {
     expect(screen.getByTestId("location")).not.toHaveTextContent("cursor=");
   });
 
-  it("clears filters while preserving only the selected sort", async () => {
+  it("clears disposable filters while preserving the selected domain and sort", async () => {
     const user = userEvent.setup();
     renderQueue({
       route:
         "/tickets?domain=operational&status=triage&priority=P1&search=estate&sort=updated&cursor=abc",
     });
 
-    await user.click(screen.getByRole("button", { name: /clear \(4\)/i }));
+    await user.click(screen.getByRole("button", { name: /clear \(3\)/i }));
 
-    expect(screen.getByTestId("location")).toHaveTextContent("?sort=updated");
+    expect(screen.getByTestId("location")).toHaveTextContent(
+      "?domain=operational&sort=updated",
+    );
   });
 
   it("copies server cursors for next and previous navigation and retains returnTo on ticket links", async () => {
@@ -281,7 +303,9 @@ describe("queue URL state", () => {
       }),
     );
     expect(harness.list).toHaveBeenCalledTimes(1);
-    expect(screen.getByTestId("location")).toHaveTextContent(/^$/);
+    expect(screen.getByTestId("location")).toHaveTextContent(
+      "?domain=operational",
+    );
   });
 
   it("collapses duplicate filter values and clears their cursor before one request", async () => {
@@ -295,9 +319,7 @@ describe("queue URL state", () => {
     expect(screen.getByLabelText("Filter by status")).toHaveTextContent(
       "Triage",
     );
-    expect(screen.getByLabelText("Filter by priority")).toHaveTextContent(
-      "P1",
-    );
+    expect(screen.getByLabelText("Filter by priority")).toHaveTextContent("P1");
     expect(screen.getByLabelText("Sort tickets")).toHaveTextContent(
       "Recently updated",
     );
@@ -396,6 +418,42 @@ describe("queue URL state", () => {
     expect(
       screen.queryByRole("navigation", { name: "Queue pagination" }),
     ).not.toBeInTheDocument();
+  });
+});
+
+describe("queue load errors", () => {
+  it("distinguishes permission denial and shows its safe reference", async () => {
+    renderQueue({
+      error: new ApiError(403, {
+        code: "permission_denied",
+        detail: "This queue is outside your assigned scope.",
+        fields: {},
+        correlation_id: "corr-queue-403",
+      }),
+    });
+
+    const alert = await screen.findByRole("alert");
+    expect(alert).toHaveTextContent("Queue access denied");
+    expect(alert).toHaveTextContent(
+      "This queue is outside your assigned scope.",
+    );
+    expect(alert).toHaveTextContent("corr-queue-403");
+  });
+
+  it("shows safe server detail and reference for an unexpected failure", async () => {
+    renderQueue({
+      error: new ApiError(500, {
+        code: "server_error",
+        detail: "The queue is temporarily unavailable.",
+        fields: {},
+        correlation_id: "corr-queue-500",
+      }),
+    });
+
+    const alert = await screen.findByRole("alert");
+    expect(alert).toHaveTextContent("Could not load tickets");
+    expect(alert).toHaveTextContent("The queue is temporarily unavailable.");
+    expect(alert).toHaveTextContent("corr-queue-500");
   });
 });
 

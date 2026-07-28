@@ -42,6 +42,9 @@ export interface TicketCapabilities {
   self_assignee_id: string | null;
   can_reassign: boolean;
   can_change_confidentiality: boolean;
+  can_add_message: boolean;
+  can_add_note: boolean;
+  can_upload_attachment: boolean;
 }
 
 export interface AvailableTransition {

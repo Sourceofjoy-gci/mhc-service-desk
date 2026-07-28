@@ -25,6 +25,7 @@ import {
 interface TransitionActionsProps {
   ticket: TicketDetail;
   onUpdated: (ticket: TicketDetail) => void;
+  onActivityChanged?: () => void | Promise<void>;
 }
 
 type TransitionValues = Omit<TicketTransitionRequest, "updated_at">;
@@ -48,6 +49,7 @@ function firstMessages(fields: Record<string, string[]> | undefined) {
 export function TransitionActions({
   ticket,
   onUpdated,
+  onActivityChanged,
 }: TransitionActionsProps) {
   const [chosen, setChosen] = useState<AvailableTransition | null>(null);
   const [values, setValues] = useState<FormValues>(EMPTY_VALUES);
@@ -61,9 +63,10 @@ export function TransitionActions({
         ...submitted,
         updated_at: ticket.updated_at,
       }),
-    onSuccess: (refreshedTicket) => {
+    onSuccess: async (refreshedTicket) => {
       onUpdated(refreshedTicket);
       setChosen(null);
+      await onActivityChanged?.();
     },
   });
 
@@ -229,7 +232,7 @@ export function TransitionActions({
                       />
                       <FieldError
                         errors={fieldErrors.resolution_summary?.map((message) => ({
-                          message,
+                            message,
                         }))}
                       />
                     </Field>

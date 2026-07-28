@@ -407,7 +407,11 @@ export default function TicketDetailPage() {
         ) : null}
       </header>
 
-      <TransitionActions ticket={ticket} onUpdated={replaceTicket} />
+      <TransitionActions
+        ticket={ticket}
+        onUpdated={replaceTicket}
+        onActivityChanged={refreshActivity}
+      />
 
       <div
         data-testid="ticket-workspace-layout"
@@ -425,10 +429,15 @@ export default function TicketDetailPage() {
             </CardHeader>
             <CardContent>
               <ActivityTimeline ticketNumber={ticket.number} />
-              <MessageComposer
-                ticketNumber={ticket.number}
-                onCreated={refreshActivity}
-              />
+              {ticket.capabilities.can_add_message ||
+              ticket.capabilities.can_add_note ? (
+                <MessageComposer
+                  ticketNumber={ticket.number}
+                  onCreated={refreshActivity}
+                  canAddMessage={ticket.capabilities.can_add_message}
+                  canAddNote={ticket.capabilities.can_add_note}
+                />
+              ) : null}
             </CardContent>
           </Card>
         </main>
@@ -442,6 +451,7 @@ export default function TicketDetailPage() {
               ticket={ticket}
               onUpdated={replaceTicket}
               onReload={reloadTicket}
+              onActivityChanged={refreshActivity}
             />
           </div>
           <div className="border-b pb-5">
@@ -450,7 +460,10 @@ export default function TicketDetailPage() {
           <div className="border-b pb-5">
             <Relationships relationships={ticket.relationships} />
           </div>
-          <AttachmentUploader ticketNumber={ticket.number} />
+          <AttachmentUploader
+            ticketNumber={ticket.number}
+            canUpload={ticket.capabilities.can_upload_attachment}
+          />
           <RequesterCard ticket={ticket} />
           <ClassificationCard ticket={ticket} />
         </aside>

@@ -246,6 +246,9 @@ def test_assignees_are_filtered_by_ticket_domain(basic_world):
                 "can_self_assign": True,
                 "can_reassign": False,
                 "can_change_confidentiality": False,
+                "can_add_message": True,
+                "can_add_note": True,
+                "can_upload_attachment": True,
             },
         ),
         (
@@ -255,6 +258,9 @@ def test_assignees_are_filtered_by_ticket_domain(basic_world):
                 "can_self_assign": True,
                 "can_reassign": True,
                 "can_change_confidentiality": True,
+                "can_add_message": True,
+                "can_add_note": True,
+                "can_upload_attachment": True,
             },
         ),
         (
@@ -264,6 +270,9 @@ def test_assignees_are_filtered_by_ticket_domain(basic_world):
                 "can_self_assign": False,
                 "can_reassign": False,
                 "can_change_confidentiality": False,
+                "can_add_message": False,
+                "can_add_note": False,
+                "can_upload_attachment": False,
             },
         ),
     ],
@@ -318,6 +327,9 @@ def test_persisted_auditor_has_no_mutation_capabilities(basic_world):
         "self_assignee_id": None,
         "can_reassign": False,
         "can_change_confidentiality": False,
+        "can_add_message": False,
+        "can_add_note": False,
+        "can_upload_attachment": False,
     }
 
 
@@ -362,4 +374,7 @@ def test_inactive_elevated_user_has_no_mutating_capabilities(basic_world):
         "self_assignee_id": None,
         "can_reassign": False,
         "can_change_confidentiality": False,
+        "can_add_message": False,
+        "can_add_note": False,
+        "can_upload_attachment": False,
     }

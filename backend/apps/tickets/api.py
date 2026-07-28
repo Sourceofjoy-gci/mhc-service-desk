@@ -16,6 +16,7 @@ from apps.workflow.models import Status
 from .activity import scoped_ticket_relationships
 from .models import OutboxEvent, Ticket, TicketLink, TicketMessage, TicketNote, Watcher
 from .permissions import (
+    can_add_ticket_content,
     can_change_confidentiality,
     can_reassign,
     can_update_work_state,
@@ -208,9 +209,13 @@ class TicketDetailSerializer(TicketListSerializer):
                 "self_assignee_id": None,
                 "can_reassign": False,
                 "can_change_confidentiality": False,
+                "can_add_message": False,
+                "can_add_note": False,
+                "can_upload_attachment": False,
             }
 
         can_update = can_update_work_state(user, obj, request=request)
+        can_add_content = can_add_ticket_content(user, obj, request=request)
         can_self_assign = can_update and obj.assignee_id is None
         return {
             "can_update_work_state": can_update,
@@ -222,6 +227,9 @@ class TicketDetailSerializer(TicketListSerializer):
                 ticket=obj,
                 request=request,
             ),
+            "can_add_message": can_add_content,
+            "can_add_note": can_add_content,
+            "can_upload_attachment": can_add_content,
         }
 
     def get_available_transitions(self, obj: Ticket) -> list[dict[str, object]]:

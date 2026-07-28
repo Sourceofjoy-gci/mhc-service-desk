@@ -18,7 +18,11 @@ from rest_framework.request import Request
 from apps.catalogue.models import RequestType, Service
 from apps.contacts.models import Contact, VerificationToken
 from apps.identity_access.models import User
-from apps.identity_access.scope import AuthoritySnapshot
+from apps.identity_access.scope import (
+    AuthoritySnapshot,
+    get_authority_snapshot,
+    scope_ticket_queryset,
+)
 from apps.organisations.models import Office
 from apps.workflow.models import Status, Transition, TransitionHistory
 
@@ -95,6 +99,7 @@ def create_ticket(
     priority: str | None = None,
     initial_status_code: str = "new",
     custom_fields: dict[str, JSONValue] | None = None,
+    tags: list[str] | None = None,
     actor_subject: str = "system",
     ip_address: str | None = None,
 ) -> Ticket:
@@ -102,6 +107,8 @@ def create_ticket(
     return the saved aggregate."""
     status = Status.objects.get(domain=domain, code=initial_status_code)
     number = next_ticket_number(domain)
+    initial_custom_fields = custom_fields or {}
+    initial_tags: list[JSONValue] = list(tags or [])
     ticket = Ticket.objects.create(
         number=number,
         domain=domain,
@@ -116,7 +123,8 @@ def create_ticket(
         request_type=request_type,
         office=office,
         matter_reference=matter_reference,
-        custom_fields=custom_fields or {},
+        custom_fields=initial_custom_fields,
+        tags=initial_tags,
         acknowledged_at=timezone.now(),
     )
     TransitionHistory.objects.create(
@@ -126,17 +134,22 @@ def create_ticket(
         actor_subject=actor_subject,
         reason="Ticket created",
     )
+    created_after: dict[str, JSONValue] = {
+        "domain": domain,
+        "channel": channel,
+        "requester_id": str(requester.id),
+        "title": title,
+    }
+    if initial_tags:
+        created_after["tags"] = initial_tags
+    if initial_custom_fields:
+        created_after["custom_fields"] = initial_custom_fields
     record_ticket_event(
         ticket=ticket,
         actor_subject=actor_subject,
         action="ticket.created",
         before={},
-        after={
-            "domain": domain,
-            "channel": channel,
-            "requester_id": str(requester.id),
-            "title": title,
-        },
+        after=created_after,
         ip_address=ip_address,
     )
     logger.info("ticket_created", extra={"correlation_id": number})
@@ -164,6 +177,10 @@ class TicketConflictError(Exception):
 
 class TicketPermissionError(Exception):
     pass
+
+
+class TicketScopeError(Exception):
+    """Raised when the canonical locked ticket is no longer in actor scope."""
 
 
 class TicketValidationError(Exception):
@@ -233,16 +250,26 @@ def update_work_state(
     actor: User,
     expected_updated_at: datetime,
     changes: dict[str, WorkStateValue],
+    request: Request | None = None,
+    snapshot: AuthoritySnapshot | None = None,
 ) -> Ticket:
     """Atomically validate and apply optimistic work-state changes."""
-    locked = (
-        Ticket.objects.select_for_update(of=("self",))
-        .select_related("assignee")
-        .get(id=ticket_id)
-    )
+    authority = snapshot or get_authority_snapshot(actor, request=request)
+    try:
+        locked = (
+            scope_ticket_queryset(
+                actor,
+                Ticket.objects.select_for_update(of=("self",)),
+                snapshot=authority,
+            )
+            .select_related("assignee")
+            .get(id=ticket_id)
+        )
+    except Ticket.DoesNotExist as exc:
+        raise TicketScopeError from exc
     if expected_updated_at != locked.updated_at:
         raise TicketConflictError(locked.updated_at)
-    if not can_update_work_state(actor, locked):
+    if not can_update_work_state(actor, locked, request=request):
         raise TicketPermissionError
 
     _validate_work_state_changes(changes)
@@ -255,35 +282,41 @@ def update_work_state(
         if target_value is not None and not isinstance(target_value, UUID):
             raise TicketValidationError({"assignee": ["Select a valid assignee."]})
         target_id = target_value
-        if target_id is None:
-            if not can_reassign(actor, ticket=locked):
-                raise TicketPermissionError
-        else:
-            is_self_assignment = locked.assignee_id is None and target_id == actor.id
-            if is_self_assignment:
-                pass
-            elif not can_reassign(actor, ticket=locked):
-                raise TicketPermissionError
-            elif not eligible_assignee_queryset(locked).filter(id=target_id).exists():
-                raise TicketValidationError({"assignee": ["Select a valid assignee."]})
-        before["assignee"] = locked.assignee_id
-        locked.assignee_id = target_id
-        after["assignee"] = locked.assignee_id
-        update_fields.append("assignee")
+        if locked.assignee_id != target_id:
+            if target_id is None:
+                if not can_reassign(actor, ticket=locked, request=request):
+                    raise TicketPermissionError
+            else:
+                is_self_assignment = locked.assignee_id is None and target_id == actor.id
+                if is_self_assignment:
+                    pass
+                elif not can_reassign(actor, ticket=locked, request=request):
+                    raise TicketPermissionError
+                elif not eligible_assignee_queryset(locked).filter(id=target_id).exists():
+                    raise TicketValidationError({"assignee": ["Select a valid assignee."]})
+            before["assignee"] = locked.assignee_id
+            locked.assignee_id = target_id
+            after["assignee"] = locked.assignee_id
+            update_fields.append("assignee")
 
     for field in WORK_STATE_FIELDS - {"assignee"}:
         if field not in changes:
             continue
-        if field == "confidentiality" and not can_change_confidentiality(
-            actor,
-            ticket=locked,
-        ):
-            raise TicketPermissionError
-        before[field] = getattr(locked, field)
-        setattr(locked, field, changes[field])
-        after[field] = getattr(locked, field)
-        update_fields.append(field)
+        current = getattr(locked, field)
+        if current != changes[field]:
+            if field == "confidentiality" and not can_change_confidentiality(
+                actor,
+                ticket=locked,
+                request=request,
+            ):
+                raise TicketPermissionError
+            before[field] = current
+            setattr(locked, field, changes[field])
+            after[field] = getattr(locked, field)
+            update_fields.append(field)
 
+    if not update_fields:
+        return locked
     locked.save(update_fields=[*update_fields, "updated_at"])
     record_ticket_event(
         ticket=locked,
@@ -438,6 +471,13 @@ def transition_ticket(
         after=after,
         metadata={"reason": reason},
     )
+    if locked.domain == Ticket.Domain.IT and target.code in {"resolved", "closed"}:
+        from .it_child import sync_child_status_to_parent
+
+        sync_child_status_to_parent(
+            child=locked,
+            actor_subject=actor.keycloak_subject,
+        )
     return locked
 
 

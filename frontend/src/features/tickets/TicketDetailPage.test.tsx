@@ -105,6 +105,9 @@ const TICKET: TicketDetail = {
     self_assignee_id: null,
     can_reassign: false,
     can_change_confidentiality: false,
+    can_add_message: true,
+    can_add_note: true,
+    can_upload_attachment: true,
   },
   sla_clocks: {
     first_response: {
@@ -393,6 +396,84 @@ describe("ticket operator workspace", () => {
     await waitFor(() => expect(reply).toHaveValue(""));
     expect(harness.activity).toHaveBeenCalledTimes(2);
     expect(harness.get).toHaveBeenCalledTimes(1);
+  });
+
+  it("refreshes the exact activity stream after a successful transition", async () => {
+    harness.activity
+      .mockResolvedValueOnce({ results: [] })
+      .mockResolvedValueOnce({ results: [INITIAL_ACTIVITY] });
+    harness.transition.mockResolvedValue({
+      ...TICKET,
+      status_code: "in_progress",
+      status_name: "In Progress",
+      updated_at: "2026-07-27T09:20:00Z",
+    });
+    const user = userEvent.setup();
+    renderDetail();
+
+    await screen.findByText("No activity yet");
+    await user.click(screen.getByRole("button", { name: "Start work" }));
+    await user.click(
+      screen.getByRole("button", { name: "Confirm Start work" }),
+    );
+
+    await waitFor(() => expect(harness.activity).toHaveBeenCalledTimes(2));
+    expect(harness.get).toHaveBeenCalledTimes(1);
+  });
+
+  it("refreshes the exact activity stream after a successful work-state update", async () => {
+    harness.activity
+      .mockResolvedValueOnce({ results: [] })
+      .mockResolvedValueOnce({ results: [INITIAL_ACTIVITY] });
+    harness.updateWorkState.mockResolvedValue({
+      ...TICKET,
+      team: "Litigation",
+      updated_at: "2026-07-27T09:21:00Z",
+    });
+    const user = userEvent.setup();
+    renderDetail();
+
+    await screen.findByText("No activity yet");
+    const team = screen.getByRole("textbox", { name: "Team" });
+    await user.clear(team);
+    await user.type(team, "Litigation");
+    await user.click(screen.getByRole("button", { name: "Save" }));
+
+    await waitFor(() => expect(harness.activity).toHaveBeenCalledTimes(2));
+    expect(harness.get).toHaveBeenCalledTimes(1);
+  });
+
+  it("hides all mutation controls when server capabilities make the ticket read-only", async () => {
+    harness.get.mockResolvedValue({
+      ...TICKET,
+      capabilities: {
+        ...TICKET.capabilities,
+        can_update_work_state: false,
+        can_self_assign: false,
+        can_reassign: false,
+        can_change_confidentiality: false,
+        can_add_message: false,
+        can_add_note: false,
+        can_upload_attachment: false,
+      },
+    });
+    renderDetail();
+
+    await screen.findByRole("heading", { name: TICKET.title });
+    expect(
+      screen.queryByRole("heading", { name: "Add to activity" }),
+    ).not.toBeInTheDocument();
+    expect(
+      screen.queryByRole("textbox", { name: "Reply message" }),
+    ).not.toBeInTheDocument();
+    expect(
+      screen.queryByRole("textbox", { name: "Internal note" }),
+    ).not.toBeInTheDocument();
+    expect(screen.queryByLabelText("Choose files")).not.toBeInTheDocument();
+    expect(
+      screen.queryByRole("button", { name: "Upload" }),
+    ).not.toBeInTheDocument();
+    expect(screen.getByRole("heading", { name: "Attachments" })).toBeVisible();
   });
 
   it("encodes relationship ticket numbers so links cannot escape the ticket route", async () => {

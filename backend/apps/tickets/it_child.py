@@ -10,6 +10,7 @@ from __future__ import annotations
 
 import logging
 
+from django.core.exceptions import ImproperlyConfigured
 from django.db import transaction
 
 from apps.catalogue.models import RequestType, Service
@@ -71,8 +72,19 @@ def create_it_child_ticket(
       4. IT cannot read the parent's message body or attachments
       5. The link is auditable
     """
+    parent = (
+        Ticket.objects.select_for_update(of=("self",))
+        .select_related("status", "office")
+        .get(id=parent.id)
+    )
     if parent.domain != "operational":
         raise ValueError("IT child can only be created from an operational parent")
+    if parent.status.is_terminal or parent.status.code in {
+        "resolved",
+        "cancelled",
+        "rejected",
+    }:
+        raise ValueError("IT child cannot be created from a terminal parent")
     if not summary.strip():
         raise ValueError("A sanitised summary is required for the IT child")
 
@@ -173,18 +185,30 @@ def sync_child_status_to_parent(*, child: Ticket, actor_subject: str = "") -> No
       * child resolved/closed -> parent moves from waiting_it to in_progress
         (operational agent verifies the outcome before closing the parent)
     """
-    if child.domain != "it":
+    child = (
+        Ticket.objects.select_for_update(of=("self",))
+        .select_related("status")
+        .get(id=child.id)
+    )
+    if child.domain != "it" or child.status.code not in {"resolved", "closed"}:
         return
-    link = TicketLink.objects.filter(from_ticket=child, kind="it_child").first()
-    if not link:
+    parent_id = TicketLink.objects.filter(
+        from_ticket=child,
+        kind="it_child",
+    ).values_list("to_ticket_id", flat=True).first()
+    if parent_id is None:
         return
-    parent = link.to_ticket
+    parent = (
+        Ticket.objects.select_for_update(of=("self",))
+        .select_related("status")
+        .get(id=parent_id)
+    )
     if parent.status.code not in ("waiting_it",):
         return  # parent isn't waiting on IT; nothing to sync
     target_code = "in_progress"
     target = Status.objects.filter(domain="operational", code=target_code).first()
     if not target:
-        return
+        raise ImproperlyConfigured("Missing operational in_progress status.")
     previous = parent.status
     previous_waiting_reason = parent.waiting_reason
     parent.status = target

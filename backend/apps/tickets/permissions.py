@@ -73,6 +73,16 @@ def can_update_work_state(
     return bool(groups & allowed)
 
 
+def can_add_ticket_content(
+    user: User,
+    ticket: Ticket,
+    *,
+    request: object | None = None,
+) -> bool:
+    """Return whether the actor may add mutable content to this ticket."""
+    return can_update_work_state(user, ticket, request=request)
+
+
 def _persisted_group_query(group_names: set[str]) -> Q:
     query = Q()
     for group_name in group_names:

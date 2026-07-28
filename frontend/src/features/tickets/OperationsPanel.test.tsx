@@ -75,6 +75,9 @@ const TICKET: TicketDetail = {
     self_assignee_id: null,
     can_reassign: false,
     can_change_confidentiality: false,
+    can_add_message: true,
+    can_add_note: true,
+    can_upload_attachment: true,
   },
   sla_clocks: {
     first_response: {
@@ -262,6 +265,9 @@ describe("server-driven ticket operations", () => {
         self_assignee_id: null,
         can_reassign: false,
         can_change_confidentiality: false,
+        can_add_message: false,
+        can_add_note: false,
+        can_upload_attachment: false,
       },
     };
     renderPanel(auditor);

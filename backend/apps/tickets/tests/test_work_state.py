@@ -20,12 +20,14 @@ pytestmark = pytest.mark.django_db
 
 
 def _user(groups: list[str], *, active: bool = True) -> User:
-    return User.objects.create(
+    user = User.objects.create(
         username=f"agent-{uuid4().hex}",
         keycloak_subject=f"subject-{uuid4().hex}",
         keycloak_groups=groups,
         is_active=active,
     )
+    user._groups = groups
+    return user
 
 
 def _ticket(basic_world, *, domain: str = "operational", assignee=None) -> Ticket:
