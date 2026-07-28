@@ -7,8 +7,11 @@ raw payloads, or full logs.
 
 ## Environment and command equivalence
 
-- Backend evidence used the running `backend` service with the current
-  `./backend:/app` bind.
+- The earlier baseline, final runtime-health check, and live-smoke evidence
+  used the running `backend` service with the current `./backend:/app` bind.
+- Accepted remediation evidence for the full backend suite and static checks
+  used a freshly built current-source image. The independent full-suite review
+  used an isolated one-off database.
 - The unrelated Cognee workload continued to own host port 8000. The MHC
   backend used the repository-supported `BACKEND_PORT=8001` mapping; in-
   container commands continued to use port 8000.
