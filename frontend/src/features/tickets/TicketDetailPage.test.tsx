@@ -419,6 +419,10 @@ describe("ticket detail route states", () => {
       returnTo: "/tickets/queue/../path?sort=updated#focused-ticket",
       expected: "/tickets/path?sort=updated#focused-ticket",
     },
+    {
+      returnTo: "/tickets/100%25-complete?x=1#h",
+      expected: "/tickets/100%25-complete?x=1#h",
+    },
   ])(
     "normalizes an admitted queue route while preserving search and hash",
     async ({ returnTo, expected }) => {
@@ -445,6 +449,11 @@ describe("ticket detail route states", () => {
     "/tickets/%252e%252e/dashboard",
     "/tickets/%2e%2e%2fadmin",
     "/tickets/%2e%2e%5cadmin",
+    "/tickets/%00admin",
+    "/tickets/%0d%0aadmin",
+    "/tickets/%2500admin",
+    "/tickets/%257fadmin",
+    "/tickets/100%-complete",
     "/tickets/%ZZ",
   ])("rejects unsafe or unrelated return location %s", async (returnTo) => {
     renderDetail({ state: { returnTo } });

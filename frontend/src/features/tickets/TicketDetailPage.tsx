@@ -32,6 +32,8 @@ import { SlaClocks } from "./SlaClocks";
 import { TransitionActions } from "./TransitionActions";
 
 const RETURN_URL_BASE = new URL("https://ticket-app.invalid/");
+const CONTROL_CHARACTERS = /[\u0000-\u001f\u007f]/u;
+const PERCENT_ESCAPE = /%[0-9a-f]{2}/iu;
 
 function isTicketPath(pathname: string): boolean {
   return pathname === "/tickets" || pathname.startsWith("/tickets/");
@@ -39,14 +41,21 @@ function isTicketPath(pathname: string): boolean {
 
 function decodedPathStaysInTickets(pathname: string): boolean {
   let candidate = pathname;
+  let decodedAtLeastOnce = false;
 
   for (let index = 0; index < 8; index += 1) {
     let decoded: string;
     try {
       decoded = decodeURIComponent(candidate);
     } catch {
-      return false;
+      return (
+        decodedAtLeastOnce &&
+        candidate.includes("%") &&
+        !PERCENT_ESCAPE.test(candidate)
+      );
     }
+
+    if (CONTROL_CHARACTERS.test(decoded)) return false;
 
     let normalized: URL;
     try {
@@ -62,6 +71,7 @@ function decodedPathStaysInTickets(pathname: string): boolean {
       return false;
     }
     if (decoded === candidate) return true;
+    decodedAtLeastOnce = true;
     candidate = decoded;
   }
 
@@ -80,7 +90,8 @@ function admittedReturnTo(value: unknown): string {
   }
 
   try {
-    decodeURI(value);
+    const decodedValue = decodeURI(value);
+    if (CONTROL_CHARACTERS.test(decodedValue)) return "/tickets";
     const normalized = new URL(value, RETURN_URL_BASE);
     if (
       normalized.origin !== RETURN_URL_BASE.origin ||
