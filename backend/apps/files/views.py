@@ -4,8 +4,10 @@ from __future__ import annotations
 import logging
 import uuid
 from collections.abc import Mapping, Sequence
+from dataclasses import dataclass
 from uuid import UUID
 
+from django.db import transaction
 from django.shortcuts import get_object_or_404
 from rest_framework import status
 from rest_framework.decorators import api_view, permission_classes
@@ -21,11 +23,15 @@ from apps.tickets.models import Ticket
 
 from .models import Attachment
 from .policy import (
+    MAX_ATTACHMENT_BATCH_SIZE_BYTES,
+    MAX_ATTACHMENT_COUNT,
     AttachmentValidationError,
     read_attachment_bounded,
+    validate_attachment_content,
     validate_attachment_metadata,
 )
 from .services import (
+    StoredObject,
     delete_from_minio,
     generate_signed_url,
     log_attachment_access,
@@ -35,6 +41,25 @@ from .services import (
 )
 
 logger = logging.getLogger(__name__)
+
+
+@dataclass(frozen=True)
+class _PreparedAttachment:
+    filename: str
+    content_type: str
+    data: bytes
+    checksum_sha256: str
+    scan_status: str
+    scan_signature: str
+    object_key: str
+
+
+def _cleanup_stored_objects(stored_objects: Sequence[StoredObject]) -> None:
+    for stored_object in reversed(stored_objects):
+        try:
+            delete_from_minio(stored_object=stored_object)
+        except Exception:
+            logger.exception("attachment_cleanup_failed")
 
 
 def _authenticated_user(request: Request) -> User:
@@ -113,8 +138,17 @@ def upload(request: Request, ticket_number: str) -> Response:
             fields={"files": ["Provide at least one file."]},
             response_status=status.HTTP_400_BAD_REQUEST,
         )
+    if len(files) > MAX_ATTACHMENT_COUNT:
+        return _attachment_error(
+            request,
+            code="invalid_attachment",
+            detail="Attachment upload is invalid.",
+            fields={"files": ["Upload at most 10 files at a time."]},
+            response_status=status.HTTP_400_BAD_REQUEST,
+        )
 
     validated_files = []
+    declared_batch_size = 0
     for uploaded_file in files:
         try:
             filename, content_type = validate_attachment_metadata(
@@ -130,10 +164,20 @@ def upload(request: Request, ticket_number: str) -> Response:
                 fields={"files": [str(exc)]},
                 response_status=status.HTTP_400_BAD_REQUEST,
             )
+        declared_batch_size += uploaded_file.size
+        if declared_batch_size > MAX_ATTACHMENT_BATCH_SIZE_BYTES:
+            return _attachment_error(
+                request,
+                code="invalid_attachment",
+                detail="Attachment upload is invalid.",
+                fields={"files": ["Combined files must be 20 MiB or smaller."]},
+                response_status=status.HTTP_400_BAD_REQUEST,
+            )
         validated_files.append((uploaded_file, filename, content_type))
 
     actor = _authenticated_user(request).keycloak_subject
-    created: list[dict[str, object]] = []
+    validated_content: list[tuple[str, str, bytes]] = []
+    actual_batch_size = 0
     for uploaded_file, filename, content_type in validated_files:
         try:
             data = read_attachment_bounded(uploaded_file)
@@ -145,55 +189,100 @@ def upload(request: Request, ticket_number: str) -> Response:
                 fields={"files": [str(exc)]},
                 response_status=status.HTTP_400_BAD_REQUEST,
             )
-        checksum = __import__("hashlib").sha256(data).hexdigest()
+        actual_batch_size += len(data)
+        if actual_batch_size > MAX_ATTACHMENT_BATCH_SIZE_BYTES:
+            return _attachment_error(
+                request,
+                code="invalid_attachment",
+                detail="Attachment upload is invalid.",
+                fields={"files": ["Combined files must be 20 MiB or smaller."]},
+                response_status=status.HTTP_400_BAD_REQUEST,
+            )
+        try:
+            validate_attachment_content(data=data, content_type=content_type)
+        except AttachmentValidationError as exc:
+            return _attachment_error(
+                request,
+                code="invalid_attachment",
+                detail="Attachment upload is invalid.",
+                fields={"files": [str(exc)]},
+                response_status=status.HTTP_400_BAD_REQUEST,
+            )
+        validated_content.append((filename, content_type, data))
+
+    prepared: list[_PreparedAttachment] = []
+    for filename, content_type, data in validated_content:
         scan_status, signature = scan_with_clamav(data)
         if scan_status == "infected":
-            object_key = f"quarantine/{ticket.number}/{uuid.uuid4().hex}-{filename}"
+            object_key = f"quarantine/{ticket.number}/{uuid.uuid4().hex}"
         else:
-            object_key = f"attachments/{ticket.number}/{uuid.uuid4().hex}-{filename}"
-        try:
-            upload_to_minio(
-                key=object_key,
-                data=data,
-                content_type=content_type,
-            )
-        except Exception:  # pragma: no cover
-            logger.exception("minio_upload_failed")
-            return _attachment_error(
-                request,
-                code="attachment_upload_failed",
-                detail="Attachment upload failed.",
-                fields={},
-                response_status=status.HTTP_502_BAD_GATEWAY,
-            )
-        try:
-            att = record_attachment(
-                ticket=ticket,
-                message=None,
-                object_key=object_key,
+            object_key = f"attachments/{ticket.number}/{uuid.uuid4().hex}"
+        prepared.append(
+            _PreparedAttachment(
                 filename=filename,
                 content_type=content_type,
-                size_bytes=len(data),
-                checksum_sha256=checksum,
+                data=data,
+                checksum_sha256=__import__("hashlib").sha256(data).hexdigest(),
                 scan_status=scan_status,
                 scan_signature=signature or "",
-                actor_subject=actor,
+                object_key=object_key,
             )
-        except Exception:
-            logger.exception("attachment_persistence_failed")
-            try:
-                delete_from_minio(key=object_key)
-            except Exception:
-                logger.exception("attachment_cleanup_failed")
-            return _attachment_error(
-                request,
-                code="attachment_persistence_failed",
-                detail="Attachment metadata could not be saved.",
-                fields={},
-                response_status=status.HTTP_500_INTERNAL_SERVER_ERROR,
+        )
+
+    stored_objects: list[StoredObject] = []
+    try:
+        for item in prepared:
+            stored_objects.append(
+                upload_to_minio(
+                    key=item.object_key,
+                    data=item.data,
+                    content_type=item.content_type,
+                )
             )
-        metadata = attachment_metadata(att)
-        metadata["scan_signature"] = att.scan_signature
+    except Exception:
+        logger.exception("minio_upload_failed")
+        _cleanup_stored_objects(stored_objects)
+        return _attachment_error(
+            request,
+            code="attachment_upload_failed",
+            detail="Attachment upload failed.",
+            fields={},
+            response_status=status.HTTP_502_BAD_GATEWAY,
+        )
+
+    attachments: list[Attachment] = []
+    try:
+        with transaction.atomic():
+            for item in prepared:
+                attachments.append(
+                    record_attachment(
+                        ticket=ticket,
+                        message=None,
+                        object_key=item.object_key,
+                        filename=item.filename,
+                        content_type=item.content_type,
+                        size_bytes=len(item.data),
+                        checksum_sha256=item.checksum_sha256,
+                        scan_status=item.scan_status,
+                        scan_signature=item.scan_signature,
+                        actor_subject=actor,
+                    )
+                )
+    except Exception:
+        logger.exception("attachment_persistence_failed")
+        _cleanup_stored_objects(stored_objects)
+        return _attachment_error(
+            request,
+            code="attachment_persistence_failed",
+            detail="Attachment metadata could not be saved.",
+            fields={},
+            response_status=status.HTTP_500_INTERNAL_SERVER_ERROR,
+        )
+
+    created: list[dict[str, object]] = []
+    for attachment in attachments:
+        metadata = attachment_metadata(attachment)
+        metadata["scan_signature"] = attachment.scan_signature
         created.append(metadata)
     return Response({"results": created}, status=status.HTTP_201_CREATED)
 

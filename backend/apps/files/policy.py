@@ -9,30 +9,24 @@ without coupling validation to Django's request parser.
 from __future__ import annotations
 
 from collections.abc import Iterator
-from pathlib import Path
 from typing import Protocol
+from unicodedata import category
 
 MAX_ATTACHMENT_SIZE_BYTES = 20 * 1024 * 1024
+MAX_ATTACHMENT_BATCH_SIZE_BYTES = 20 * 1024 * 1024
+MAX_ATTACHMENT_COUNT = 10
 UPLOAD_READ_CHUNK_SIZE = 64 * 1024
 
 ALLOWED_ATTACHMENT_TYPES: dict[str, frozenset[str]] = {
-    "application/msword": frozenset({".doc"}),
     "application/pdf": frozenset({".pdf"}),
-    "application/vnd.ms-excel": frozenset({".xls"}),
-    "application/vnd.ms-powerpoint": frozenset({".ppt"}),
-    "application/vnd.openxmlformats-officedocument.presentationml.presentation": (
-        frozenset({".pptx"})
-    ),
-    "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet": (
-        frozenset({".xlsx"})
-    ),
-    "application/vnd.openxmlformats-officedocument.wordprocessingml.document": (
-        frozenset({".docx"})
-    ),
     "image/jpeg": frozenset({".jpeg", ".jpg"}),
     "image/png": frozenset({".png"}),
-    "text/csv": frozenset({".csv"}),
-    "text/plain": frozenset({".txt"}),
+}
+
+ATTACHMENT_SIGNATURES: dict[str, tuple[bytes, ...]] = {
+    "application/pdf": (b"%PDF-",),
+    "image/jpeg": (b"\xff\xd8\xff",),
+    "image/png": (b"\x89PNG\r\n\x1a\n",),
 }
 
 
@@ -53,15 +47,34 @@ def validate_attachment_metadata(
     declared_size: int,
 ) -> tuple[str, str]:
     """Validate metadata and return a safe basename plus normalized media type."""
-    safe_filename = Path(filename).name
+    normalized_path = filename.replace("\\", "/")
+    safe_filename = normalized_path.rsplit("/", 1)[-1]
+    if (
+        not safe_filename
+        or safe_filename.startswith(".")
+        or len(safe_filename) > 255
+        or any(category(character) == "Cc" for character in safe_filename)
+    ):
+        raise AttachmentValidationError("File name is not allowed.")
     normalized_type = (content_type or "").partition(";")[0].strip().lower()
     allowed_extensions = ALLOWED_ATTACHMENT_TYPES.get(normalized_type)
-    extension = Path(safe_filename).suffix.lower()
+    extension = f".{safe_filename.rpartition('.')[2].lower()}"
     if not allowed_extensions or extension not in allowed_extensions:
         raise AttachmentValidationError("File type and extension are not allowed.")
     if declared_size > MAX_ATTACHMENT_SIZE_BYTES:
         raise AttachmentValidationError("Each file must be 20 MiB or smaller.")
     return safe_filename, normalized_type
+
+
+def validate_attachment_content(*, data: bytes, content_type: str) -> None:
+    """Verify bytes against the small set of signatures this service can identify."""
+    if not data:
+        raise AttachmentValidationError("File is empty.")
+    signatures = ATTACHMENT_SIGNATURES.get(content_type)
+    if not signatures or not data.startswith(signatures):
+        raise AttachmentValidationError(
+            "File contents do not match the declared type."
+        )
 
 
 def read_attachment_bounded(upload: ChunkedUpload) -> bytes:

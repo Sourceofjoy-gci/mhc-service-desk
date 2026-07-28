@@ -2,8 +2,9 @@
 from __future__ import annotations
 
 import pytest
+from botocore.exceptions import ClientError
 
-from apps.files import policy
+from apps.files import policy, services
 from apps.files.services import scan_with_clamav
 
 
@@ -66,3 +67,73 @@ def test_upload_reader_rejects_the_chunk_that_crosses_the_size_cap(
         match="Each file must be 20 MiB or smaller",
     ):
         policy.read_attachment_bounded(_ChunkOnlyUpload())
+
+
+class _ConditionalObjectStore:
+    def __init__(self) -> None:
+        self.objects: dict[str, tuple[bytes, str]] = {}
+
+    def put_object(self, **kwargs: object) -> dict[str, str]:
+        key = str(kwargs["Key"])
+        if kwargs.get("IfNoneMatch") == "*" and key in self.objects:
+            raise ClientError(
+                {"Error": {"Code": "PreconditionFailed", "Message": "exists"}},
+                "PutObject",
+            )
+        body = kwargs["Body"]
+        assert isinstance(body, bytes)
+        etag = '"created-etag"'
+        self.objects[key] = (body, etag)
+        return {"ETag": etag}
+
+    def delete_object(self, **kwargs: object) -> dict[str, str]:
+        key = str(kwargs["Key"])
+        current = self.objects.get(key)
+        if current is None or kwargs.get("IfMatch") != current[1]:
+            raise ClientError(
+                {"Error": {"Code": "PreconditionFailed", "Message": "changed"}},
+                "DeleteObject",
+            )
+        del self.objects[key]
+        return {}
+
+
+def test_conditional_upload_does_not_overwrite_an_existing_object(monkeypatch) -> None:
+    """Catch a collision turning an upload into an overwrite."""
+    store = _ConditionalObjectStore()
+    store.objects["attachments/collision"] = (b"existing", '"existing-etag"')
+    monkeypatch.setattr(services, "_s3_client", lambda: store)
+
+    with pytest.raises(ClientError):
+        services.upload_to_minio(
+            key="attachments/collision",
+            data=b"new",
+            content_type="application/pdf",
+        )
+
+    assert store.objects["attachments/collision"] == (
+        b"existing",
+        '"existing-etag"',
+    )
+
+
+def test_compensation_does_not_delete_an_object_replaced_after_upload(
+    monkeypatch,
+) -> None:
+    """Catch cleanup deleting bytes no longer owned by this request."""
+    store = _ConditionalObjectStore()
+    monkeypatch.setattr(services, "_s3_client", lambda: store)
+    created = services.upload_to_minio(
+        key="attachments/request-object",
+        data=b"request",
+        content_type="application/pdf",
+    )
+    store.objects["attachments/request-object"] = (b"replacement", '"new-etag"')
+
+    with pytest.raises(ClientError):
+        services.delete_from_minio(stored_object=created)
+
+    assert store.objects["attachments/request-object"] == (
+        b"replacement",
+        '"new-etag"',
+    )

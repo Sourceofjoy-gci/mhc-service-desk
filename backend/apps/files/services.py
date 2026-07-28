@@ -5,8 +5,9 @@ import hashlib
 import io
 import logging
 import socket
+from dataclasses import dataclass
 from datetime import timedelta
-from typing import Protocol, TypedDict, Unpack
+from typing import NotRequired, Protocol, TypedDict, Unpack
 from urllib.parse import urlparse
 
 import boto3
@@ -31,11 +32,19 @@ class _PutObjectArguments(TypedDict):
     Key: str
     Body: bytes
     ContentType: str
+    IfNoneMatch: str
+
+
+class _PutObjectResult(TypedDict, total=False):
+    ETag: str
+    VersionId: str
 
 
 class _DeleteObjectArguments(TypedDict):
     Bucket: str
     Key: str
+    IfMatch: str
+    VersionId: NotRequired[str]
 
 
 class _PresignArguments(TypedDict):
@@ -44,7 +53,7 @@ class _PresignArguments(TypedDict):
 
 
 class _S3Client(Protocol):
-    def put_object(self, **kwargs: Unpack[_PutObjectArguments]) -> object: ...
+    def put_object(self, **kwargs: Unpack[_PutObjectArguments]) -> _PutObjectResult: ...
 
     def delete_object(self, **kwargs: Unpack[_DeleteObjectArguments]) -> object: ...
 
@@ -54,6 +63,16 @@ class _S3Client(Protocol):
         /,
         **kwargs: Unpack[_PresignArguments],
     ) -> str: ...
+
+
+@dataclass(frozen=True)
+class StoredObject:
+    """Ownership proof returned by a successful conditional object creation."""
+
+    bucket: str
+    key: str
+    etag: str
+    version_id: str | None = None
 
 
 def _s3_client() -> _S3Client:
@@ -112,17 +131,38 @@ def upload_to_minio(
     data: bytes,
     content_type: str = "application/octet-stream",
     bucket: str | None = None,
-) -> None:
+) -> StoredObject:
     bucket = bucket or settings.AWS_STORAGE_BUCKET_NAME
     client = _s3_client()
-    client.put_object(Bucket=bucket, Key=key, Body=data, ContentType=content_type)
+    result = client.put_object(
+        Bucket=bucket,
+        Key=key,
+        Body=data,
+        ContentType=content_type,
+        IfNoneMatch="*",
+    )
+    etag = result.get("ETag")
+    if not etag:
+        raise RuntimeError("Object storage did not return an ownership ETag.")
+    return StoredObject(
+        bucket=bucket,
+        key=key,
+        etag=etag,
+        version_id=result.get("VersionId"),
+    )
 
 
-def delete_from_minio(*, key: str, bucket: str | None = None) -> None:
-    """Delete a stored object when its database metadata cannot be committed."""
-    bucket = bucket or settings.AWS_STORAGE_BUCKET_NAME
+def delete_from_minio(*, stored_object: StoredObject) -> None:
+    """Conditionally delete only the exact object created by this request."""
     client = _s3_client()
-    client.delete_object(Bucket=bucket, Key=key)
+    arguments = _DeleteObjectArguments(
+        Bucket=stored_object.bucket,
+        Key=stored_object.key,
+        IfMatch=stored_object.etag,
+    )
+    if stored_object.version_id:
+        arguments["VersionId"] = stored_object.version_id
+    client.delete_object(**arguments)
 
 
 def generate_signed_url(*, key: str, expires: int = 60) -> str:

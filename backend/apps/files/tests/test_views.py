@@ -8,9 +8,11 @@ from django.core.files.uploadedfile import SimpleUploadedFile
 from django.urls import reverse
 from rest_framework.test import APIClient
 
+from apps.audit.models import AuditEvent
+from apps.files import services as file_services
 from apps.files.models import Attachment, AttachmentAccessLog
 from apps.identity_access.models import User
-from apps.tickets.models import Ticket
+from apps.tickets.models import OutboxEvent, Ticket
 from apps.workflow.models import Status
 
 pytestmark = pytest.mark.django_db
@@ -64,6 +66,14 @@ def _client(user):
     return client
 
 
+def _pdf(filename: str, marker: bytes = b"") -> SimpleUploadedFile:
+    return SimpleUploadedFile(
+        filename,
+        b"%PDF-1.7\n" + marker,
+        content_type="application/pdf",
+    )
+
+
 def test_attachment_get_returns_complete_metadata_and_clean_availability(basic_world):
     ticket = _ticket(basic_world)
     clean = _attachment(ticket, scan_status="clean")
@@ -87,7 +97,7 @@ def test_attachment_get_returns_complete_metadata_and_clean_availability(basic_w
     assert by_id[str(pending.id)]["download_available"] is False
 
 
-def test_attachment_post_returns_common_metadata_and_preserves_legacy_signature(
+def test_attachment_post_returns_common_metadata_and_scan_signature(
     basic_world,
     monkeypatch,
 ):
@@ -96,16 +106,16 @@ def test_attachment_post_returns_common_metadata_and_preserves_legacy_signature(
         "apps.files.views.scan_with_clamav",
         lambda _data: ("clean", "verified-signature"),
     )
-    monkeypatch.setattr("apps.files.views.upload_to_minio", lambda **_kwargs: None)
+    monkeypatch.setattr("apps.files.views.upload_to_minio", lambda **_kwargs: object())
 
     response = _client(_user(["ops-agents"])).post(
         reverse("ticket-attachments", args=[ticket.number]),
         {
             "files": [
                 SimpleUploadedFile(
-                    "proof.txt",
-                    b"proof",
-                    content_type="text/plain",
+                    "proof.pdf",
+                    b"%PDF-1.7\nproof",
+                    content_type="application/pdf",
                 )
             ]
         },
@@ -114,13 +124,13 @@ def test_attachment_post_returns_common_metadata_and_preserves_legacy_signature(
 
     assert response.status_code == 201
     metadata = response.data["results"][0]
-    assert metadata["filename"] == "proof.txt"
-    assert metadata["content_type"] == "text/plain"
-    assert metadata["size_bytes"] == 5
+    assert metadata["filename"] == "proof.pdf"
+    assert metadata["content_type"] == "application/pdf"
+    assert metadata["size_bytes"] == 14
     assert metadata["scan_status"] == "clean"
     assert metadata["download_available"] is True
     assert metadata["scan_signature"] == "verified-signature"
-    assert Attachment.objects.filter(ticket=ticket, filename="proof.txt").exists()
+    assert Attachment.objects.filter(ticket=ticket, filename="proof.pdf").exists()
 
 
 def test_attachment_post_validation_uses_common_error_contract(basic_world):
@@ -217,26 +227,260 @@ def test_attachment_post_rejects_a_file_over_twenty_mebibytes_before_storage(
     assert not Attachment.objects.filter(ticket=ticket).exists()
 
 
-def test_attachment_post_deletes_stored_object_when_event_persistence_rolls_back(
+@pytest.mark.parametrize("content", [b"", b"MZ\x90\x00forged-pdf"])
+def test_attachment_post_rejects_empty_and_signature_mismatched_content_before_scan(
+    basic_world,
+    monkeypatch,
+    content,
+):
+    ticket = _ticket(basic_world)
+    monkeypatch.setattr(
+        "apps.files.views.scan_with_clamav",
+        lambda _data: pytest.fail("invalid attachment was scanned"),
+    )
+    monkeypatch.setattr(
+        "apps.files.views.upload_to_minio",
+        lambda **_kwargs: pytest.fail("invalid attachment reached storage"),
+    )
+
+    response = _client(_user(["ops-agents"])).post(
+        reverse("ticket-attachments", args=[ticket.number]),
+        {"files": [SimpleUploadedFile("evidence.pdf", content, "application/pdf")]},
+        format="multipart",
+    )
+
+    assert response.status_code == 400
+    assert response.data["code"] == "invalid_attachment"
+    assert not Attachment.objects.filter(ticket=ticket).exists()
+
+
+def test_attachment_post_rejects_unbounded_file_count_before_scan(
     basic_world,
     monkeypatch,
 ):
-    """Catch a storage orphan when the transactional DB/event write fails."""
     ticket = _ticket(basic_world)
-    stored: list[str] = []
-    deleted: list[str] = []
+    monkeypatch.setattr(
+        "apps.files.views.scan_with_clamav",
+        lambda _data: pytest.fail("oversized batch was scanned"),
+    )
+    monkeypatch.setattr(
+        "apps.files.views.upload_to_minio",
+        lambda **_kwargs: pytest.fail("oversized batch reached storage"),
+    )
+
+    response = _client(_user(["ops-agents"])).post(
+        reverse("ticket-attachments", args=[ticket.number]),
+        {"files": [_pdf(f"evidence-{index}.pdf") for index in range(11)]},
+        format="multipart",
+    )
+
+    assert response.status_code == 400
+    assert response.data["fields"] == {
+        "files": ["Upload at most 10 files at a time."]
+    }
+
+
+def test_attachment_post_rejects_an_aggregate_batch_over_twenty_mebibytes(
+    basic_world,
+    monkeypatch,
+):
+    ticket = _ticket(basic_world)
+    monkeypatch.setattr(
+        "apps.files.views.scan_with_clamav",
+        lambda _data: pytest.fail("oversized aggregate batch was scanned"),
+    )
+    monkeypatch.setattr(
+        "apps.files.views.upload_to_minio",
+        lambda **_kwargs: pytest.fail("oversized aggregate batch reached storage"),
+    )
+    payload = b"%PDF-1.7\n" + b"x" * (11 * 1024 * 1024)
+
+    response = _client(_user(["ops-agents"])).post(
+        reverse("ticket-attachments", args=[ticket.number]),
+        {"files": [_pdf("first.pdf", payload), _pdf("second.pdf", payload)]},
+        format="multipart",
+    )
+
+    assert response.status_code == 400
+    assert response.data["fields"] == {
+        "files": ["Combined files must be 20 MiB or smaller."]
+    }
+
+
+def test_attachment_storage_key_excludes_the_user_supplied_filename(
+    basic_world,
+    monkeypatch,
+):
+    ticket = _ticket(basic_world)
+    stored_keys: list[str] = []
     monkeypatch.setattr(
         "apps.files.views.scan_with_clamav",
         lambda _data: ("clean", None),
     )
     monkeypatch.setattr(
         "apps.files.views.upload_to_minio",
-        lambda *, key, **_kwargs: stored.append(key),
+        lambda *, key, **_kwargs: stored_keys.append(key),
+    )
+
+    response = _client(_user(["ops-agents"])).post(
+        reverse("ticket-attachments", args=[ticket.number]),
+        {"files": [_pdf("sensitive-client-name.pdf")]},
+        format="multipart",
+    )
+
+    assert response.status_code == 201
+    assert len(stored_keys) == 1
+    assert stored_keys[0].startswith(f"attachments/{ticket.number}/")
+    assert stored_keys[0].rsplit("/", 1)[-1].isalnum()
+    assert "sensitive-client-name" not in stored_keys[0]
+
+
+def test_attachment_batch_validates_every_file_before_creating_objects(
+    basic_world,
+    monkeypatch,
+):
+    ticket = _ticket(basic_world)
+    monkeypatch.setattr(
+        "apps.files.views.scan_with_clamav",
+        lambda _data: ("clean", None),
+    )
+    monkeypatch.setattr(
+        "apps.files.views.upload_to_minio",
+        lambda **_kwargs: pytest.fail("partially validated batch reached storage"),
+    )
+
+    response = _client(_user(["ops-agents"])).post(
+        reverse("ticket-attachments", args=[ticket.number]),
+        {
+            "files": [
+                _pdf("valid.pdf"),
+                SimpleUploadedFile(
+                    "forged.pdf",
+                    b"MZ\x90\x00forged",
+                    content_type="application/pdf",
+                ),
+            ]
+        },
+        format="multipart",
+    )
+
+    assert response.status_code == 400
+    assert not Attachment.objects.filter(ticket=ticket).exists()
+
+
+def test_attachment_batch_compensates_earlier_objects_when_later_storage_fails(
+    basic_world,
+    monkeypatch,
+):
+    ticket = _ticket(basic_world)
+    created_handles: list[object] = []
+    deleted_handles: list[object] = []
+
+    def upload_object(**_kwargs):
+        if created_handles:
+            raise RuntimeError("second object failed")
+        handle = object()
+        created_handles.append(handle)
+        return handle
+
+    monkeypatch.setattr(
+        "apps.files.views.scan_with_clamav",
+        lambda _data: ("clean", None),
+    )
+    monkeypatch.setattr("apps.files.views.upload_to_minio", upload_object)
+    monkeypatch.setattr(
+        "apps.files.views.delete_from_minio",
+        lambda *, stored_object: deleted_handles.append(stored_object),
+    )
+
+    response = _client(_user(["ops-agents"])).post(
+        reverse("ticket-attachments", args=[ticket.number]),
+        {"files": [_pdf("first.pdf"), _pdf("second.pdf")]},
+        format="multipart",
+    )
+
+    assert response.status_code == 502
+    assert deleted_handles == list(reversed(created_handles))
+    assert not Attachment.objects.filter(ticket=ticket).exists()
+
+
+def test_attachment_batch_rolls_back_all_rows_and_objects_when_later_event_fails(
+    basic_world,
+    monkeypatch,
+):
+    ticket = _ticket(basic_world)
+    created_handles: list[object] = []
+    deleted_handles: list[object] = []
+    real_record_ticket_event = file_services.record_ticket_event
+    event_calls = 0
+
+    def upload_object(**_kwargs):
+        handle = object()
+        created_handles.append(handle)
+        return handle
+
+    def fail_second_event(**kwargs):
+        nonlocal event_calls
+        event_calls += 1
+        if event_calls == 2:
+            raise RuntimeError("second event failed")
+        return real_record_ticket_event(**kwargs)
+
+    monkeypatch.setattr(
+        "apps.files.views.scan_with_clamav",
+        lambda _data: ("clean", None),
+    )
+    monkeypatch.setattr("apps.files.views.upload_to_minio", upload_object)
+    monkeypatch.setattr(
+        "apps.files.views.delete_from_minio",
+        lambda *, stored_object: deleted_handles.append(stored_object),
+    )
+    monkeypatch.setattr(
+        "apps.files.services.record_ticket_event",
+        fail_second_event,
+    )
+    client = _client(_user(["ops-agents"]))
+    client.raise_request_exception = False
+
+    response = client.post(
+        reverse("ticket-attachments", args=[ticket.number]),
+        {"files": [_pdf("first.pdf"), _pdf("second.pdf")]},
+        format="multipart",
+    )
+
+    assert response.status_code == 500
+    assert response.data["code"] == "attachment_persistence_failed"
+    assert deleted_handles == list(reversed(created_handles))
+    assert not Attachment.objects.filter(ticket=ticket).exists()
+    assert not AuditEvent.objects.filter(
+        object_id=str(ticket.id),
+        action="ticket.attachment.created",
+    ).exists()
+    assert not OutboxEvent.objects.filter(
+        aggregate_id=str(ticket.id),
+        event_type="ticket.attachment.created",
+    ).exists()
+
+
+def test_attachment_post_deletes_stored_object_when_event_persistence_rolls_back(
+    basic_world,
+    monkeypatch,
+):
+    """Catch a storage orphan when the transactional DB/event write fails."""
+    ticket = _ticket(basic_world)
+    stored: list[object] = []
+    deleted: list[object] = []
+    monkeypatch.setattr(
+        "apps.files.views.scan_with_clamav",
+        lambda _data: ("clean", None),
+    )
+    monkeypatch.setattr(
+        "apps.files.views.upload_to_minio",
+        lambda **_kwargs: stored.append(object()) or stored[-1],
     )
     monkeypatch.setattr(
         "apps.files.views.delete_from_minio",
-        lambda *, key, **_kwargs: deleted.append(key),
-        raising=False,
+        lambda *, stored_object: deleted.append(stored_object),
     )
     monkeypatch.setattr(
         "apps.files.services.record_ticket_event",
