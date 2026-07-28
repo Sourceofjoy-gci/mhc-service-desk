@@ -57,6 +57,19 @@ vi.mock("@dnd-kit/core", () => ({
       >
         Drag to disallowed
       </button>
+      <button
+        type="button"
+        onClick={() => {
+          const event = {
+            active: { id: "ticket-1" },
+            over: { id: "in_progress" },
+          };
+          onDragEnd(event);
+          onDragEnd(event);
+        }}
+      >
+        Drag twice synchronously
+      </button>
       {children}
     </>
   ),
@@ -140,16 +153,15 @@ describe("Kanban server-approved transitions", () => {
     expect(screen.getByText("That transition is not available.")).toBeVisible();
   });
 
-  it("prevents a second submission for a ticket while its transition is pending", async () => {
+  it("prevents two same-ticket submissions before pending state rerenders", async () => {
     const pending = deferred<undefined>();
     harness.transition.mockReturnValue(pending.promise);
     const user = userEvent.setup();
     renderWithProviders(<KanbanPage />);
-    const drag = await screen.findByRole("button", { name: "Drag to allowed" });
 
-    await user.click(drag);
-    await waitFor(() => expect(harness.transition).toHaveBeenCalledTimes(1));
-    await user.click(drag);
+    await user.click(
+      await screen.findByRole("button", { name: "Drag twice synchronously" }),
+    );
 
     expect(harness.transition).toHaveBeenCalledTimes(1);
     pending.resolve(undefined);

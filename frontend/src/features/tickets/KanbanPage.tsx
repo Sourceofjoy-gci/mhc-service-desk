@@ -1,5 +1,5 @@
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
-import { useState } from "react";
+import { useRef, useState } from "react";
 import {
   DndContext,
   KeyboardSensor,
@@ -138,6 +138,7 @@ function DroppableColumn({
 export default function KanbanPage() {
   const [domain, setDomain] = useState<Domain>("operational");
   const [validityError, setValidityError] = useState<string | null>(null);
+  const pendingTicketNumbers = useRef(new Set<string>());
   const qc = useQueryClient();
   const sensors = useSensors(
     useSensor(PointerSensor),
@@ -165,10 +166,12 @@ export default function KanbanPage() {
       }),
     onSuccess: () => qc.invalidateQueries({ queryKey: ["kanban", domain] }),
     onError: () => toast.error("Ticket transition failed"),
+    onSettled: (_data, _error, variables) => {
+      pendingTicketNumbers.current.delete(variables.number);
+    },
   });
 
   const handleDragEnd = (event: DragEndEvent) => {
-    if (transition.isPending) return;
     const ticketId = event.active?.id as string | undefined;
     const toColumn = event.over?.id as string | undefined;
     if (!ticketId || !toColumn) return;
@@ -179,6 +182,8 @@ export default function KanbanPage() {
       setValidityError("That transition is not available.");
       return;
     }
+    if (pendingTicketNumbers.current.has(ticket.number)) return;
+    pendingTicketNumbers.current.add(ticket.number);
     setValidityError(null);
     transition.mutate({
       number: ticket.number,
