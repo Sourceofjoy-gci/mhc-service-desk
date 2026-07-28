@@ -39,6 +39,11 @@ pilot-ready.
   integration paths have not all been migrated to the standardized envelope.
 - [x] Ticket mutations write audit and outbox records transactionally on the
   tested service paths.
+- [x] WhatsApp template listing and outbound sending require an authenticated
+  identity; auditors cannot send. The inbound provider webhook remains
+  public.
+- [x] Inbound email HTML is sanitized with Bleach 6.4.0, with a service-level
+  regression covering invisible URI-scheme characters and `formaction`.
 
 ### Pilot workflow and staff experience
 
@@ -72,21 +77,27 @@ operational asset passed the current release gate.
 Latest evidence shows:
 
 - [x] Migration drift check passed.
+- [x] Unapplied-migration check passed.
 - [x] Django system check passed.
 - [x] Permission route audit passed and included the required lifecycle,
   attachment, and reporting route families.
-- [x] Current-source frontend component tests passed.
-- [x] Frontend TypeScript and ESLint passed.
-- [x] Frontend production build completed, with recorded non-fatal font and
-  bundle-size warnings.
-- [x] Live Operational/IT pilot smoke passed with fresh development tickets.
-- [ ] Full backend pytest gate: blocked by a collection-path error in the
-  pilot smoke contract under the backend-only container bind.
-- [ ] Backend Ruff gate: repository-wide violations remain.
-- [ ] Backend mypy gate: the known strict-type baseline remains red.
+- [x] Full backend pytest passed in a freshly built current-source image.
+- [x] Strict backend mypy passed across the configured application and settings
+  source set.
+- [x] The inbound-email sanitizer security regression passed through the
+  persisted service path.
+- [x] Ruff passed against the explicitly authorized current dirty worktree.
+- [ ] Reproducible clean-checkout Ruff remains open: its fixes exist only in
+  preserved, unstaged user-owned hunks. Exact findings are in the dated record.
+- [ ] Final current-source frontend tests, TypeScript, ESLint, and production
+  build rerun against the completed checkout is pending. An earlier run passed
+  all four gates and recorded non-fatal font and bundle-size warnings.
+- [ ] Final live Operational/IT pilot smoke rerun is pending. An earlier run
+  passed with fresh development tickets.
 
-The last three items keep the automatic release gate open. See the dated
-evidence for exact results; do not copy fixed totals into this page.
+The open items keep the automatic release gate open. See the dated evidence
+for exact totals and the dirty-worktree qualification; do not copy fixed totals
+into this page.
 
 ## Manual verification required
 
@@ -133,8 +144,9 @@ listed above.
 ## Decision
 
 **Pilot readiness is open.** The application must not be labelled pilot-ready
-until the backend tests, Ruff, mypy, frontend gates, live smoke, required
-browser checks, and owner-controlled prerequisites all have passing evidence.
+until clean-checkout Ruff, the final frontend gates, the final live smoke,
+required browser checks, and owner-controlled prerequisites all have passing
+evidence.
 
 | Role | Name | Date | Decision/signature |
 |---|---|---|---|

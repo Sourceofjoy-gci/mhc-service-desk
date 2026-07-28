@@ -8,11 +8,11 @@ record.
 | # | Milestone | Implemented | Automatically verified | Manual/external work still open |
 |---|---|---|---|---|
 | M0 | Service and governance baseline | Governance templates, retention model, permission documentation, and runbooks exist | Repository presence only; not a governance approval | DPIA and owner approvals remain unsigned |
-| M1 | Platform foundation | Django/React stack, Keycloak integration, health routes, scoped identity model, and Docker development tooling exist | Migration drift, Django check, permission audit, and current frontend gates passed in the latest evidence | Full backend tests, Ruff, mypy, production TLS/secrets, and browser verification are open |
-| M2 | Operational vertical slice | Intake, scoped queue/Kanban, ticket workspace, SLA presentation, lifecycle, activity, and Operational dashboard exist | Live Operational lifecycle smoke passed | Operational UAT and rendered desktop/mobile verification remain open |
-| M3 | IT separation and cross-domain work | Scoped IT queues/reporting, sanitized IT-child flow, restricted tickets, and email-threading code exist | Live smoke demonstrated dashboard denials, out-of-domain `404`, IT-child visibility, and material activity | IT UAT, provider/integration validation, and browser verification remain open |
-| M4 | P0 channels and pilot operations | Call/walk-in/web/email fields, requester link, attachments, CSV export, and operational scripts exist | Attachment/reporting focused tests are linked in traceability; the latest full backend gate did not complete | Restore drill, attachment/provider operations, accessibility review, and external go-live approvals remain open |
-| M5 | P1 omnichannel | WhatsApp adapter, knowledge, CSAT, automation, and e-Estate stub are present | No current release-wide green claim | Meta/e-Estate approvals and production credentials remain external; selected features remain stubs or deferred |
+| M1 | Platform foundation | Django/React stack, Keycloak integration, health routes, scoped identity model, and Docker development tooling exist | Migration/checks, the full backend suite, strict mypy, and the permission audit passed; Ruff passed only in the authorized dirty worktree | Clean-checkout Ruff, the final frontend rerun, production TLS/secrets, and browser verification are open |
+| M2 | Operational vertical slice | Intake, scoped queue/Kanban, ticket workspace, SLA presentation, lifecycle, activity, and Operational dashboard exist | An earlier live Operational lifecycle smoke passed | Final live-smoke rerun, Operational UAT, and rendered desktop/mobile verification remain open |
+| M3 | IT separation and cross-domain work | Scoped IT queues/reporting, sanitized IT-child flow, restricted tickets, and email-threading code exist | Earlier live smoke demonstrated dashboard denials, out-of-domain `404`, IT-child visibility, and material activity; persisted email-sanitizer regression passed | Final live-smoke rerun, IT UAT, provider/integration validation, and browser verification remain open |
+| M4 | P0 channels and pilot operations | Call/walk-in/web/email fields, requester link, attachments, CSV export, and operational scripts exist | The full backend suite passed; attachment/reporting coverage is linked in traceability | Restore drill, attachment/provider operations, accessibility review, and external go-live approvals remain open |
+| M5 | P1 omnichannel | WhatsApp adapter, knowledge, CSAT, automation, and e-Estate stub are present | WhatsApp template/send authentication and auditor denial are covered; no release-wide green claim | Meta/e-Estate approvals and production credentials remain external; selected features remain stubs or deferred |
 | M6 | Optimization | Problem/change models, monitoring correlation, flow metrics, and guarded AI-assist code are present | No load/performance or production-operability claim | Capacity, response-time, reporting, and AI governance validation remain open |
 
 ## Implemented foundation by outcome
@@ -44,18 +44,23 @@ record.
 - Public intake, inbound email, WhatsApp/provider abstractions, requester
   token routes, attachment scan/download, knowledge, CSAT, and automation
   surfaces exist.
+- WhatsApp template listing and outbound sending require an authenticated identity;
+  the public provider webhook remains available for inbound delivery.
+- Inbound email HTML sanitization uses Bleach 6.4.0 and has a persisted-content
+  regression for invisible URI-scheme characters and `formaction`.
 - Audit/outbox event pairs are transactional on the tested ticket mutation
   paths.
 - Retention, SAR, backup, restore, incident, and pilot runbook assets exist.
 
 ## Verification sequence to close the pilot foundation
 
-1. Repair the backend full-test collection path and rerun all backend tests.
-2. Resolve the repository-wide Ruff and strict-mypy baselines, then rerun the
-   complete backend gate.
-3. Preserve the passing current-source frontend test/type/lint/build gate and
-   resolve or accept the documented build warnings.
-4. Repeat the live Operational/IT smoke after backend repairs.
+1. Land or otherwise reconcile the preserved user-owned lint cleanup so
+   `ruff check .` also passes from a clean committed checkout.
+2. Rerun the current-source frontend test/type/lint/build gate against the
+   completed checkout and resolve or accept the documented build warnings.
+3. Repeat the live Operational/IT smoke after the backend remediation.
+4. Preserve the now-passing backend test, strict-mypy, migration, system-check,
+   sanitizer, and permission-audit evidence in the final release record.
 5. Perform desktop and mobile browser verification, including controlled
    loading, empty, forbidden, validation, and stale-conflict states.
 6. Complete UAT, restore/load exercises, security testing, production

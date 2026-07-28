@@ -51,11 +51,21 @@ view are separate from DRF authentication.
 | `/api/v1/integrations/email/bounce/` | POST | Public DRF route |
 | `/api/v1/integrations/monitoring/events/` | POST | Public DRF route |
 | `/api/v1/integrations/whatsapp/webhook/` | POST | Public DRF route |
-| `/api/v1/integrations/whatsapp/templates/` | GET | Public DRF route |
-| `/api/v1/integrations/whatsapp/send/` | POST | Public DRF route in the current implementation |
 
 The site root `/` is also public. `/api/v1/` is the authenticated DRF router
 root and is not the same route.
+
+## Protected integration helpers
+
+| Path | Methods | Implemented access |
+|---|---|---|
+| `/api/v1/integrations/whatsapp/templates/` | GET | Keycloak authentication plus `ScopePermission`; auditors may use this read-only route |
+| `/api/v1/integrations/whatsapp/send/` | POST | Keycloak authentication plus `ScopePermission`; auditors are denied and the provider is not called when authorization fails |
+
+Neither WhatsApp helper declares a `required_scope`. Authentication protects
+the provider operations, but the route metadata does not establish domain,
+office, service, or queue authority. The inbound WhatsApp webhook remains
+public so the provider can deliver events.
 
 ## Protected ticket and file operations
 
@@ -150,3 +160,5 @@ placeholder. These facts supersede older aspirational matrix entries.
   `test_transition_api.py`, and `test_workflow_capabilities.py`
 - Files: `backend/apps/files/tests/test_views.py`
 - Reporting: `backend/apps/reporting/tests/test_permissions.py`
+- WhatsApp helper authentication and auditor denial:
+  `backend/apps/whatsapp/tests/test_views.py`

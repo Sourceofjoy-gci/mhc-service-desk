@@ -19,7 +19,13 @@ raw payloads, or full logs.
   current-source equivalent of the plan's stale `docker compose exec frontend`
   examples.
 
-## Fresh automatic evidence
+## Earlier baseline evidence
+
+This first run predates the backend remediation commits. Its backend pytest,
+Ruff, and mypy failures are retained as historical evidence and are superseded
+by the accepted remediation evidence below. The frontend and live-smoke rows
+show that those workflows passed at that point; their final closeout reruns
+against the completed checkout are still pending.
 
 | UTC start | Command | Exit | Concise result |
 |---|---|---:|---|
@@ -38,10 +44,40 @@ The permission audit result is route-metadata evidence, not proof that every
 queryset is scoped. The permission matrix pairs it with current view logic and
 focused authorization tests.
 
-An independent review reconciliation on 2026-07-28 UTC repeated the direct
+An independent review reconciliation on 2026-07-28 UTC repeated the original
 Compose pytest command twice: the outer Docker Compose process exited 1. A
 bounded in-container shell probe captured pytest's own exit as 2. Both refer to
-the same single collection error above; neither is a passing test run.
+the same historical collection error above.
+
+## Accepted backend remediation evidence
+
+The backend fixes were then tested from a freshly built current-source image
+and independently reviewed. One full-suite review used an isolated one-off
+database. These results supersede the earlier backend failures without erasing
+them from the record.
+
+| Command or source state | Exit | Concise result |
+|---|---:|---|
+| `python manage.py makemigrations --check --dry-run` | 0 | No model changes detected |
+| `python manage.py migrate --check` | 0 | No unapplied migrations detected |
+| `python manage.py check` | 0 | Django system check reported no issues |
+| `pytest -q` in the fresh current-source backend image | 0 | 354 tests passed |
+| `mypy apps config` in the fresh current-source backend image | 0 | No issues in 160 source files |
+| `ruff check .` against the explicitly authorized dirty main worktree | 0 | No findings in the current worktree |
+| `ruff check .` against committed `HEAD` without the preserved user worktree overlays | 1 | 73 findings remain: 32 `F401`, 23 `I001`, 12 `UP017`, 4 `F811`, and 2 `UP035` |
+| `python scripts/permission_audit.py` | 0 | 67 route actions across 48 API paths |
+| Focused inbound-email sanitizer regression | 0 | Persisted HTML removed an invisible `javascript` URI scheme, `formaction`, and the embedded zero-width character |
+
+The sanitizer evidence uses Bleach 6.4.0 and the service-level persistence
+path, not only a direct library call. WhatsApp template listing and outbound
+sending now require authentication; outbound sending denies auditors.
+The inbound provider webhook remains public for provider delivery.
+
+The Ruff distinction matters. The authorized dirty worktree is clean because
+it contains pre-existing user-owned lint cleanup hunks that were deliberately
+left unstaged. The committed checkout does not contain those hunks, so a fresh
+clone is not yet Ruff-clean. No unrelated user hunk was included in the
+backend remediation commits.
 
 ## Implemented
 
@@ -57,16 +93,22 @@ the same single collection error above; neither is a passing test run.
 
 Implementation is a code-state statement, not a passing release verdict.
 
-## Automatically verified in this run
+## Automatically verified
 
-- Migration drift check and Django system check.
+- Migration drift, unapplied-migration, and Django system checks.
+- The full backend test suite: 354 tests passed.
+- Strict backend typing: no issues in 160 source files.
 - Permission-audit route inventory.
-- Frontend unit/component tests, TypeScript, ESLint, and production build.
-- The live Operational/IT pilot smoke workflow, including cross-domain `403`
-  dashboards and `404` ticket isolation asserted by the script.
+- The inbound-email sanitizer regression through persisted message content.
+- Ruff only for the explicitly authorized current dirty worktree.
+- An earlier current-source frontend run passed unit/component tests,
+  TypeScript, ESLint, and the production build.
+- An earlier live Operational/IT smoke run passed, including cross-domain
+  `403` dashboards and `404` ticket isolation asserted by the script.
 
-The complete backend automated gate is **not** verified: full pytest did not
-collect and repository-wide Ruff is red.
+The final release gate remains open. A clean committed checkout is not
+Ruff-clean, and the final frontend and live-smoke reruns against the completed
+checkout have not yet been recorded.
 
 ## Manual browser verification
 
@@ -76,12 +118,10 @@ permission, validation, or stale-conflict browser claim is made here.
 
 ## Open release blockers
 
-- Full backend pytest: outer command exit 1 / internal pytest exit 2 for the
-  collection error described above.
-- Backend Ruff: 64 violations in the fresh run above.
-- Backend mypy: Task 1's fresh gate recorded 255 errors across 52 files. Mypy
-  was not rerun by Task 3 because it is outside Task 3's command list; it
-  remains an explicit Plan 4 completion blocker until a fresh zero-error run.
+- Reproducible Ruff: committed `HEAD` still has the 73 findings itemized above;
+  the zero-finding result currently depends on preserved, unstaged user work.
+- Final frontend tests, TypeScript, ESLint, and production build rerun: pending.
+- Final live Operational/IT pilot smoke rerun: pending.
 - Browser verification: unavailable and therefore not passed.
 - Production TLS certificates and production secret-manager integration: no
   operator evidence supplied.
@@ -89,6 +129,8 @@ permission, validation, or stale-conflict browser claim is made here.
 - Penetration test and security acceptance: no external report supplied.
 - External provider approvals and production credentials, including Meta
   WhatsApp and e-Estate dependencies: no owner evidence supplied.
+- Product, technical, security, operations, records, and data-protection owner
+  sign-off: not supplied.
 
 Because these gates are open, this evidence does not label the application
 pilot-ready or the Plan 4 completion gate complete.
