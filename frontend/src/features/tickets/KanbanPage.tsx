@@ -137,6 +137,7 @@ function DroppableColumn({
 
 export default function KanbanPage() {
   const [domain, setDomain] = useState<Domain>("operational");
+  const [validityError, setValidityError] = useState<string | null>(null);
   const qc = useQueryClient();
   const sensors = useSensors(
     useSensor(PointerSensor),
@@ -167,12 +168,18 @@ export default function KanbanPage() {
   });
 
   const handleDragEnd = (event: DragEndEvent) => {
+    if (transition.isPending) return;
     const ticketId = event.active?.id as string | undefined;
     const toColumn = event.over?.id as string | undefined;
     if (!ticketId || !toColumn) return;
     const allTickets = Object.values(data?.columns ?? {}).flat();
     const ticket = allTickets.find((item) => item.id === ticketId);
     if (!ticket || ticket.status_code === toColumn) return;
+    if (!ticket.available_transition_codes.includes(toColumn)) {
+      setValidityError("That transition is not available.");
+      return;
+    }
+    setValidityError(null);
     transition.mutate({
       number: ticket.number,
       to: toColumn,
@@ -228,6 +235,14 @@ export default function KanbanPage() {
           <AlertDescription>
             Transition failed: {String((transition.error as Error)?.message)}
           </AlertDescription>
+        </Alert>
+      ) : null}
+
+      {validityError ? (
+        <Alert variant="destructive">
+          <AlertCircle data-icon="inline-start" aria-hidden />
+          <AlertTitle>Move not available</AlertTitle>
+          <AlertDescription>{validityError}</AlertDescription>
         </Alert>
       ) : null}
 
