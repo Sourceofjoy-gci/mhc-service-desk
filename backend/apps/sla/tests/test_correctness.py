@@ -7,9 +7,11 @@ from importlib import import_module
 from threading import Event, Thread
 from typing import TypedDict
 from unittest.mock import patch
+from zoneinfo import ZoneInfo
 
 import pytest
 from django.apps import apps as django_apps
+from django.core.exceptions import ValidationError
 from django.db import close_old_connections, transaction
 from django.utils import timezone
 from freezegun import freeze_time
@@ -77,6 +79,49 @@ def test_business_seconds_between_uses_calendar_local_slots() -> None:
     assert business_seconds_between(start, end, calendar) == 3600
 
 
+def test_business_seconds_between_counts_both_sides_of_dst_fall_fold() -> None:
+    calendar = BusinessCalendar.objects.create(
+        name="New York fold correctness",
+        timezone="America/New_York",
+        weekday_hours={"7": [{"start": "01:00", "end": "02:00"}]},
+        holidays=[],
+    )
+    local_timezone = ZoneInfo("America/New_York")
+    start = datetime(2026, 11, 1, 1, 30, tzinfo=local_timezone, fold=0)
+    end = datetime(2026, 11, 1, 1, 30, tzinfo=local_timezone, fold=1)
+
+    assert business_seconds_between(start, end, calendar) == 3600
+
+
+def test_calendar_validation_rejects_overlapping_weekly_intervals() -> None:
+    calendar = _mbabane_calendar()
+    calendar.holidays = ["2099-01-01"]
+    calendar.weekday_hours = {
+        "1": [
+            {"start": "08:00", "end": "10:00"},
+            {"start": "09:00", "end": "11:00"},
+        ]
+    }
+
+    with pytest.raises(ValidationError, match="overlap"):
+        calendar.full_clean()
+
+
+def test_calendar_math_merges_legacy_overlapping_intervals() -> None:
+    calendar = _mbabane_calendar()
+    calendar.weekday_hours = {
+        "1": [
+            {"start": "08:00", "end": "10:00"},
+            {"start": "09:00", "end": "11:00"},
+        ]
+    }
+    calendar.save(update_fields=["weekday_hours"])
+    start = datetime(2026, 7, 27, 6, 0, tzinfo=UTC)  # 08:00 local
+    end = datetime(2026, 7, 27, 9, 0, tzinfo=UTC)  # 11:00 local
+
+    assert business_seconds_between(start, end, calendar) == 3 * 3600
+
+
 def _ticket(basic_world: BasicWorld) -> Ticket:
     service = basic_world["gen_info"]
     return Ticket.objects.create(
@@ -140,6 +185,7 @@ def test_paused_clock_displays_frozen_entitlement_after_original_deadline(
     instance.refresh_from_db()
     clock = serialize_sla_clock(instance, later)
     assert clock["state"] == "paused"
+    assert clock["due_at"] is None
     assert clock["remaining_seconds"] == 3600
     assert clock["overdue_seconds"] == 0
 
@@ -200,6 +246,68 @@ def test_completion_after_deadline_records_completion_without_marking_sla_met(
     assert instance.completed_at == completed_at
 
 
+def test_completion_at_exact_deadline_uses_breached_boundary(
+    basic_world: BasicWorld,
+) -> None:
+    due_at = datetime(2026, 7, 27, 10, 0, tzinfo=UTC)
+    instance = _instance(basic_world, due_at=due_at)
+
+    complete_sla(ticket=instance.ticket, kind=instance.kind, at=due_at)
+
+    instance.refresh_from_db()
+    assert instance.state == SlaInstance.State.BREACHED
+    assert instance.breached_at == due_at
+    assert serialize_sla_clock(instance, due_at)["state"] == "breached"
+
+
+def test_evaluator_at_exact_deadline_uses_breached_boundary(
+    basic_world: BasicWorld,
+) -> None:
+    due_at = datetime(2026, 7, 27, 10, 0, tzinfo=UTC)
+    instance = _instance(basic_world, due_at=due_at)
+    assert serialize_sla_clock(instance, due_at)["state"] == "breached"
+
+    with freeze_time(due_at):
+        evaluate_open_slas()
+
+    instance.refresh_from_db()
+    assert instance.state == SlaInstance.State.BREACHED
+
+
+def test_breached_completion_is_timestamped_once_and_stops_overdue_clock(
+    basic_world: BasicWorld,
+) -> None:
+    due_at = datetime(2026, 7, 27, 9, 0, tzinfo=UTC)
+    first_completion = due_at + timedelta(hours=1)
+    later_retry = first_completion + timedelta(hours=1)
+    display_now = later_retry + timedelta(hours=1)
+    instance = _instance(
+        basic_world,
+        due_at=due_at,
+        state=SlaInstance.State.BREACHED,
+    )
+    recorded_breach = due_at + timedelta(minutes=1)
+    instance.breached_at = recorded_breach
+    instance.save(update_fields=["breached_at"])
+
+    complete_sla(
+        ticket=instance.ticket,
+        kind=instance.kind,
+        at=first_completion,
+    )
+    complete_sla(
+        ticket=instance.ticket,
+        kind=instance.kind,
+        at=later_retry,
+    )
+
+    instance.refresh_from_db()
+    assert instance.state == SlaInstance.State.BREACHED
+    assert instance.breached_at == recorded_breach
+    assert instance.completed_at == first_completion
+    assert serialize_sla_clock(instance, display_now)["overdue_seconds"] == 3600
+
+
 def test_completion_cannot_turn_an_exhausted_paused_clock_into_met(
     basic_world: BasicWorld,
 ) -> None:
@@ -236,6 +344,10 @@ def test_resume_recovers_legacy_null_entitlement_from_pause_history(
         reason="legacy_pause",
     )
     SlaPauseHistory.objects.filter(pk=history.pk).update(at=paused_at)
+    calendar = instance.policy.calendar
+    calendar.weekday_hours = {"1": [{"start": "12:00", "end": "17:00"}]}
+    calendar.holidays = []
+    calendar.save(update_fields=["weekday_hours", "holidays"])
 
     with freeze_time(resumed_at):
         resume_sla(instance=instance, reason="requester_replied")
@@ -295,6 +407,10 @@ def test_data_migration_backfills_history_and_fails_closed_without_it(
         reason="legacy_pause",
     )
     SlaPauseHistory.objects.filter(pk=history.pk).update(at=paused_at)
+    calendar = with_history.policy.calendar
+    calendar.weekday_hours = {}
+    calendar.holidays = ["2026-07-27"]
+    calendar.save(update_fields=["weekday_hours", "holidays"])
     without_history = _instance(
         basic_world,
         due_at=paused_at + timedelta(hours=1),

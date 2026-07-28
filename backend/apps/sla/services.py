@@ -24,6 +24,37 @@ logger = logging.getLogger(__name__)
 # Business calendar math
 # -----------------------------------------------------------------------------
 
+def _normalized_weekday_intervals(
+    calendar: BusinessCalendar,
+    day_key: str,
+) -> list[tuple[time, time]]:
+    """Return a defensive union of valid persisted intervals for one day."""
+    if not isinstance(calendar.weekday_hours, dict):
+        return []
+    raw_intervals = calendar.weekday_hours.get(day_key, [])
+    if not isinstance(raw_intervals, list):
+        return []
+    intervals: list[tuple[time, time]] = []
+    for raw_interval in raw_intervals:
+        try:
+            start = time.fromisoformat(raw_interval["start"])
+            end = time.fromisoformat(raw_interval["end"])
+        except (KeyError, TypeError, ValueError):
+            continue
+        if end <= start:
+            continue
+        intervals.append((start, end))
+    intervals.sort()
+
+    merged: list[tuple[time, time]] = []
+    for start, end in intervals:
+        if not merged or start > merged[-1][1]:
+            merged.append((start, end))
+            continue
+        previous_start, previous_end = merged[-1]
+        merged[-1] = (previous_start, max(previous_end, end))
+    return merged
+
 def add_business_seconds(
     start: datetime,
     seconds: int,
@@ -54,7 +85,7 @@ def add_business_seconds(
         date = cursor.date()
         iso_weekday = date.isoweekday()
         day_key = str(iso_weekday)
-        intervals = calendar.weekday_hours.get(day_key, [])
+        intervals = _normalized_weekday_intervals(calendar, day_key)
         if date.isoformat() in holiday_set or not intervals:
             cursor = datetime.combine(
                 date + timedelta(days=1),
@@ -63,9 +94,7 @@ def add_business_seconds(
             )
             continue
 
-        for interval in intervals:
-            t_start = time.fromisoformat(interval["start"])
-            t_end = time.fromisoformat(interval["end"])
+        for t_start, t_end in intervals:
             slot_start = datetime.combine(date, t_start, tzinfo=calendar_timezone)
             slot_end = datetime.combine(date, t_end, tzinfo=calendar_timezone)
             cursor_utc = cursor.astimezone(UTC)
@@ -101,8 +130,6 @@ def business_seconds_between(
     calendar: BusinessCalendar,
 ) -> int:
     """Return business seconds in ``[start, end)`` for one calendar."""
-    if end <= start:
-        return 0
     if (
         start.tzinfo is None
         or start.utcoffset() is None
@@ -111,24 +138,29 @@ def business_seconds_between(
     ):
         raise ValueError("SLA business-time calculations require aware endpoints")
 
+    start_utc = start.astimezone(UTC)
+    end_utc = end.astimezone(UTC)
+    if end_utc <= start_utc:
+        return 0
+
     total = 0
     calendar_timezone = ZoneInfo(calendar.timezone)
     holiday_set = set(calendar.holidays)
-    start_utc = start.astimezone(UTC)
-    end_utc = end.astimezone(UTC)
     current_date = start.astimezone(calendar_timezone).date()
     end_date = end.astimezone(calendar_timezone).date()
     while current_date <= end_date:
         if current_date.isoformat() not in holiday_set:
-            for interval in calendar.weekday_hours.get(str(current_date.isoweekday()), []):
+            for interval_start, interval_end in _normalized_weekday_intervals(
+                calendar, str(current_date.isoweekday())
+            ):
                 slot_start = datetime.combine(
                     current_date,
-                    time.fromisoformat(interval["start"]),
+                    interval_start,
                     tzinfo=calendar_timezone,
                 ).astimezone(UTC)
                 slot_end = datetime.combine(
                     current_date,
-                    time.fromisoformat(interval["end"]),
+                    interval_end,
                     tzinfo=calendar_timezone,
                 ).astimezone(UTC)
                 overlap_start = max(start_utc, slot_start)
@@ -194,7 +226,7 @@ PAUSED_SLA_STATES = {
 
 
 def _recover_legacy_remaining_business_seconds(instance: SlaInstance) -> int:
-    """Recover a legacy paused clock, failing closed when history is absent."""
+    """Recover persisted wall time without assuming a calendar's history."""
     histories = instance.pause_history.all()
     last_resumed_at = (
         histories.filter(state=SlaInstance.State.ACTIVE)
@@ -208,10 +240,13 @@ def _recover_legacy_remaining_business_seconds(instance: SlaInstance) -> int:
     paused_at = current_pauses.order_by("at").values_list("at", flat=True).first()
     if paused_at is None:
         return 0
-    return business_seconds_between(
-        paused_at,
-        instance.due_at,
-        instance.policy.calendar,
+    return max(
+        0,
+        int(
+            (
+                instance.due_at.astimezone(UTC) - paused_at.astimezone(UTC)
+            ).total_seconds()
+        ),
     )
 
 
@@ -298,14 +333,19 @@ def complete_sla(*, ticket: Ticket, kind: str, at: datetime) -> SlaInstance | No
         .order_by("created_at", "id")
         .first()
     )
-    if instance is None or instance.state == SlaInstance.State.BREACHED:
+    if instance is None:
+        return instance
+    if instance.state == SlaInstance.State.BREACHED:
+        if instance.completed_at is None:
+            instance.completed_at = at
+            instance.save(update_fields=["completed_at", "updated_at"])
         return instance
     if instance.state == SlaInstance.State.MET:
         return instance
     overdue = (
         instance.state == SlaInstance.State.ACTIVE
         and (
-            at > instance.due_at
+            at >= instance.due_at
             or instance.remaining_business_seconds == 0
         )
     ) or (

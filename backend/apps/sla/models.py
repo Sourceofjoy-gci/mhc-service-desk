@@ -7,7 +7,10 @@ notifications or escalations.
 from __future__ import annotations
 
 import uuid
+from datetime import time
+from zoneinfo import ZoneInfo, ZoneInfoNotFoundError
 
+from django.core.exceptions import ValidationError
 from django.db import models
 from django.utils import timezone
 
@@ -34,6 +37,48 @@ class BusinessCalendar(models.Model):
 
     def __str__(self) -> str:
         return self.name
+
+    def clean(self) -> None:
+        super().clean()
+        try:
+            ZoneInfo(self.timezone)
+        except (ValueError, ZoneInfoNotFoundError) as exc:
+            raise ValidationError(
+                {"timezone": "Enter a valid IANA timezone name."}
+            ) from exc
+
+        if not isinstance(self.weekday_hours, dict):
+            raise ValidationError(
+                {"weekday_hours": "Business hours must be keyed by ISO weekday."}
+            )
+
+        errors: list[str] = []
+        for day_key, raw_intervals in self.weekday_hours.items():
+            if day_key not in {str(day) for day in range(1, 8)} or not isinstance(
+                raw_intervals, list
+            ):
+                errors.append(f"Invalid ISO weekday entry: {day_key}.")
+                continue
+            intervals: list[tuple[time, time]] = []
+            for raw_interval in raw_intervals:
+                try:
+                    start = time.fromisoformat(raw_interval["start"])
+                    end = time.fromisoformat(raw_interval["end"])
+                except (KeyError, TypeError, ValueError):
+                    errors.append(f"Invalid interval for weekday {day_key}.")
+                    continue
+                if end <= start:
+                    errors.append(
+                        f"Interval end must follow start for weekday {day_key}."
+                    )
+                    continue
+                intervals.append((start, end))
+            intervals.sort()
+            for previous, current in zip(intervals, intervals[1:], strict=False):
+                if current[0] < previous[1]:
+                    errors.append(f"Intervals for weekday {day_key} overlap.")
+        if errors:
+            raise ValidationError({"weekday_hours": errors})
 
 
 class SlaPolicy(models.Model):

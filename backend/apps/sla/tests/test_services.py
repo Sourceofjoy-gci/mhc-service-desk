@@ -226,10 +226,15 @@ def test_resolution_completes_active_clock_but_preserves_breach(basic_world):
     active.completed_at = None
     active.breached_at = at
     active.save(update_fields=["state", "completed_at", "breached_at"])
-    complete_sla(ticket=ticket, kind="resolution", at=at + timedelta(minutes=1))
+    breached_completion_at = at + timedelta(minutes=1)
+    complete_sla(
+        ticket=ticket,
+        kind="resolution",
+        at=breached_completion_at,
+    )
     active.refresh_from_db()
     assert active.state == "breached"
-    assert active.completed_at is None
+    assert active.completed_at == breached_completion_at
 
 
 def test_reopen_restarts_existing_resolution_clock_from_reopened_at(basic_world):

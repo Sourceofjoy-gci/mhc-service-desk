@@ -31,7 +31,9 @@ def serialize_sla_clock(
 
     now = now or timezone.now()
     remaining = max(0, int((instance.due_at - now).total_seconds()))
-    overdue = max(0, int((now - instance.due_at).total_seconds()))
+    overdue_at = instance.completed_at or now
+    overdue = max(0, int((overdue_at - instance.due_at).total_seconds()))
+    display_due_at: datetime | None = instance.due_at
 
     if instance.state == SlaInstance.State.ACTIVE:
         state = "running" if instance.due_at > now else "breached"
@@ -41,6 +43,7 @@ def serialize_sla_clock(
         SlaInstance.State.PAUSED_IT,
     }:
         state = "paused"
+        display_due_at = None
         if instance.remaining_business_seconds is not None:
             remaining = instance.remaining_business_seconds
         overdue = 0
@@ -57,7 +60,7 @@ def serialize_sla_clock(
 
     return {
         "state": state,
-        "due_at": _iso_z(instance.due_at),
+        "due_at": _iso_z(display_due_at),
         "remaining_seconds": remaining,
         "overdue_seconds": overdue,
     }
