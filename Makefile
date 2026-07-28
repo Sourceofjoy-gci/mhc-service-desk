@@ -1,5 +1,9 @@
 .PHONY: help up down logs build ps restart migrate seed backup restore test lint type verify pilot-smoke fmt clean keycloak-export
 
+define run_frontend
+docker compose run --rm --no-deps --build --env VITE_API_BASE_URL= frontend sh -c 'set -eu; LOCK_HASH=$$(sha256sum package-lock.json | cut -d " " -f 1); if [ ! -f node_modules/.mhc-package-lock-hash ] || [ "$$(cat node_modules/.mhc-package-lock-hash 2>/dev/null)" != "$$LOCK_HASH" ]; then npm install --no-audit --no-fund --legacy-peer-deps; printf "%s" "$$LOCK_HASH" > node_modules/.mhc-package-lock-hash; fi; exec "$$@"' sh $(1)
+endef
+
 help:
 	@echo "MHC e-Ticketing — make targets"
 	@echo "  up            Start full stack"
@@ -53,15 +57,15 @@ restore:
 
 test:
 	docker compose exec backend pytest -q
-	docker compose exec frontend npm test -- --run
+	$(call run_frontend,npm test -- --run)
 
 lint:
 	docker compose exec backend ruff check .
-	docker compose exec frontend npm run lint
+	$(call run_frontend,npm run lint)
 
 type:
 	docker compose exec backend mypy apps config
-	docker compose exec frontend npm run typecheck
+	$(call run_frontend,npm run typecheck)
 
 pilot-smoke:
 	docker compose exec backend python /app/scripts/pilot_foundation_smoke.py
@@ -70,10 +74,10 @@ verify:
 	docker compose exec backend python manage.py makemigrations --check --dry-run
 	docker compose exec backend pytest -q
 	docker compose exec backend ruff check .
-	docker compose exec frontend npm test -- --run
-	docker compose exec frontend npm run typecheck
-	docker compose exec frontend npm run lint
-	docker compose exec frontend npm run build
+	$(call run_frontend,npm test -- --run)
+	$(call run_frontend,npm run typecheck)
+	$(call run_frontend,npm run lint)
+	$(call run_frontend,npm run build)
 
 fmt:
 	docker compose exec backend ruff format .

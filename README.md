@@ -63,7 +63,8 @@ Open:
 ## Development quality commands
 
 Run these targets from the repository root against the local development
-Docker Compose stack:
+Docker Compose stack. They require GNU Make; on Windows, run them from WSL or
+Git Bash with GNU Make installed rather than directly from PowerShell.
 
 - `make test` runs the complete backend and frontend test suites.
 - `make lint` runs Ruff for the backend and ESLint for the frontend.
@@ -75,6 +76,12 @@ Docker Compose stack:
 - `make pilot-smoke` runs `/app/scripts/pilot_foundation_smoke.py` in the
   backend container. It creates and mutates development-only ticket data, so
   use it only with the local `config.settings.dev` stack.
+
+Each frontend gate rebuilds the current `frontend/` context and runs in a new
+one-off container. Before the gate starts, it compares `package-lock.json`
+with the dependency-volume lock hash and installs the current dependencies
+when needed. This keeps checks aligned with both the working source and lock
+file without replacing the running development server.
 
 ## Current milestone
 
