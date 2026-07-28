@@ -14,13 +14,14 @@ from rest_framework.permissions import IsAuthenticated
 
 from apps.identity_access.authentication import KeycloakJWTAuthentication
 from apps.identity_access.scope import ScopePermission
+from apps.tickets.models import Ticket
 
 from .models import AutomationExecution, AutomationRule
 
 logger = logging.getLogger(__name__)
 
 
-class AutomationRuleSerializer(serializers.ModelSerializer):
+class AutomationRuleSerializer(serializers.ModelSerializer[AutomationRule]):
     class Meta:
         model = AutomationRule
         fields = (
@@ -31,14 +32,14 @@ class AutomationRuleSerializer(serializers.ModelSerializer):
         read_only_fields = ("id", "created_at", "updated_at")
 
 
-class AutomationRuleViewSet(viewsets.ModelViewSet):
+class AutomationRuleViewSet(viewsets.ModelViewSet[AutomationRule]):
     queryset = AutomationRule.objects.all()
     serializer_class = AutomationRuleSerializer
     authentication_classes = [KeycloakJWTAuthentication]
     permission_classes = [IsAuthenticated, ScopePermission]
 
 
-def evaluate_rules(*, trigger: str, ticket) -> int:
+def evaluate_rules(*, trigger: str, ticket: Ticket) -> int:
     """Apply all active rules that match ``trigger`` against ``ticket``.
 
     Returns the number of successful executions. Failures are logged with
@@ -74,7 +75,7 @@ def evaluate_rules(*, trigger: str, ticket) -> int:
 
 
 @transaction.atomic
-def _apply_action(rule: AutomationRule, ticket) -> bool:
+def _apply_action(rule: AutomationRule, ticket: Ticket) -> bool:
     from apps.tickets.events import record_ticket_event
 
     actor_subject = f"automation:{rule.name}"

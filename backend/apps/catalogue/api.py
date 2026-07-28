@@ -6,14 +6,22 @@ from rest_framework import serializers
 from .models import CustomFieldDefinition, RequestType, Service
 
 
-class CustomFieldDefinitionSerializer(serializers.ModelSerializer):
+class CustomFieldDefinitionSerializer(
+    serializers.ModelSerializer[CustomFieldDefinition]
+):
     class Meta:
         model = CustomFieldDefinition
         fields = ("id", "key", "label", "kind", "required", "choices", "help_text", "order")
 
 
-class RequestTypeSerializer(serializers.ModelSerializer):
-    fields = CustomFieldDefinitionSerializer(many=True, read_only=True)
+class RequestTypeSerializer(serializers.ModelSerializer[RequestType]):
+
+    def get_fields(
+        self,
+    ) -> dict[str, serializers.Field[object, object, object, object]]:
+        fields = super().get_fields()
+        fields["fields"] = CustomFieldDefinitionSerializer(many=True, read_only=True)
+        return fields
 
     class Meta:
         model = RequestType
@@ -29,7 +37,7 @@ class RequestTypeSerializer(serializers.ModelSerializer):
         )
 
 
-class ServiceSerializer(serializers.ModelSerializer):
+class ServiceSerializer(serializers.ModelSerializer[Service]):
     request_types = RequestTypeSerializer(many=True, read_only=True)
 
     class Meta:

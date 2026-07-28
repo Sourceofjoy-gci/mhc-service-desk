@@ -5,6 +5,8 @@ from datetime import UTC, datetime
 
 from django.utils import timezone
 
+from apps.tickets.models import Ticket
+
 from .models import SlaInstance
 
 
@@ -59,7 +61,10 @@ def serialize_sla_clock(
     }
 
 
-def serialize_sla_clocks(ticket, now: datetime | None = None) -> dict[str, object]:
+def serialize_sla_clocks(
+    ticket: Ticket,
+    now: datetime | None = None,
+) -> dict[str, object]:
     """Return the two workspace SLA clocks from authoritative persisted rows."""
     instances = {
         instance.kind: instance

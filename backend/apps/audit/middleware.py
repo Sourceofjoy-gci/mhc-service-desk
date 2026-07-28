@@ -12,6 +12,10 @@ from __future__ import annotations
 
 import logging
 import uuid
+from collections.abc import Callable
+
+from django.http import HttpRequest
+from django.http.response import HttpResponseBase
 
 CORRELATION_ID_HEADER = "HTTP_X_CORRELATION_ID"
 CORRELATION_ID_RESPONSE = "X-Correlation-ID"
@@ -20,12 +24,12 @@ logger = logging.getLogger("apps.audit.middleware")
 
 
 class RequestAuditMiddleware:
-    def __init__(self, get_response):
+    def __init__(self, get_response: Callable[[HttpRequest], HttpResponseBase]) -> None:
         self.get_response = get_response
 
-    def __call__(self, request):
+    def __call__(self, request: HttpRequest) -> HttpResponseBase:
         correlation_id = request.META.get(CORRELATION_ID_HEADER) or uuid.uuid4().hex
-        request.correlation_id = correlation_id
+        request.__dict__["correlation_id"] = correlation_id
 
         response = self.get_response(request)
         response[CORRELATION_ID_RESPONSE] = correlation_id

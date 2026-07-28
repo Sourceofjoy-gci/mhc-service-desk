@@ -11,6 +11,7 @@ from __future__ import annotations
 
 import secrets
 import string
+from typing import TypedDict, Unpack
 
 from django.core.management.base import BaseCommand, CommandParser
 
@@ -20,10 +21,15 @@ def _generate(length: int = 64) -> str:
     return "".join(secrets.choice(alphabet) for _ in range(length))
 
 
+class RotateSecretOptions(TypedDict):
+    length: int
+    what: str
+
+
 class Command(BaseCommand):
     help = "Print a freshly generated secret. The operator commits it to the vault."
 
-    def add_arguments(self, parser: CommandParser):
+    def add_arguments(self, parser: CommandParser) -> None:
         parser.add_argument("--length", type=int, default=64)
         parser.add_argument(
             "--what",
@@ -31,7 +37,11 @@ class Command(BaseCommand):
             default="django",
         )
 
-    def handle(self, *args, **opts):
+    def handle(
+        self,
+        *args: object,
+        **opts: Unpack[RotateSecretOptions],
+    ) -> None:
         new = _generate(opts["length"])
         self.stdout.write(self.style.SUCCESS(
             f"New {opts['what']} secret ({len(new)} chars). Update the vault, then redeploy."

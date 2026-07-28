@@ -16,6 +16,7 @@ from collections import defaultdict
 
 from rest_framework.decorators import api_view, permission_classes
 from rest_framework.permissions import AllowAny
+from rest_framework.request import Request
 from rest_framework.response import Response
 
 from apps.catalogue.models import RequestType, Service
@@ -28,10 +29,12 @@ from apps.tickets.models import OutboxEvent, Ticket
 
 logger = logging.getLogger(__name__)
 
+type MonitoringAlert = dict[str, str]
 
-def _coalesce(alerts: list[dict]) -> list[list[dict]]:
+
+def _coalesce(alerts: list[MonitoringAlert]) -> list[list[MonitoringAlert]]:
     """Group alerts by their deduplication key, preserving order."""
-    buckets: dict[str, list[dict]] = defaultdict(list)
+    buckets: dict[str, list[MonitoringAlert]] = defaultdict(list)
     for alert in alerts:
         key = alert.get("deduplication_key") or hashlib.sha256(
             (alert.get("title") or "").encode()
@@ -42,7 +45,7 @@ def _coalesce(alerts: list[dict]) -> list[list[dict]]:
 
 @api_view(["POST"])
 @permission_classes([AllowAny])
-def monitoring_webhook(request):
+def monitoring_webhook(request: Request) -> Response:
     """Receive a list of alerts and create one ticket per deduplication group."""
     body = request.data or {}
     alerts = body.get("alerts", [])

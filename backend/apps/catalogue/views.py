@@ -11,7 +11,7 @@ from .api import ServiceSerializer
 from .models import Service
 
 
-class ServiceViewSet(viewsets.ReadOnlyModelViewSet):
+class ServiceViewSet(viewsets.ReadOnlyModelViewSet[Service]):
     queryset = Service.objects.filter(is_active=True).prefetch_related("request_types__fields")
     serializer_class = ServiceSerializer
     authentication_classes = [KeycloakJWTAuthentication]

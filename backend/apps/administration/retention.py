@@ -14,9 +14,10 @@ import hashlib
 import json
 import logging
 from dataclasses import asdict, dataclass
-from datetime import UTC, datetime
+from datetime import UTC, datetime, timedelta
+from typing import TypedDict, TypeGuard, Unpack
 
-from django.core.management.base import BaseCommand
+from django.core.management.base import BaseCommand, CommandParser
 from django.db import transaction
 from django.utils import timezone as djtz
 
@@ -24,10 +25,34 @@ from .models import ConfigItem
 
 logger = logging.getLogger(__name__)
 
+type JSONScalar = None | bool | int | float | str
+type JSONValue = JSONScalar | list[JSONValue] | dict[str, JSONValue]
+type RetentionRule = dict[str, JSONValue]
+type RetentionPolicy = dict[str, RetentionRule]
+
+
+class DisposalCertificatePayload(TypedDict):
+    issued_at: str
+    table: str
+    rows_disposed: int
+    retention_class_days: int
+    cutoff: str
+    legal_hold_preserved: int
+    payload_hash: str
+
+
+type DisposalResult = DisposalCertificatePayload | dict[str, JSONValue]
+
+
+class RetentionCommandOptions(TypedDict):
+    dry_run: bool
+    table: list[str]
+    out: str
+
 
 # --- Retention classes (operator-tunable, persisted in ConfigItem) -------
 
-DEFAULT_RETENTION = {
+DEFAULT_RETENTION: RetentionPolicy = {
     "ticket":              {"days": 2555, "description": "7 years (operational record)"},
     "ticket_message":      {"days": 2555, "description": "tied to ticket lifecycle"},
     "ticket_note":         {"days": 2555, "description": "tied to ticket lifecycle"},
@@ -52,6 +77,17 @@ class DisposalCertificate:
     def to_json(self) -> str:
         return json.dumps(asdict(self), indent=2, sort_keys=True)
 
+    def to_payload(self) -> DisposalCertificatePayload:
+        return {
+            "issued_at": self.issued_at,
+            "table": self.table,
+            "rows_disposed": self.rows_disposed,
+            "retention_class_days": self.retention_class_days,
+            "cutoff": self.cutoff,
+            "legal_hold_preserved": self.legal_hold_preserved,
+            "payload_hash": self.payload_hash,
+        }
+
 
 @dataclass(frozen=True)
 class RetentionSqlPlan:
@@ -60,7 +96,7 @@ class RetentionSqlPlan:
     legal_hold_count_sql: str | None = None
 
 
-RETENTION_SQL_PLANS = {
+RETENTION_SQL_PLANS: dict[str, RetentionSqlPlan] = {
     "ticket": RetentionSqlPlan(
         count_sql="SELECT count(*) FROM ticket WHERE created_at < %s",
         delete_sql=(
@@ -129,12 +165,39 @@ RETENTION_SQL_PLANS = {
 }
 
 
-def get_retention_policy() -> dict:
+def _is_json_value(value: object) -> TypeGuard[JSONValue]:
+    if value is None or isinstance(value, bool | int | float | str):
+        return True
+    if isinstance(value, list):
+        return all(_is_json_value(item) for item in value)
+    if isinstance(value, dict):
+        return all(
+            isinstance(key, str) and _is_json_value(item)
+            for key, item in value.items()
+        )
+    return False
+
+
+def _is_retention_policy(value: object) -> TypeGuard[RetentionPolicy]:
+    return isinstance(value, dict) and all(
+        isinstance(table, str)
+        and isinstance(rule, dict)
+        and all(
+            isinstance(key, str) and _is_json_value(item)
+            for key, item in rule.items()
+        )
+        for table, rule in value.items()
+    )
+
+
+def get_retention_policy() -> RetentionPolicy:
     """Read the operator-tuned retention policy from ConfigItem, falling
     back to the defaults baked into this module."""
     item = ConfigItem.objects.filter(key="retention.policy.v1").first()
-    if item and isinstance(item.value, dict):
-        return item.value
+    if item:
+        value: object = item.value
+        if _is_retention_policy(value):
+            return value
     return DEFAULT_RETENTION
 
 
@@ -144,18 +207,22 @@ def get_retention_policy() -> dict:
 class Command(BaseCommand):
     help = "Dispose records past their retention class. Honours legal hold."
 
-    def add_arguments(self, parser):
+    def add_arguments(self, parser: CommandParser) -> None:
         parser.add_argument("--dry-run", action="store_true")
         parser.add_argument("--table", action="append", default=[])
         parser.add_argument("--out", default="backups/disposal-")
 
-    def handle(self, *args, **options):
+    def handle(
+        self,
+        *args: object,
+        **options: Unpack[RetentionCommandOptions],
+    ) -> None:
         dry = options["dry_run"]
         only = set(options["table"])
         out_prefix = options["out"]
         policy = get_retention_policy()
         now = djtz.now()
-        summary = []
+        summary: list[DisposalResult] = []
         for table, rule in policy.items():
             if only and table not in only:
                 continue
@@ -166,7 +233,7 @@ class Command(BaseCommand):
             if not isinstance(days, int) or days <= 0:
                 self.stdout.write(f"[skip] {table}: invalid days={days!r}")
                 continue
-            cutoff = now - djtz.timedelta(days=days)
+            cutoff = now - timedelta(days=days)
             summary.append(self._dispose_table(table, cutoff, rule, dry))
         cert_path = f"{out_prefix}{now.strftime('%Y%m%dT%H%M%SZ')}.json"
         with open(cert_path, "w", encoding="utf-8") as fh:
@@ -176,7 +243,13 @@ class Command(BaseCommand):
         ))
 
     @transaction.atomic
-    def _dispose_table(self, table: str, cutoff, rule: dict, dry: bool) -> dict:
+    def _dispose_table(
+        self,
+        table: str,
+        cutoff: datetime,
+        rule: RetentionRule,
+        dry: bool,
+    ) -> DisposalResult:
         from django.db import connection
         plan = RETENTION_SQL_PLANS.get(table)
         if plan is None:
@@ -195,11 +268,12 @@ class Command(BaseCommand):
                 rows_disposed = cur.rowcount
             else:
                 rows_disposed = total_old - rows_preserved_legal_hold
+        rule_days = rule.get("days", 0)
         cert = DisposalCertificate(
             issued_at=datetime.now(tz=UTC).isoformat(),
             table=table,
             rows_disposed=rows_disposed,
-            retention_class_days=rule.get("days", 0),
+            retention_class_days=rule_days if isinstance(rule_days, int) else 0,
             cutoff=cutoff.isoformat(),
             legal_hold_preserved=rows_preserved_legal_hold,
             payload_hash=hashlib.sha256(
@@ -210,4 +284,4 @@ class Command(BaseCommand):
             f"  {table:<32} cutoff={cutoff.date()} disposed={rows_disposed} "
             f"hold_kept={rows_preserved_legal_hold}"
         )
-        return asdict(cert)
+        return cert.to_payload()

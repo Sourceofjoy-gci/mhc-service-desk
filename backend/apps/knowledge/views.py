@@ -1,9 +1,10 @@
 """Knowledge API — public + agent views."""
 from __future__ import annotations
 
-from rest_framework import viewsets
+from rest_framework import serializers, viewsets
 from rest_framework.decorators import api_view, permission_classes
 from rest_framework.permissions import AllowAny, IsAuthenticated
+from rest_framework.request import Request
 from rest_framework.response import Response
 
 from apps.identity_access.authentication import KeycloakJWTAuthentication
@@ -12,14 +13,15 @@ from apps.identity_access.scope import ScopePermission
 from .models import KnowledgeArticle
 
 
-class KnowledgeArticleViewSet(viewsets.ModelViewSet):
+class KnowledgeArticleViewSet(viewsets.ModelViewSet[KnowledgeArticle]):
     queryset = KnowledgeArticle.objects.all()
     authentication_classes = [KeycloakJWTAuthentication]
     permission_classes = [IsAuthenticated, ScopePermission]
 
-    def get_serializer_class(self):
-        from rest_framework import serializers
-        class _S(serializers.ModelSerializer):
+    def get_serializer_class(
+        self,
+    ) -> type[serializers.ModelSerializer[KnowledgeArticle]]:
+        class _S(serializers.ModelSerializer[KnowledgeArticle]):
             class Meta:
                 model = KnowledgeArticle
                 fields = (
@@ -34,7 +36,7 @@ class KnowledgeArticleViewSet(viewsets.ModelViewSet):
 
 @api_view(["GET"])
 @permission_classes([AllowAny])
-def public_search(request):
+def public_search(request: Request) -> Response:
     """Public knowledge search (FR-078). Returns published public articles only."""
     from django.db.models import Q
     term = request.query_params.get("q", "").strip()
