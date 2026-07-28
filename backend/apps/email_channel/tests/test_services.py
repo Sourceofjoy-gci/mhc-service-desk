@@ -62,6 +62,7 @@ def test_in_reply_to_attaches_to_existing_ticket(basic_world, mailbox):
         body_text="Any update?",
         message_id="<thread-2@example.com>",
         in_reply_to="<thread-1@example.com>",
+        sender_verified=True,
     )
     assert r2["status"] == "updated", r2
     assert r2["ticket_number"] == ticket_number
@@ -77,11 +78,12 @@ def test_subject_token_attach(basic_world, mailbox):
     )
     token = r1["ticket_number"]
     r2 = process_inbound_email(
-        from_header="Other <other@example.com>",
+        from_header="Visitor <visitor@example.com>",
         to_header="ops@mhc.local",
         subject=f"Re: [{token}] question",
         body_text="Following up",
         message_id="<tok-2@example.com>",
+        sender_verified=True,
     )
     assert r2["status"] == "updated", r2
     assert r2["ticket_number"] == token

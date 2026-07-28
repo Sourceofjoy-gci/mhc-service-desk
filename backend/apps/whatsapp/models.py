@@ -9,6 +9,7 @@ from django.db import models
 class WhatsappAccount(models.Model):
     id = models.UUIDField(primary_key=True, default=uuid.uuid4, editable=False)
     phone_number_id = models.CharField(max_length=64, unique=True)
+    business_id = models.CharField(max_length=128, blank=True)
     display_name = models.CharField(max_length=128)
     domain = models.CharField(max_length=16, choices=[("operational", "Operational"), ("it", "IT")])
     is_active = models.BooleanField(default=True)
@@ -56,6 +57,13 @@ class WhatsappMessage(models.Model):
     class Meta:
         db_table = "whatsapp_message"
         ordering = ("-created_at",)
+        constraints = [
+            models.UniqueConstraint(
+                fields=("external_message_id",),
+                condition=~models.Q(external_message_id=""),
+                name="uniq_whatsapp_external_message_when_set",
+            )
+        ]
 
     def __str__(self) -> str:
         return f"whatsapp-message:{self.pk}"

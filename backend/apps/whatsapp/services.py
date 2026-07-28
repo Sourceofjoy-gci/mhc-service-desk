@@ -8,14 +8,19 @@ Two providers are wired:
 """
 from __future__ import annotations
 
+import hashlib
 import logging
 import os
-from typing import TypedDict
+from typing import TYPE_CHECKING, TypedDict
 
 import requests
-from django.db import transaction
+from django.db import IntegrityError, transaction
 
 from apps.email_channel.services import process_inbound_email
+from apps.tickets.models import Ticket
+
+if TYPE_CHECKING:
+    from .models import WhatsappAccount
 
 logger = logging.getLogger(__name__)
 
@@ -49,7 +54,24 @@ class BaseProvider:
     ) -> dict[str, str]:
         raise NotImplementedError
 
-    def fetch_templates(self) -> list[dict[str, object]]:
+    def send_template(
+        self,
+        *,
+        to: str,
+        template_name: str,
+        language: str,
+        parameters: list[str],
+        phone_number_id: str,
+        account_token: str,
+    ) -> dict[str, str]:
+        raise NotImplementedError
+
+    def fetch_templates(
+        self,
+        *,
+        account_token: str = "",
+        business_id: str = "",
+    ) -> list[dict[str, object]]:
         raise NotImplementedError
 
 
@@ -69,11 +91,37 @@ class MockProvider(BaseProvider):
             "provider": "mock",
         }
 
-    def fetch_templates(self) -> list[dict[str, object]]:
+    def send_template(
+        self,
+        *,
+        to: str,
+        template_name: str,
+        language: str,
+        parameters: list[str],
+        phone_number_id: str,
+        account_token: str,
+    ) -> dict[str, str]:
+        digest = hashlib.sha256(
+            f"{phone_number_id}|{to}|{template_name}|{language}|{parameters}".encode()
+        ).hexdigest()[:20]
+        return {
+            "status": "sent",
+            "external_message_id": f"mock-{digest}",
+            "provider": "mock",
+        }
+
+    def fetch_templates(
+        self,
+        *,
+        account_token: str = "",
+        business_id: str = "",
+    ) -> list[dict[str, object]]:
         return [
             {"name": "ticket_ack_en", "language": "en", "category": "utility",
+             "status": "APPROVED",
              "body": "Your request {{1}} has been received. Reference: {{2}}."},
             {"name": "ticket_ack_ss", "language": "ss", "category": "utility",
+             "status": "APPROVED",
              "body": "Inchaziso yakho {{1}} itholakele. Inombolo: {{2}}."},
         ]
 
@@ -96,17 +144,20 @@ class CloudProvider(BaseProvider):
     ) -> dict[str, str]:
         if not account_token:
             return {"status": "failed", "error": "missing access token"}
-        r = requests.post(
-            f"{self.BASE}/{os.environ.get('WHATSAPP_PHONE_NUMBER_ID', '')}/messages",
-            headers={"Authorization": f"Bearer {account_token}"},
-            json={
-                "messaging_product": "whatsapp",
-                "to": to,
-                "type": "text",
-                "text": {"body": body},
-            },
-            timeout=5,
-        )
+        try:
+            r = requests.post(
+                f"{self.BASE}/{os.environ.get('WHATSAPP_PHONE_NUMBER_ID', '')}/messages",
+                headers={"Authorization": f"Bearer {account_token}"},
+                json={
+                    "messaging_product": "whatsapp",
+                    "to": to,
+                    "type": "text",
+                    "text": {"body": body},
+                },
+                timeout=5,
+            )
+        except requests.RequestException:
+            return {"status": "failed", "error": "provider unavailable"}
         if r.ok:
             data: _CloudSendResponse = r.json()
             return {
@@ -116,14 +167,72 @@ class CloudProvider(BaseProvider):
             }
         return {"status": "failed", "error": r.text[:300]}
 
-    def fetch_templates(self) -> list[dict[str, object]]:
-        if not os.environ.get("WHATSAPP_ACCESS_TOKEN"):
+    def send_template(
+        self,
+        *,
+        to: str,
+        template_name: str,
+        language: str,
+        parameters: list[str],
+        phone_number_id: str,
+        account_token: str,
+    ) -> dict[str, str]:
+        if not account_token or not phone_number_id:
+            return {"status": "failed", "error": "missing account configuration"}
+        components: list[dict[str, object]] = []
+        if parameters:
+            components.append(
+                {
+                    "type": "body",
+                    "parameters": [
+                        {"type": "text", "text": parameter}
+                        for parameter in parameters
+                    ],
+                }
+            )
+        try:
+            response = requests.post(
+                f"{self.BASE}/{phone_number_id}/messages",
+                headers={"Authorization": f"Bearer {account_token}"},
+                json={
+                    "messaging_product": "whatsapp",
+                    "to": to,
+                    "type": "template",
+                    "template": {
+                        "name": template_name,
+                        "language": {"code": language},
+                        "components": components,
+                    },
+                },
+                timeout=5,
+            )
+        except requests.RequestException:
+            return {"status": "failed", "error": "provider unavailable"}
+        if response.ok:
+            data: _CloudSendResponse = response.json()
+            return {
+                "status": "sent",
+                "external_message_id": data.get("messages", [{}])[0].get("id", ""),
+                "provider": "cloud",
+            }
+        return {"status": "failed", "error": response.text[:300]}
+
+    def fetch_templates(
+        self,
+        *,
+        account_token: str = "",
+        business_id: str = "",
+    ) -> list[dict[str, object]]:
+        if not account_token or not business_id:
             return []
-        r = requests.get(
-            f"{self.BASE}/{os.environ.get('WHATSAPP_BUSINESS_ID', '')}/message_templates",
-            headers={"Authorization": f"Bearer {os.environ.get('WHATSAPP_ACCESS_TOKEN')}"},
-            timeout=5,
-        )
+        try:
+            r = requests.get(
+                f"{self.BASE}/{business_id}/message_templates",
+                headers={"Authorization": f"Bearer {account_token}"},
+                timeout=5,
+            )
+        except requests.RequestException:
+            return []
         if not r.ok:
             return []
         data: _CloudTemplatesResponse = r.json()
@@ -136,6 +245,7 @@ class CloudProvider(BaseProvider):
 @transaction.atomic
 def process_inbound_whatsapp(
     *,
+    account: WhatsappAccount,
     from_number: str,
     to_number: str,
     body: str,
@@ -151,13 +261,19 @@ def process_inbound_whatsapp(
     from apps.contacts.models import Contact
     from .models import WhatsappMessage
 
-    # Prevent duplicate delivery using provider id
-    if (
-        external_message_id
-        and WhatsappMessage.objects.filter(
-            external_message_id=external_message_id
-        ).exists()
-    ):
+    try:
+        with transaction.atomic():
+            channel_message = WhatsappMessage.objects.create(
+                account=account,
+                from_number=from_number,
+                to_number=to_number,
+                direction=WhatsappMessage.Direction.INBOUND,
+                body=body,
+                external_message_id=external_message_id,
+                delivery_status="received",
+                raw_payload=raw or {},
+            )
+    except IntegrityError:
         return {"status": "duplicate"}
 
     contact, _ = Contact.objects.get_or_create(
@@ -167,19 +283,24 @@ def process_inbound_whatsapp(
 
     # Use a synthetic email to reuse the email intake pipeline
     outcome = process_inbound_email(
-        from_header=contact.full_name,
+        from_header=from_number,
         to_header=to_number,
         subject="WhatsApp enquiry",
         body_text=body,
         message_id=external_message_id or f"<wa:{from_number}:{hash(body)}@mhc>",
+        contact_override=contact,
+        domain_override=account.domain,
+        channel="whatsapp",
+        source_account=account.phone_number_id,
+        author_subject=from_number,
+        author_label=contact.full_name,
+        sender_verified=True,
     )
-    WhatsappMessage.objects.create(
-        account=None,
-        from_number=from_number,
-        to_number=to_number,
-        direction="inbound",
-        body=body,
-        external_message_id=external_message_id,
-        raw_payload=raw or {},
-    )
+    if outcome.get("status") == "error":
+        transaction.set_rollback(True)
+        return outcome
+    ticket_number = outcome.get("ticket_number")
+    if ticket_number:
+        channel_message.ticket = Ticket.objects.get(number=ticket_number)
+        channel_message.save(update_fields=["ticket"])
     return outcome

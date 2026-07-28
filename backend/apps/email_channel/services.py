@@ -52,26 +52,36 @@ def find_target_ticket(
     in_reply_to: str,
     references: str,
     subject: str,
+    domain: str,
+    requester: Contact,
 ) -> Ticket | None:
     """Match an inbound email to an existing ticket by:
       1. A previous outbound TicketMessage with the same Message-ID
       2. The In-Reply-To / References chain
       3. The platform-issued token in the subject
     """
+    eligible_messages = TicketMessage.objects.filter(
+        ticket__domain=domain,
+        ticket__requester=requester,
+    )
     if message_id:
-        prev = TicketMessage.objects.filter(external_message_id=message_id).first()
+        prev = eligible_messages.filter(external_message_id=message_id).first()
         if prev:
             return prev.ticket
     for ref in (in_reply_to, references or ""):
         for piece in re.split(r"[\s,]+", ref):
             if not piece:
                 continue
-            m = TicketMessage.objects.filter(external_message_id=piece).first()
+            m = eligible_messages.filter(external_message_id=piece).first()
             if m:
                 return m.ticket
     token = _thread_token_in_subject(subject)
     if token:
-        return Ticket.objects.filter(number=token).first()
+        return Ticket.objects.filter(
+            number=token,
+            domain=domain,
+            requester=requester,
+        ).first()
     return None
 
 
@@ -88,6 +98,13 @@ def process_inbound_email(
     references: str = "",
     received_at: datetime | None = None,
     raw_headers: dict[str, object] | None = None,
+    contact_override: Contact | None = None,
+    domain_override: str | None = None,
+    channel: str = "email",
+    source_account: str | None = None,
+    author_subject: str | None = None,
+    author_label: str | None = None,
+    sender_verified: bool = False,
 ) -> dict[str, str]:
     """Handle an inbound email. Returns a small dict with the outcome.
 
@@ -98,31 +115,47 @@ def process_inbound_email(
         return {"status": "duplicate", "message_id": message_id}
 
     from_email, from_name = _parse_address(from_header)
+    if contact_override is not None:
+        from_email = author_subject or contact_override.email or contact_override.phone_e164
+        from_name = author_label or contact_override.full_name
     to_email, _to_name = _parse_address(to_header)
     if not from_email:
         return {"status": "error", "detail": "missing From address"}
 
     mailbox = Mailbox.objects.filter(address__iexact=to_email, is_active=True).first()
-    if not mailbox:
-        # Default to operational for unknown mailboxes (most inbound is public)
-        mailbox_domain = "operational"
+    if domain_override is not None:
+        mailbox_domain = domain_override
+    elif not mailbox:
+        return {
+            "status": "error",
+            "detail": "mailbox is not configured or active",
+        }
     else:
         mailbox_domain = mailbox.domain
 
     # Reconcile contact by email
-    contact, _ = Contact.objects.get_or_create(
-        email=from_email,
-        defaults={"full_name": from_name or from_email.split("@")[0]},
-    )
-    if from_name and contact.full_name != from_name:
-        contact.full_name = from_name
-        contact.save(update_fields=["full_name"])
+    if contact_override is None:
+        contact, _ = Contact.objects.get_or_create(
+            email=from_email,
+            defaults={"full_name": from_name or from_email.split("@")[0]},
+        )
+        if from_name and contact.full_name != from_name:
+            contact.full_name = from_name
+            contact.save(update_fields=["full_name"])
+    else:
+        contact = contact_override
 
-    target = find_target_ticket(
-        message_id=in_reply_to or message_id,
-        in_reply_to=in_reply_to,
-        references=references,
-        subject=subject,
+    target = (
+        find_target_ticket(
+            message_id=in_reply_to or message_id,
+            in_reply_to=in_reply_to,
+            references=references,
+            subject=subject,
+            domain=mailbox_domain,
+            requester=contact,
+        )
+        if sender_verified
+        else None
     )
 
     if target is None:
@@ -164,8 +197,8 @@ def process_inbound_email(
             service=service,
             request_type=request_type,
             office=office,
-            channel="email",
-            source_account=to_email,
+            channel=channel,
+            source_account=source_account or to_email,
             matter_reference="",
             actor_subject=f"email:{to_email}",
             ip_address=None,
@@ -183,16 +216,16 @@ def process_inbound_email(
     ticket_services.add_message(
         ticket=target,
         direction="inbound",
-        actor_subject=from_email,
-        author_subject=from_email,
-        author_label=from_name or from_email,
+        actor_subject=author_subject or from_email,
+        author_subject=author_subject or from_email,
+        author_label=author_label or from_name or from_email,
         body_text=bleach.clean(body_text or "", tags=[], strip=True),
         body_html=clean_html,
         body_html_sanitized=clean_html,
         external_message_id=message_id,
         delivery_status="received",
         event_metadata={
-            "channel": "email",
+            "channel": channel,
             "provider_message_id": message_id,
         },
     )

@@ -57,3 +57,26 @@ class EmailDelivery(models.Model):
 
     def __str__(self) -> str:
         return f"email-delivery:{self.pk}"
+
+
+class EmailWebhookEvent(models.Model):
+    """Authenticated adapter event claimed before channel mutation."""
+
+    id = models.UUIDField(primary_key=True, default=uuid.uuid4, editable=False)
+    event_id = models.CharField(max_length=255, unique=True)
+    event_type = models.CharField(max_length=32)
+    message_id = models.CharField(max_length=255, blank=True)
+    received_at = models.DateTimeField(auto_now_add=True)
+
+    class Meta:
+        db_table = "email_webhook_event"
+        constraints = [
+            models.UniqueConstraint(
+                fields=("event_type", "message_id"),
+                condition=~models.Q(message_id=""),
+                name="uniq_email_webhook_type_message_when_set",
+            )
+        ]
+
+    def __str__(self) -> str:
+        return f"email-webhook-event:{self.pk}"
