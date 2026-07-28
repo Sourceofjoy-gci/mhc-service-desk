@@ -142,6 +142,130 @@ def test_attachment_post_validation_uses_common_error_contract(basic_world):
     }
 
 
+@pytest.mark.parametrize(
+    ("filename", "content_type"),
+    [
+        ("payload.exe", "application/pdf"),
+        ("evidence.pdf", "text/plain"),
+        ("evidence.pdf", "application/x-msdownload"),
+    ],
+)
+def test_attachment_post_rejects_disallowed_type_extension_pairs_before_storage(
+    basic_world,
+    monkeypatch,
+    filename,
+    content_type,
+):
+    ticket = _ticket(basic_world)
+    monkeypatch.setattr(
+        "apps.files.views.scan_with_clamav",
+        lambda _data: pytest.fail("disallowed attachment was scanned"),
+    )
+    monkeypatch.setattr(
+        "apps.files.views.upload_to_minio",
+        lambda **_kwargs: pytest.fail("disallowed attachment reached storage"),
+    )
+
+    response = _client(_user(["ops-agents"])).post(
+        reverse("ticket-attachments", args=[ticket.number]),
+        {
+            "files": [
+                SimpleUploadedFile(filename, b"payload", content_type=content_type)
+            ]
+        },
+        format="multipart",
+    )
+
+    assert response.status_code == 400
+    assert response.data["code"] == "invalid_attachment"
+    assert response.data["fields"] == {
+        "files": ["File type and extension are not allowed."]
+    }
+    assert not Attachment.objects.filter(ticket=ticket).exists()
+
+
+def test_attachment_post_rejects_a_file_over_twenty_mebibytes_before_storage(
+    basic_world,
+    monkeypatch,
+):
+    ticket = _ticket(basic_world)
+    monkeypatch.setattr(
+        "apps.files.views.scan_with_clamav",
+        lambda _data: pytest.fail("oversized attachment was scanned"),
+    )
+    monkeypatch.setattr(
+        "apps.files.views.upload_to_minio",
+        lambda **_kwargs: pytest.fail("oversized attachment reached storage"),
+    )
+    oversized = SimpleUploadedFile(
+        "evidence.pdf",
+        b"x" * (20 * 1024 * 1024 + 1),
+        content_type="application/pdf",
+    )
+
+    response = _client(_user(["ops-agents"])).post(
+        reverse("ticket-attachments", args=[ticket.number]),
+        {"files": [oversized]},
+        format="multipart",
+    )
+
+    assert response.status_code == 400
+    assert response.data["code"] == "invalid_attachment"
+    assert response.data["fields"] == {
+        "files": ["Each file must be 20 MiB or smaller."]
+    }
+    assert not Attachment.objects.filter(ticket=ticket).exists()
+
+
+def test_attachment_post_deletes_stored_object_when_event_persistence_rolls_back(
+    basic_world,
+    monkeypatch,
+):
+    """Catch a storage orphan when the transactional DB/event write fails."""
+    ticket = _ticket(basic_world)
+    stored: list[str] = []
+    deleted: list[str] = []
+    monkeypatch.setattr(
+        "apps.files.views.scan_with_clamav",
+        lambda _data: ("clean", None),
+    )
+    monkeypatch.setattr(
+        "apps.files.views.upload_to_minio",
+        lambda *, key, **_kwargs: stored.append(key),
+    )
+    monkeypatch.setattr(
+        "apps.files.views.delete_from_minio",
+        lambda *, key, **_kwargs: deleted.append(key),
+        raising=False,
+    )
+    monkeypatch.setattr(
+        "apps.files.services.record_ticket_event",
+        lambda **_kwargs: (_ for _ in ()).throw(RuntimeError("event write failed")),
+    )
+    client = _client(_user(["ops-agents"]))
+    client.raise_request_exception = False
+
+    response = client.post(
+        reverse("ticket-attachments", args=[ticket.number]),
+        {
+            "files": [
+                SimpleUploadedFile(
+                    "evidence.pdf",
+                    b"%PDF-1.7 evidence",
+                    content_type="application/pdf",
+                )
+            ]
+        },
+        format="multipart",
+    )
+
+    assert response.status_code == 500
+    assert response.data["code"] == "attachment_persistence_failed"
+    assert len(stored) == 1
+    assert deleted == stored
+    assert not Attachment.objects.filter(ticket=ticket).exists()
+
+
 @pytest.mark.parametrize("scan_status", ["pending", "infected", "error"])
 def test_only_clean_attachments_can_be_downloaded(
     basic_world,

@@ -20,7 +20,13 @@ from apps.identity_access.scope import ScopePermission, scope_ticket_queryset
 from apps.tickets.models import Ticket
 
 from .models import Attachment
+from .policy import (
+    AttachmentValidationError,
+    read_attachment_bounded,
+    validate_attachment_metadata,
+)
 from .services import (
+    delete_from_minio,
     generate_signed_url,
     log_attachment_access,
     record_attachment,
@@ -108,21 +114,48 @@ def upload(request: Request, ticket_number: str) -> Response:
             response_status=status.HTTP_400_BAD_REQUEST,
         )
 
+    validated_files = []
+    for uploaded_file in files:
+        try:
+            filename, content_type = validate_attachment_metadata(
+                filename=uploaded_file.name,
+                content_type=uploaded_file.content_type,
+                declared_size=uploaded_file.size,
+            )
+        except AttachmentValidationError as exc:
+            return _attachment_error(
+                request,
+                code="invalid_attachment",
+                detail="Attachment upload is invalid.",
+                fields={"files": [str(exc)]},
+                response_status=status.HTTP_400_BAD_REQUEST,
+            )
+        validated_files.append((uploaded_file, filename, content_type))
+
     actor = _authenticated_user(request).keycloak_subject
     created: list[dict[str, object]] = []
-    for f in files:
-        data = f.read()
+    for uploaded_file, filename, content_type in validated_files:
+        try:
+            data = read_attachment_bounded(uploaded_file)
+        except AttachmentValidationError as exc:
+            return _attachment_error(
+                request,
+                code="invalid_attachment",
+                detail="Attachment upload is invalid.",
+                fields={"files": [str(exc)]},
+                response_status=status.HTTP_400_BAD_REQUEST,
+            )
         checksum = __import__("hashlib").sha256(data).hexdigest()
         scan_status, signature = scan_with_clamav(data)
         if scan_status == "infected":
-            object_key = f"quarantine/{ticket.number}/{uuid.uuid4().hex}-{f.name}"
+            object_key = f"quarantine/{ticket.number}/{uuid.uuid4().hex}-{filename}"
         else:
-            object_key = f"attachments/{ticket.number}/{uuid.uuid4().hex}-{f.name}"
+            object_key = f"attachments/{ticket.number}/{uuid.uuid4().hex}-{filename}"
         try:
             upload_to_minio(
                 key=object_key,
                 data=data,
-                content_type=f.content_type or "application/octet-stream",
+                content_type=content_type,
             )
         except Exception:  # pragma: no cover
             logger.exception("minio_upload_failed")
@@ -133,18 +166,32 @@ def upload(request: Request, ticket_number: str) -> Response:
                 fields={},
                 response_status=status.HTTP_502_BAD_GATEWAY,
             )
-        att = record_attachment(
-            ticket=ticket,
-            message=None,
-            object_key=object_key,
-            filename=f.name,
-            content_type=f.content_type or "application/octet-stream",
-            size_bytes=len(data),
-            checksum_sha256=checksum,
-            scan_status=scan_status,
-            scan_signature=signature or "",
-            actor_subject=actor,
-        )
+        try:
+            att = record_attachment(
+                ticket=ticket,
+                message=None,
+                object_key=object_key,
+                filename=filename,
+                content_type=content_type,
+                size_bytes=len(data),
+                checksum_sha256=checksum,
+                scan_status=scan_status,
+                scan_signature=signature or "",
+                actor_subject=actor,
+            )
+        except Exception:
+            logger.exception("attachment_persistence_failed")
+            try:
+                delete_from_minio(key=object_key)
+            except Exception:
+                logger.exception("attachment_cleanup_failed")
+            return _attachment_error(
+                request,
+                code="attachment_persistence_failed",
+                detail="Attachment metadata could not be saved.",
+                fields={},
+                response_status=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            )
         metadata = attachment_metadata(att)
         metadata["scan_signature"] = att.scan_signature
         created.append(metadata)

@@ -23,12 +23,19 @@ from .models import Attachment, AttachmentAccessLog
 
 logger = logging.getLogger(__name__)
 
+CLAMAV_STREAM_CHUNK_SIZE = 64 * 1024
+
 
 class _PutObjectArguments(TypedDict):
     Bucket: str
     Key: str
     Body: bytes
     ContentType: str
+
+
+class _DeleteObjectArguments(TypedDict):
+    Bucket: str
+    Key: str
 
 
 class _PresignArguments(TypedDict):
@@ -38,6 +45,8 @@ class _PresignArguments(TypedDict):
 
 class _S3Client(Protocol):
     def put_object(self, **kwargs: Unpack[_PutObjectArguments]) -> object: ...
+
+    def delete_object(self, **kwargs: Unpack[_DeleteObjectArguments]) -> object: ...
 
     def generate_presigned_url(
         self,
@@ -73,9 +82,10 @@ def scan_with_clamav(data: bytes) -> tuple[str, str | None]:
     try:
         with socket.create_connection((host, port), timeout=5) as s:
             s.sendall(b"zINSTREAM\0")
-            length = len(data)
-            header = length.to_bytes(4, "little")
-            s.sendall(header + data + b"\0\0\0\0")
+            for offset in range(0, len(data), CLAMAV_STREAM_CHUNK_SIZE):
+                chunk = data[offset : offset + CLAMAV_STREAM_CHUNK_SIZE]
+                s.sendall(len(chunk).to_bytes(4, "big") + chunk)
+            s.sendall(b"\0\0\0\0")
             response = b""
             while True:
                 buf = s.recv(4096)
@@ -106,6 +116,13 @@ def upload_to_minio(
     bucket = bucket or settings.AWS_STORAGE_BUCKET_NAME
     client = _s3_client()
     client.put_object(Bucket=bucket, Key=key, Body=data, ContentType=content_type)
+
+
+def delete_from_minio(*, key: str, bucket: str | None = None) -> None:
+    """Delete a stored object when its database metadata cannot be committed."""
+    bucket = bucket or settings.AWS_STORAGE_BUCKET_NAME
+    client = _s3_client()
+    client.delete_object(Bucket=bucket, Key=key)
 
 
 def generate_signed_url(*, key: str, expires: int = 60) -> str:
