@@ -3,6 +3,7 @@ import userEvent from "@testing-library/user-event";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import {
   ApiError,
+  type AttachmentDownload,
   type AttachmentMetadata,
   type AttachmentUploadResponse,
 } from "@/lib/api";
@@ -73,6 +74,18 @@ const ATTACHMENTS: AttachmentMetadata[] = [
     download_available: false,
   },
 ];
+
+const SECOND_CLEAN_ATTACHMENT: AttachmentMetadata = {
+  id: "attachment-clean-2",
+  filename: "transcript.docx",
+  size_bytes: 4096,
+  content_type:
+    "application/vnd.openxmlformats-officedocument.wordprocessingml.document",
+  uploaded_by: "B. Registrar",
+  uploaded_at: "2026-07-27T08:19:00Z",
+  scan_status: "clean",
+  download_available: true,
+};
 
 function deferred<T>() {
   let resolve!: (value: T) => void;
@@ -160,14 +173,16 @@ describe("AttachmentUploader", () => {
   });
 
   it("keeps selected files and restores upload controls after a failure", async () => {
-    harness.upload.mockRejectedValue(
-      new ApiError(503, {
-        code: "scan_unavailable",
-        detail: "The file scanner is temporarily unavailable.",
-        fields: {},
-        correlation_id: "corr-upload-503",
-      }),
-    );
+    harness.upload
+      .mockRejectedValueOnce(
+        new ApiError(503, {
+          code: "scan_unavailable",
+          detail: "The file scanner is temporarily unavailable.",
+          fields: {},
+          correlation_id: "corr-upload-503",
+        }),
+      )
+      .mockResolvedValueOnce({ results: [] });
     const user = userEvent.setup();
     renderWithProviders(<AttachmentUploader ticketNumber={TICKET_NUMBER} />);
     const input = screen.getByLabelText("Choose files") as HTMLInputElement;
@@ -186,7 +201,198 @@ describe("AttachmentUploader", () => {
       screen.getByRole("list", { name: "Selected files" }),
     ).toHaveTextContent("proof.txt");
     expect(input.files).toHaveLength(1);
-    expect(screen.getByRole("button", { name: "Upload" })).toBeEnabled();
+
+    await user.click(screen.getByRole("button", { name: "Upload" }));
+
+    await waitFor(() => expect(harness.upload).toHaveBeenCalledTimes(2));
+    expect(harness.upload).toHaveBeenNthCalledWith(2, TICKET_NUMBER, [file]);
+    await waitFor(() =>
+      expect(
+        screen.queryByRole("list", { name: "Selected files" }),
+      ).not.toBeInTheDocument(),
+    );
+  });
+
+  it("releases the upload lock after success for a new explicit upload", async () => {
+    harness.upload.mockResolvedValue({ results: [] });
+    const user = userEvent.setup();
+    renderWithProviders(<AttachmentUploader ticketNumber={TICKET_NUMBER} />);
+    const first = new File(["first"], "first.txt", { type: "text/plain" });
+    const second = new File(["second"], "second.txt", {
+      type: "text/plain",
+    });
+
+    await screen.findByText("No attachments yet");
+    await user.upload(screen.getByLabelText("Choose files"), first);
+    await user.click(screen.getByRole("button", { name: "Upload" }));
+
+    await waitFor(() => expect(harness.upload).toHaveBeenCalledTimes(1));
+    await waitFor(() =>
+      expect(screen.getByLabelText("Choose files")).toBeEnabled(),
+    );
+    await user.upload(screen.getByLabelText("Choose files"), second);
+    await user.click(screen.getByRole("button", { name: "Upload" }));
+
+    await waitFor(() => expect(harness.upload).toHaveBeenCalledTimes(2));
+    expect(harness.upload).toHaveBeenNthCalledWith(2, TICKET_NUMBER, [second]);
+  });
+
+  it("fails closed when unsafe scan metadata claims a download is available", async () => {
+    harness.list.mockResolvedValue({
+      results: ATTACHMENTS.slice(1).map((attachment) => ({
+        ...attachment,
+        download_available: true,
+      })),
+    });
+
+    renderWithProviders(<AttachmentUploader ticketNumber={TICKET_NUMBER} />);
+
+    const list = await screen.findByRole("list", {
+      name: "Ticket attachments",
+    });
+    expect(within(list).getByText("Quarantined")).toBeVisible();
+    expect(within(list).getByText("Scan failed")).toBeVisible();
+    expect(within(list).getByText("Scanning")).toBeVisible();
+    expect(
+      within(list).queryAllByRole("button", { name: /^Download / }),
+    ).toHaveLength(0);
+    expect(harness.download).not.toHaveBeenCalled();
+  });
+
+  it("prepares different clean attachments concurrently", async () => {
+    harness.list.mockResolvedValue({
+      results: [ATTACHMENTS[0], SECOND_CLEAN_ATTACHMENT],
+    });
+    const first = deferred<AttachmentDownload>();
+    const second = deferred<AttachmentDownload>();
+    harness.download.mockImplementation((id: string) =>
+      id === ATTACHMENTS[0].id ? first.promise : second.promise,
+    );
+    const assign = vi
+      .spyOn(attachmentDownloadNavigation, "assign")
+      .mockImplementation(() => undefined);
+    try {
+      renderWithProviders(<AttachmentUploader ticketNumber={TICKET_NUMBER} />);
+      const evidence = await screen.findByRole("button", {
+        name: "Download evidence.pdf",
+      });
+      const transcript = screen.getByRole("button", {
+        name: "Download transcript.docx",
+      });
+
+      fireEvent.click(evidence);
+      fireEvent.click(transcript);
+
+      await waitFor(() => expect(harness.download).toHaveBeenCalledTimes(2));
+      expect(harness.download).toHaveBeenCalledWith("attachment-clean");
+      expect(harness.download).toHaveBeenCalledWith("attachment-clean-2");
+      expect(
+        await screen.findByRole("button", {
+          name: "Preparing evidence.pdf…",
+        }),
+      ).toBeDisabled();
+      expect(
+        screen.getByRole("button", { name: "Preparing transcript.docx…" }),
+      ).toBeDisabled();
+
+      first.resolve({
+        url: "https://files.example.test/signed/evidence.pdf",
+        filename: "evidence.pdf",
+        expires_in: 60,
+      });
+      second.resolve({
+        url: "https://files.example.test/signed/transcript.docx",
+        filename: "transcript.docx",
+        expires_in: 60,
+      });
+      await waitFor(() => expect(assign).toHaveBeenCalledTimes(2));
+    } finally {
+      assign.mockRestore();
+    }
+  });
+
+  it("releases a download lock after success so the same file can be retried", async () => {
+    harness.list.mockResolvedValue({ results: [ATTACHMENTS[0]] });
+    harness.download
+      .mockResolvedValueOnce({
+        url: "https://files.example.test/signed/evidence-1.pdf",
+        filename: "evidence.pdf",
+        expires_in: 60,
+      })
+      .mockResolvedValueOnce({
+        url: "https://files.example.test/signed/evidence-2.pdf",
+        filename: "evidence.pdf",
+        expires_in: 60,
+      });
+    const assign = vi
+      .spyOn(attachmentDownloadNavigation, "assign")
+      .mockImplementation(() => undefined);
+    const user = userEvent.setup();
+    try {
+      renderWithProviders(<AttachmentUploader ticketNumber={TICKET_NUMBER} />);
+
+      await user.click(
+        await screen.findByRole("button", { name: "Download evidence.pdf" }),
+      );
+      await waitFor(() => expect(assign).toHaveBeenCalledTimes(1));
+      await user.click(
+        await screen.findByRole("button", { name: "Download evidence.pdf" }),
+      );
+
+      await waitFor(() => expect(harness.download).toHaveBeenCalledTimes(2));
+      await waitFor(() =>
+        expect(assign).toHaveBeenNthCalledWith(
+          2,
+          "https://files.example.test/signed/evidence-2.pdf",
+        ),
+      );
+    } finally {
+      assign.mockRestore();
+    }
+  });
+
+  it("releases a download lock after failure so the same file can be retried", async () => {
+    harness.list.mockResolvedValue({ results: [ATTACHMENTS[0]] });
+    harness.download
+      .mockRejectedValueOnce(
+        new ApiError(503, {
+          code: "download_unavailable",
+          detail: "The signed URL service is unavailable.",
+          fields: {},
+          correlation_id: "corr-download-503",
+        }),
+      )
+      .mockResolvedValueOnce({
+        url: "https://files.example.test/signed/evidence-retry.pdf",
+        filename: "evidence.pdf",
+        expires_in: 60,
+      });
+    const assign = vi
+      .spyOn(attachmentDownloadNavigation, "assign")
+      .mockImplementation(() => undefined);
+    const user = userEvent.setup();
+    try {
+      renderWithProviders(<AttachmentUploader ticketNumber={TICKET_NUMBER} />);
+
+      await user.click(
+        await screen.findByRole("button", { name: "Download evidence.pdf" }),
+      );
+      expect(await screen.findByRole("alert")).toHaveTextContent(
+        "The signed URL service is unavailable.",
+      );
+      await user.click(
+        screen.getByRole("button", { name: "Download evidence.pdf" }),
+      );
+
+      await waitFor(() => expect(harness.download).toHaveBeenCalledTimes(2));
+      await waitFor(() =>
+        expect(assign).toHaveBeenCalledWith(
+          "https://files.example.test/signed/evidence-retry.pdf",
+        ),
+      );
+    } finally {
+      assign.mockRestore();
+    }
   });
 
   it("clears selection only after success and reloads attachments and activity", async () => {

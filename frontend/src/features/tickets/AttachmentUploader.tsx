@@ -103,9 +103,11 @@ function AttachmentRow({ attachment }: { attachment: AttachmentMetadata }) {
     },
   });
   const state = scanState[attachment.scan_status];
+  const canDownload =
+    attachment.download_available && attachment.scan_status === "clean";
 
   function requestDownload() {
-    if (downloadLock.current || !attachment.download_available) return;
+    if (downloadLock.current || !canDownload) return;
     downloadLock.current = true;
     download.mutate();
   }
@@ -147,7 +149,7 @@ function AttachmentRow({ attachment }: { attachment: AttachmentMetadata }) {
         </div>
       </dl>
 
-      {attachment.download_available ? (
+      {canDownload ? (
         <Button
           variant="outline"
           size="sm"
