@@ -53,6 +53,7 @@ const TICKET: TicketSummary = {
   updated_at: "2026-07-27T08:00:00Z",
   age_hours: 24,
   sla_health: "at_risk",
+  available_transition_codes: [],
 };
 
 const PAGE: Page<TicketSummary> = {

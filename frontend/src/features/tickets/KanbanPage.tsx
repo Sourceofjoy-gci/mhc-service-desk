@@ -149,8 +149,19 @@ export default function KanbanPage() {
   });
 
   const transition = useMutation({
-    mutationFn: ({ number, to }: { number: string; to: string }) =>
-      ticketsApi.transition(number, to),
+    mutationFn: ({
+      number,
+      to,
+      updated_at,
+    }: {
+      number: string;
+      to: string;
+      updated_at: string;
+    }) =>
+      ticketsApi.transition(number, {
+        to_status: to,
+        updated_at,
+      }),
     onSuccess: () => qc.invalidateQueries({ queryKey: ["kanban", domain] }),
     onError: () => toast.error("Ticket transition failed"),
   });
@@ -162,7 +173,11 @@ export default function KanbanPage() {
     const allTickets = Object.values(data?.columns ?? {}).flat();
     const ticket = allTickets.find((item) => item.id === ticketId);
     if (!ticket || ticket.status_code === toColumn) return;
-    transition.mutate({ number: ticket.number, to: toColumn });
+    transition.mutate({
+      number: ticket.number,
+      to: toColumn,
+      updated_at: ticket.updated_at,
+    });
   };
 
   const columns = OPERATIONAL_COLUMNS;

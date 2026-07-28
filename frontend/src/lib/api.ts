@@ -117,7 +117,7 @@ export interface TicketSummary {
   updated_at: string;
   age_hours: number;
   sla_health: "on_track" | "at_risk" | "breached" | "paused" | "none";
-  available_transition_codes?: string[];
+  available_transition_codes: string[];
 }
 
 export interface TicketMessage {
@@ -371,24 +371,10 @@ function asBearerToken(token: string): string {
 function transitionTicket(
   number: string,
   values: TicketTransitionRequest,
-): Promise<TicketDetail>;
-/** @deprecated Use the structured payload with `updated_at`. */
-function transitionTicket(
-  number: string,
-  toStatus: string,
-  reason?: string,
-): Promise<TicketDetail>;
-function transitionTicket(
-  number: string,
-  values: TicketTransitionRequest | string,
-  reason = "",
 ): Promise<TicketDetail> {
   return api<TicketDetail>(`/tickets/${number}/transition/`, {
     method: "POST",
-    body:
-      typeof values === "string"
-        ? { to_status: values, reason }
-        : values,
+    body: values,
   });
 }
 

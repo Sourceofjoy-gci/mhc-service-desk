@@ -1,5 +1,23 @@
-import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
-import * as apiClient from "./api";
+import {
+  afterEach,
+  beforeEach,
+  describe,
+  expect,
+  expectTypeOf,
+  it,
+  vi,
+} from "vitest";
+import {
+  ApiError,
+  apiProblem,
+  attachmentsApi,
+  configureApiAuth,
+  ticketsApi,
+  type TicketDetail,
+  type TicketSummary,
+  type TicketTransitionRequest,
+  type TicketWorkStateUpdate,
+} from "./api";
 
 function jsonResponse(status: number, body: unknown = {}) {
   return new Response(status === 204 ? null : JSON.stringify(body), {
@@ -8,32 +26,18 @@ function jsonResponse(status: number, body: unknown = {}) {
   });
 }
 
-function request(call: unknown[]): { url: unknown; init: RequestInit } {
-  return { url: call[0], init: call[1] as RequestInit };
-}
-
-interface LifecycleTicketsApi {
-  updateWorkState(
-    number: string,
-    values: Record<string, unknown>,
-  ): Promise<unknown>;
-  transition(number: string, values: Record<string, unknown>): Promise<unknown>;
-  activity(number: string): Promise<unknown>;
-  assignees(number: string): Promise<unknown>;
-}
-
-interface LifecycleAttachmentsApi {
-  list(number: string): Promise<unknown>;
-  upload(number: string, files: readonly File[]): Promise<unknown>;
-  download(id: string): Promise<unknown>;
+function request(call: [input: RequestInfo | URL, init?: RequestInit]): {
+  url: RequestInfo | URL;
+  init: RequestInit;
+} {
+  return { url: call[0], init: call[1] ?? {} };
 }
 
 describe("ticket lifecycle API contracts", () => {
   let disposeAuth: () => void;
-  const ticketsApi = apiClient.ticketsApi as unknown as LifecycleTicketsApi;
 
   beforeEach(() => {
-    disposeAuth = apiClient.configureApiAuth({
+    disposeAuth = configureApiAuth({
       getAccessToken: vi.fn().mockResolvedValue("staff-token"),
       refresh: vi.fn().mockResolvedValue(false),
       login: vi.fn().mockResolvedValue(undefined),
@@ -52,7 +56,7 @@ describe("ticket lifecycle API contracts", () => {
       updated_at: "2026-07-27T08:00:00Z",
       next_action: "Call requester",
       next_action_at: "2026-07-28T08:00:00Z",
-    };
+    } satisfies TicketWorkStateUpdate;
 
     await ticketsApi.updateWorkState("OP-202607-000001", values);
 
@@ -75,7 +79,7 @@ describe("ticket lifecycle API contracts", () => {
       resolution_code: "INFO_PROVIDED",
       resolution_summary:
         "The requester received the required information.",
-    };
+    } satisfies TicketTransitionRequest;
 
     await ticketsApi.transition("OP-202607-000001", values);
 
@@ -111,9 +115,6 @@ describe("ticket lifecycle API contracts", () => {
       .spyOn(globalThis, "fetch")
       .mockResolvedValueOnce(jsonResponse(200, { results: [] }))
       .mockResolvedValueOnce(jsonResponse(201, { results: [] }));
-    const attachmentsApi = (
-      apiClient as unknown as { attachmentsApi: LifecycleAttachmentsApi }
-    ).attachmentsApi;
     const first = new File(["first"], "first.txt", { type: "text/plain" });
     const second = new File(["second"], "second.txt", { type: "text/plain" });
 
@@ -146,10 +147,6 @@ describe("ticket lifecycle API contracts", () => {
     const fetchMock = vi
       .spyOn(globalThis, "fetch")
       .mockResolvedValueOnce(jsonResponse(200, response));
-    const attachmentsApi = (
-      apiClient as unknown as { attachmentsApi: LifecycleAttachmentsApi }
-    ).attachmentsApi;
-
     await expect(attachmentsApi.download("attachment-1")).resolves.toEqual(
       response,
     );
@@ -158,15 +155,22 @@ describe("ticket lifecycle API contracts", () => {
       init: { method: "GET" },
     });
   });
+
+  it("requires accepted lifecycle fields at compile time", () => {
+    expectTypeOf<TicketSummary["available_transition_codes"]>().toEqualTypeOf<
+      string[]
+    >();
+    expectTypeOf(ticketsApi.transition).toEqualTypeOf<
+      (
+        number: string,
+        values: TicketTransitionRequest,
+      ) => Promise<TicketDetail>
+    >();
+  });
 });
 
 describe("canonical API problems", () => {
   it("exposes only complete canonical error bodies", () => {
-    const apiProblem = (
-      apiClient as unknown as {
-        apiProblem(error: unknown): unknown;
-      }
-    ).apiProblem;
     const problem = {
       code: "stale_ticket",
       detail: "The ticket was updated by another user.",
@@ -174,10 +178,10 @@ describe("canonical API problems", () => {
       correlation_id: "corr-123",
     };
 
-    expect(apiProblem(new apiClient.ApiError(409, problem))).toEqual(problem);
+    expect(apiProblem(new ApiError(409, problem))).toEqual(problem);
     expect(
       apiProblem(
-        new apiClient.ApiError(400, {
+        new ApiError(400, {
           code: "invalid_work_state",
           detail: "Work state is invalid.",
           fields: { next_action: "Must be text." },
