@@ -143,11 +143,44 @@ def test_legacy_m3_email_ids_are_unique_per_run_and_related_within_a_run():
     first = smoke.email_message_ids()
     second = smoke.email_message_ids()
 
-    assert set(first) == {"initial", "reply", "subject_reply"}
-    assert len(set(first.values())) == 3
-    assert first["initial"] != second["initial"]
-    assert all(value.startswith("<m3-") for value in first.values())
-    assert all(value.endswith("@example.com>") for value in first.values())
+    for family in (first, second):
+        assert set(family) == {"initial", "reply", "subject_reply"}
+        assert len(set(family.values())) == 3
+        assert all(value.startswith("<m3-") for value in family.values())
+        assert all(value.endswith("@example.com>") for value in family.values())
+    assert set(first.values()).isdisjoint(second.values())
+
+
+def test_email_update_validation_accepts_only_the_expected_updated_ticket():
+    outcome = {
+        "status": "updated",
+        "ticket_number": "OP-202607-000001",
+        "domain": "operational",
+    }
+
+    smoke.validate_email_update_outcome(
+        outcome,
+        expected_ticket_number="OP-202607-000001",
+        label="threaded reply",
+    )
+
+
+@pytest.mark.parametrize(
+    "outcome",
+    [
+        {"status": "duplicate", "ticket_number": "OP-202607-000001"},
+        {"status": "updated", "ticket_number": "OP-202607-999999"},
+        {"ticket_number": "OP-202607-000001"},
+        {"status": "updated"},
+    ],
+)
+def test_email_update_validation_rejects_non_updates_and_wrong_targets(outcome):
+    with pytest.raises(smoke.SmokeError):
+        smoke.validate_email_update_outcome(
+            outcome,
+            expected_ticket_number="OP-202607-000001",
+            label="threaded reply",
+        )
 
 
 @pytest.mark.parametrize(

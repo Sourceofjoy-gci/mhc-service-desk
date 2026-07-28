@@ -16,6 +16,7 @@ OPS_HEADERS = {"Authorization": "Bearer dev:alice:ops-agents"}
 IT_HEADERS = {"Authorization": "Bearer dev:bob:it-agents"}
 must = pilot_helpers.legacy_must
 email_message_ids = pilot_helpers.email_message_ids
+validate_email_update_outcome = pilot_helpers.validate_email_update_outcome
 
 
 def main():
@@ -156,7 +157,9 @@ def main():
         timeout=REQUEST_TIMEOUT,
     )
     must(r, 201, "email intake creates new ticket")
-    print(f"     {r.json()}")
+    created_outcome = r.json()
+    email_ticket_number = created_outcome["ticket_number"]
+    print(f"     {created_outcome}")
 
     # 8. Idempotency: same message_id returns duplicate
     r = session.post(
@@ -188,7 +191,13 @@ def main():
         timeout=REQUEST_TIMEOUT,
     )
     must(r, 200, "threaded reply attaches to existing ticket")
-    print(f"     {r.json()}")
+    threaded_outcome = r.json()
+    validate_email_update_outcome(
+        threaded_outcome,
+        expected_ticket_number=email_ticket_number,
+        label="threaded reply",
+    )
+    print(f"     {threaded_outcome}")
 
     # 10. Subject token — manual reference via [OP-...]
     r = session.post(
@@ -203,7 +212,13 @@ def main():
         timeout=REQUEST_TIMEOUT,
     )
     must(r, 200, "subject-token reply attaches to parent")
-    print(f"     {r.json()}")
+    subject_outcome = r.json()
+    validate_email_update_outcome(
+        subject_outcome,
+        expected_ticket_number=parent_number,
+        label="subject-token reply",
+    )
+    print(f"     {subject_outcome}")
 
     print("\nAll M3 smoke checks passed ✅")
 

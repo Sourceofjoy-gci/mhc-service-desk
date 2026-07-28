@@ -266,6 +266,21 @@ def email_message_ids() -> dict[str, str]:
     }
 
 
+def validate_email_update_outcome(
+    outcome: object,
+    *,
+    expected_ticket_number: str,
+    label: str,
+) -> None:
+    """Fail closed unless email processing updated the expected ticket."""
+    _require(isinstance(outcome, dict), f"{label}: response was not an object")
+    _require(outcome.get("status") == "updated", f"{label}: status was not updated")
+    _require(
+        outcome.get("ticket_number") == expected_ticket_number,
+        f"{label}: response targeted the wrong ticket",
+    )
+
+
 def _intake_payload(suffix: str, *, child_parent: bool = False) -> dict[str, Any]:
     purpose = "IT child parent" if child_parent else "lifecycle"
     return {
