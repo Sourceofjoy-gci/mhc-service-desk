@@ -1,4 +1,4 @@
-import { Link } from "react-router-dom";
+import { Link, useLocation } from "react-router-dom";
 import { Clock, Building2, ArrowUpRight } from "lucide-react";
 import type { TicketSummary } from "@/lib/api";
 import {
@@ -23,9 +23,13 @@ interface TicketCardProps {
 }
 
 export function TicketCard({ ticket, draggable = false }: TicketCardProps) {
+  const location = useLocation();
+  const returnTo = `${location.pathname}${location.search}`;
+
   return (
     <Link
       to={`/tickets/${ticket.number}`}
+      state={{ returnTo }}
       data-ticket-number={ticket.number}
       data-draggable={draggable ? "true" : undefined}
       className="group block text-card-foreground no-underline hover:no-underline focus-visible:outline-none"

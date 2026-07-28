@@ -1,426 +1,396 @@
-import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
-import { AlertCircle, ArrowLeft, Send, StickyNote } from "lucide-react";
-import { useState } from "react";
-import { Link, useParams } from "react-router-dom";
+import { useQuery, useQueryClient } from "@tanstack/react-query";
+import { AlertCircle, ArrowLeft } from "lucide-react";
+import { Link, useLocation, useParams } from "react-router-dom";
 import {
   ChannelBadge,
   PriorityBadge,
   StatusBadge,
 } from "@/components/domain-badges";
 import { Alert, AlertDescription, AlertTitle } from "@/components/ui/alert";
-import { Button } from "@/components/ui/button";
+import { buttonVariants } from "@/components/ui/button";
 import {
   Card,
   CardContent,
   CardDescription,
-  CardFooter,
   CardHeader,
   CardTitle,
 } from "@/components/ui/card";
-import {
-  Empty,
-  EmptyDescription,
-  EmptyHeader,
-  EmptyTitle,
-} from "@/components/ui/empty";
-import { Field, FieldGroup, FieldLabel } from "@/components/ui/field";
 import { Separator } from "@/components/ui/separator";
 import { Skeleton } from "@/components/ui/skeleton";
-import { Spinner } from "@/components/ui/spinner";
-import { Textarea } from "@/components/ui/textarea";
-import { ticketsApi, type TicketDetail } from "../../lib/api";
+import {
+  ApiError,
+  apiProblem,
+  ticketsApi,
+  type TicketDetail,
+  type TicketRelationship,
+} from "@/lib/api";
+import { ActivityTimeline } from "./ActivityTimeline";
 import AttachmentUploader from "./AttachmentUploader";
+import { MessageComposer } from "./MessageComposer";
+import { OperationsPanel } from "./OperationsPanel";
+import { SlaClocks } from "./SlaClocks";
+import { TransitionActions } from "./TransitionActions";
+
+function admittedReturnTo(value: unknown): string {
+  if (typeof value !== "string") return "/tickets";
+  if (
+    value === "/tickets" ||
+    value.startsWith("/tickets?") ||
+    value.startsWith("/tickets#") ||
+    value.startsWith("/tickets/")
+  ) {
+    return value;
+  }
+  return "/tickets";
+}
+
+function ticketPath(ticketNumber: string): string {
+  return `/tickets/${encodeURIComponent(ticketNumber)}`;
+}
+
+function humanize(value: string): string {
+  return value
+    .replaceAll("_", " ")
+    .replaceAll("-", " ")
+    .replace(/\b\w/g, (letter) => letter.toUpperCase());
+}
+
+function BackToQueue({ to }: { to: string }) {
+  return (
+    <Link to={to} className={buttonVariants({ variant: "ghost", size: "sm" })}>
+      <ArrowLeft data-icon="inline-start" aria-hidden />
+      Back to queue
+    </Link>
+  );
+}
+
+function TicketLoading() {
+  return (
+    <section
+      className="flex flex-col gap-6"
+      aria-busy="true"
+      aria-label="Loading ticket"
+    >
+      <Skeleton className="h-7 w-32" />
+      <div className="flex flex-col gap-3">
+        <Skeleton className="h-4 w-28" />
+        <Skeleton className="h-9 w-3/4" />
+        <Skeleton className="h-5 w-2/3" />
+        <Skeleton className="h-20 w-full" />
+      </div>
+      <div className="grid grid-cols-1 gap-6 lg:grid-cols-[minmax(0,2fr)_minmax(18rem,1fr)]">
+        <Skeleton className="h-96 w-full" />
+        <div className="flex flex-col gap-4">
+          <Skeleton className="h-72 w-full" />
+          <Skeleton className="h-40 w-full" />
+        </div>
+      </div>
+    </section>
+  );
+}
+
+function TicketLoadFailure({
+  error,
+  returnTo,
+}: {
+  error: unknown;
+  returnTo: string;
+}) {
+  const problem = apiProblem(error);
+  const status = error instanceof ApiError ? error.status : null;
+  const copy =
+    status === 401
+      ? {
+          title: "Authentication required",
+          fallback: "Sign in again to open this ticket.",
+        }
+      : status === 403
+        ? {
+            title: "Ticket access denied",
+            fallback: "You do not have permission to view this ticket.",
+          }
+        : status === 404
+          ? {
+              title: "Ticket not found",
+              fallback: "This ticket may have been removed or is unavailable.",
+            }
+          : {
+              title: "Could not load ticket",
+              fallback: "The ticket details are unavailable. Please try again.",
+            };
+
+  return (
+    <Alert variant="destructive">
+      <AlertCircle data-icon="inline-start" aria-hidden />
+      <AlertTitle>{copy.title}</AlertTitle>
+      <AlertDescription>
+        <p>{problem?.detail ?? copy.fallback}</p>
+        {problem ? <p>Reference: {problem.correlation_id}</p> : null}
+        <p>
+          <Link to={returnTo}>Back to queue</Link>
+        </p>
+      </AlertDescription>
+    </Alert>
+  );
+}
+
+function Relationships({
+  relationships,
+}: {
+  relationships: TicketRelationship[];
+}) {
+  return (
+    <section aria-labelledby="relationships-heading" className="space-y-3">
+      <div>
+        <h2 id="relationships-heading" className="text-base font-semibold">
+          Relationships
+        </h2>
+        <p className="text-sm text-muted-foreground">
+          Tickets linked to the current request.
+        </p>
+      </div>
+      {relationships.length ? (
+        <ul className="divide-y border-y" aria-label="Ticket relationships">
+          {relationships.map((relationship) => (
+            <li
+              key={relationship.id}
+              className="flex items-center justify-between gap-3 py-3"
+            >
+              <div className="min-w-0">
+                <Link
+                  className="break-all text-sm font-medium text-primary underline underline-offset-4"
+                  to={ticketPath(relationship.ticket_number)}
+                >
+                  {relationship.ticket_number}
+                </Link>
+                <p className="mt-0.5 text-xs text-muted-foreground">
+                  {humanize(relationship.kind)}
+                </p>
+              </div>
+              <span className="shrink-0 text-xs text-muted-foreground">
+                {humanize(relationship.direction)}
+              </span>
+            </li>
+          ))}
+        </ul>
+      ) : (
+        <p className="border-y py-3 text-sm text-muted-foreground">
+          No related tickets.
+        </p>
+      )}
+    </section>
+  );
+}
+
+function RequesterCard({ ticket }: { ticket: TicketDetail }) {
+  return (
+    <Card className="rounded-lg!">
+      <CardHeader>
+        <CardTitle>
+          <h2>Requester</h2>
+        </CardTitle>
+        <CardDescription>Contact details for this ticket.</CardDescription>
+      </CardHeader>
+      <CardContent>
+        <dl className="text-sm">
+          <div className="flex items-start justify-between gap-4">
+            <dt className="text-muted-foreground">Full name</dt>
+            <dd className="text-right font-medium">
+              {ticket.requester.full_name}
+            </dd>
+          </div>
+          {ticket.requester.email ? (
+            <>
+              <Separator className="my-3" />
+              <div className="flex items-start justify-between gap-4">
+                <dt className="text-muted-foreground">Email</dt>
+                <dd className="break-all text-right">
+                  {ticket.requester.email}
+                </dd>
+              </div>
+            </>
+          ) : null}
+          {ticket.requester.phone_e164 ? (
+            <>
+              <Separator className="my-3" />
+              <div className="flex items-start justify-between gap-4">
+                <dt className="text-muted-foreground">Phone</dt>
+                <dd className="text-right">{ticket.requester.phone_e164}</dd>
+              </div>
+            </>
+          ) : null}
+        </dl>
+      </CardContent>
+    </Card>
+  );
+}
+
+function ClassificationCard({ ticket }: { ticket: TicketDetail }) {
+  return (
+    <Card className="rounded-lg!">
+      <CardHeader>
+        <CardTitle>
+          <h2>Classification</h2>
+        </CardTitle>
+        <CardDescription>Routing and matter details.</CardDescription>
+      </CardHeader>
+      <CardContent>
+        <dl className="text-sm">
+          <div className="flex items-center justify-between gap-4">
+            <dt className="text-muted-foreground">Channel</dt>
+            <dd>
+              <ChannelBadge channel={ticket.channel} />
+            </dd>
+          </div>
+          <Separator className="my-3" />
+          <div className="flex items-start justify-between gap-4">
+            <dt className="text-muted-foreground">Office</dt>
+            <dd className="text-right">{ticket.office}</dd>
+          </div>
+          <Separator className="my-3" />
+          <div className="flex items-start justify-between gap-4">
+            <dt className="text-muted-foreground">Service</dt>
+            <dd className="text-right">{ticket.service}</dd>
+          </div>
+          <Separator className="my-3" />
+          <div className="flex items-start justify-between gap-4">
+            <dt className="text-muted-foreground">Type</dt>
+            <dd className="text-right">{ticket.request_type}</dd>
+          </div>
+          {ticket.matter_reference ? (
+            <>
+              <Separator className="my-3" />
+              <div className="flex items-start justify-between gap-4">
+                <dt className="text-muted-foreground">Matter</dt>
+                <dd className="break-all text-right text-xs">
+                  {ticket.matter_reference}
+                </dd>
+              </div>
+            </>
+          ) : null}
+        </dl>
+      </CardContent>
+    </Card>
+  );
+}
 
 export default function TicketDetailPage() {
   const { number } = useParams<{ number: string }>();
-  const qc = useQueryClient();
+  const location = useLocation();
+  const queryClient = useQueryClient();
+  const returnTo = admittedReturnTo(
+    (location.state as { returnTo?: unknown } | null)?.returnTo,
+  );
 
-  const { data, isLoading, error } = useQuery({
+  const ticketQuery = useQuery({
     queryKey: ["ticket", number],
     queryFn: () => ticketsApi.get(number!),
-    enabled: !!number,
+    enabled: Boolean(number),
   });
 
-  const [reply, setReply] = useState("");
-  const [note, setNote] = useState("");
+  if (ticketQuery.isLoading) return <TicketLoading />;
 
-  const addMessage = useMutation({
-    mutationFn: (body_text: string) =>
-      ticketsApi.addMessage(number!, body_text),
-    onSuccess: () => {
-      setReply("");
-      qc.invalidateQueries({ queryKey: ["ticket", number] });
-    },
-  });
-
-  const addNote = useMutation({
-    mutationFn: (body: string) => ticketsApi.addNote(number!, body),
-    onSuccess: () => {
-      setNote("");
-      qc.invalidateQueries({ queryKey: ["ticket", number] });
-    },
-  });
-
-  if (isLoading) {
-    return (
-      <section
-        className="flex flex-col gap-6"
-        aria-busy="true"
-        aria-label="Loading ticket"
-      >
-        <Skeleton className="h-7 w-32" />
-        <div className="flex flex-col gap-3">
-          <Skeleton className="h-4 w-28" />
-          <Skeleton className="h-9 w-3/4" />
-          <Skeleton className="h-5 w-2/3" />
-          <Skeleton className="h-20 w-full" />
-        </div>
-        <div className="grid grid-cols-1 gap-4 lg:grid-cols-3">
-          <div className="flex flex-col gap-4 lg:col-span-2">
-            {Array.from({ length: 3 }, (_, index) => (
-              <Card key={index} className="rounded-lg!">
-                <CardHeader>
-                  <Skeleton className="h-5 w-32" />
-                  <Skeleton className="h-4 w-48" />
-                </CardHeader>
-                <CardContent className="flex flex-col gap-3">
-                  <Skeleton className="h-16 w-full" />
-                  <Skeleton className="h-16 w-full" />
-                </CardContent>
-              </Card>
-            ))}
-          </div>
-          <div className="flex flex-col gap-4">
-            {Array.from({ length: 2 }, (_, index) => (
-              <Card key={index} className="rounded-lg!">
-                <CardHeader>
-                  <Skeleton className="h-5 w-28" />
-                  <Skeleton className="h-4 w-40" />
-                </CardHeader>
-                <CardContent className="flex flex-col gap-3">
-                  <Skeleton className="h-5 w-full" />
-                  <Skeleton className="h-5 w-full" />
-                  <Skeleton className="h-5 w-3/4" />
-                </CardContent>
-              </Card>
-            ))}
-          </div>
-        </div>
-      </section>
-    );
+  if (ticketQuery.error || !ticketQuery.data) {
+    return <TicketLoadFailure error={ticketQuery.error} returnTo={returnTo} />;
   }
 
-  if (error || !data) {
-    return (
-      <Alert variant="destructive">
-        <AlertCircle data-icon="inline-start" aria-hidden />
-        <AlertTitle>Could not load ticket {number}</AlertTitle>
-        <AlertDescription>
-          The ticket details are unavailable.{" "}
-          <Link to="/tickets">Back to queue</Link>
-        </AlertDescription>
-      </Alert>
-    );
-  }
-
-  const t = data as TicketDetail;
+  const ticket = ticketQuery.data;
+  const replaceTicket = (updatedTicket: TicketDetail) => {
+    queryClient.setQueryData(["ticket", number], updatedTicket);
+  };
+  const reloadTicket = () =>
+    queryClient.refetchQueries({
+      queryKey: ["ticket", number],
+      exact: true,
+    });
+  const refreshActivity = () =>
+    queryClient.invalidateQueries({
+      queryKey: ["ticket-activity", number],
+      exact: true,
+    });
 
   return (
     <section className="flex flex-col gap-6">
       <div>
-        <Button
-          variant="ghost"
-          size="sm"
-          render={<Link to="/tickets" />}
-          nativeButton={false}
-        >
-          <ArrowLeft data-icon="inline-start" />
-          Back to queue
-        </Button>
+        <BackToQueue to={returnTo} />
       </div>
 
       <header className="flex flex-col gap-4">
         <div className="flex flex-col justify-between gap-4 md:flex-row md:items-start">
           <div className="flex min-w-0 flex-col gap-1">
             <p className="font-mono text-xs text-muted-foreground">
-              {t.number}
+              {ticket.number}
             </p>
-            <h1 className="text-2xl font-semibold tracking-tight">{t.title}</h1>
+            <h1 className="text-2xl font-semibold tracking-tight">
+              {ticket.title}
+            </h1>
             <p className="text-sm text-muted-foreground">
-              {t.requester.full_name} · {t.office} · {t.service} ·{" "}
-              {t.request_type}
+              {ticket.requester.full_name} · {ticket.office} · {ticket.service}{" "}
+              · {ticket.request_type}
             </p>
           </div>
           <div className="flex flex-wrap items-center gap-2 md:justify-end">
-            <StatusBadge code={t.status_code} label={t.status_name} />
-            <PriorityBadge code={t.priority} />
-            <ChannelBadge channel={t.channel} />
+            <StatusBadge code={ticket.status_code} label={ticket.status_name} />
+            <PriorityBadge code={ticket.priority} />
+            <ChannelBadge channel={ticket.channel} />
             <span className="text-sm tabular-nums text-muted-foreground">
-              {t.age_hours.toFixed(1)}h old
+              {ticket.age_hours.toFixed(1)}h old
             </span>
           </div>
         </div>
-        {t.description && (
+        {ticket.description ? (
           <p className="max-w-4xl whitespace-pre-line text-sm leading-relaxed text-foreground">
-            {t.description}
+            {ticket.description}
           </p>
-        )}
+        ) : null}
       </header>
 
-      <div className="grid grid-cols-1 gap-4 lg:grid-cols-3">
-        <div className="flex min-w-0 flex-col gap-4 lg:col-span-2">
+      <TransitionActions ticket={ticket} onUpdated={replaceTicket} />
+
+      <div
+        data-testid="ticket-workspace-layout"
+        className="grid grid-cols-1 gap-6 lg:grid-cols-[minmax(0,2fr)_minmax(18rem,1fr)]"
+      >
+        <main className="min-w-0" aria-label="Ticket activity workspace">
           <Card className="rounded-lg!">
             <CardHeader>
               <CardTitle>
-                <h2>Conversation</h2>
+                <h2>Activity</h2>
               </CardTitle>
               <CardDescription>
-                Messages exchanged with the requester.
+                Requester messages and internal ticket changes in one stream.
               </CardDescription>
             </CardHeader>
             <CardContent>
-              {t.messages.length === 0 ? (
-                <Empty className="min-h-24 p-4">
-                  <EmptyHeader>
-                    <EmptyTitle>No messages yet.</EmptyTitle>
-                    <EmptyDescription>
-                      Replies and requester messages will appear here.
-                    </EmptyDescription>
-                  </EmptyHeader>
-                </Empty>
-              ) : (
-                <ul className="flex flex-col" aria-label="Ticket messages">
-                  {t.messages.map((m, index) => (
-                    <li key={m.id} className="flex flex-col gap-2">
-                      {index > 0 ? <Separator className="mb-3" /> : null}
-                      <div className="flex flex-wrap items-center justify-between gap-2">
-                        <p className="text-xs font-medium">
-                          {m.direction === "outbound" ? "↑ Reply" : "↓ Inbound"}{" "}
-                          · {m.author_label || "system"}
-                        </p>
-                        <time
-                          className="text-xs text-muted-foreground"
-                          dateTime={m.created_at}
-                        >
-                          {new Date(m.created_at).toLocaleString()}
-                        </time>
-                      </div>
-                      <p className="whitespace-pre-line text-sm leading-relaxed">
-                        {m.body_text}
-                      </p>
-                    </li>
-                  ))}
-                </ul>
-              )}
+              <ActivityTimeline ticketNumber={ticket.number} />
+              <MessageComposer
+                ticketNumber={ticket.number}
+                onCreated={refreshActivity}
+              />
             </CardContent>
-            <CardFooter className="flex-col items-stretch gap-3">
-              <FieldGroup className="gap-3">
-                <Field>
-                  <FieldLabel htmlFor="ticket-reply">
-                    Reply to requester
-                  </FieldLabel>
-                  <Textarea
-                    id="ticket-reply"
-                    value={reply}
-                    onChange={(e) => setReply(e.target.value)}
-                    placeholder="Reply to the requester…"
-                    rows={3}
-                  />
-                </Field>
-              </FieldGroup>
-              <Button
-                className="self-end"
-                disabled={!reply.trim() || addMessage.isPending}
-                onClick={() => addMessage.mutate(reply)}
-              >
-                {addMessage.isPending ? (
-                  <Spinner data-icon="inline-start" />
-                ) : (
-                  <Send data-icon="inline-start" />
-                )}
-                {addMessage.isPending ? "Sending…" : "Send reply"}
-              </Button>
-            </CardFooter>
           </Card>
-
-          <Card className="rounded-lg!">
-            <CardHeader>
-              <CardTitle>
-                <h2>Internal notes</h2>
-              </CardTitle>
-              <CardDescription>
-                Notes are never visible to the requester.
-              </CardDescription>
-            </CardHeader>
-            <CardContent>
-              {t.notes.length === 0 ? (
-                <Empty className="min-h-24 p-4">
-                  <EmptyHeader>
-                    <EmptyTitle>No notes yet.</EmptyTitle>
-                    <EmptyDescription>
-                      Internal notes will appear here.
-                    </EmptyDescription>
-                  </EmptyHeader>
-                </Empty>
-              ) : (
-                <ul className="flex flex-col" aria-label="Internal notes">
-                  {t.notes.map((n, index) => (
-                    <li key={n.id} className="flex flex-col gap-2">
-                      {index > 0 ? <Separator className="mb-3" /> : null}
-                      <div className="flex flex-wrap items-center justify-between gap-2">
-                        <p className="text-xs font-medium">
-                          {n.author_subject}
-                        </p>
-                        <time
-                          className="text-xs text-muted-foreground"
-                          dateTime={n.created_at}
-                        >
-                          {new Date(n.created_at).toLocaleString()}
-                        </time>
-                      </div>
-                      <p className="whitespace-pre-line text-sm leading-relaxed">
-                        {n.body}
-                      </p>
-                    </li>
-                  ))}
-                </ul>
-              )}
-            </CardContent>
-            <CardFooter className="flex-col items-stretch gap-3">
-              <FieldGroup className="gap-3">
-                <Field>
-                  <FieldLabel htmlFor="internal-note">
-                    Add internal note
-                  </FieldLabel>
-                  <Textarea
-                    id="internal-note"
-                    value={note}
-                    onChange={(e) => setNote(e.target.value)}
-                    placeholder="Add an internal note…"
-                    rows={2}
-                  />
-                </Field>
-              </FieldGroup>
-              <Button
-                variant="secondary"
-                className="self-end"
-                disabled={!note.trim() || addNote.isPending}
-                onClick={() => addNote.mutate(note)}
-              >
-                {addNote.isPending ? (
-                  <Spinner data-icon="inline-start" />
-                ) : (
-                  <StickyNote data-icon="inline-start" />
-                )}
-                {addNote.isPending ? "Saving…" : "Add note"}
-              </Button>
-            </CardFooter>
-          </Card>
-
-          <AttachmentUploader ticketNumber={t.number} />
-        </div>
+        </main>
 
         <aside
-          className="flex min-w-0 flex-col gap-4"
-          aria-label="Ticket details"
+          className="flex min-w-0 flex-col gap-5"
+          aria-label="Ticket context"
         >
-          <Card className="rounded-lg!">
-            <CardHeader>
-              <CardTitle>
-                <h2>Requester</h2>
-              </CardTitle>
-              <CardDescription>
-                Contact details for this ticket.
-              </CardDescription>
-            </CardHeader>
-            <CardContent className="flex flex-col">
-              <dl className="text-sm">
-                <div className="flex items-start justify-between gap-4">
-                  <dt className="text-muted-foreground">Full name</dt>
-                  <dd className="text-right font-medium">
-                    {t.requester.full_name}
-                  </dd>
-                </div>
-              </dl>
-              {t.requester.email && (
-                <>
-                  <Separator className="my-3" />
-                  <dl className="text-sm">
-                    <div className="flex items-start justify-between gap-4">
-                      <dt className="text-muted-foreground">Email</dt>
-                      <dd className="break-all text-right">
-                        {t.requester.email}
-                      </dd>
-                    </div>
-                  </dl>
-                </>
-              )}
-              {t.requester.phone_e164 && (
-                <>
-                  <Separator className="my-3" />
-                  <dl className="text-sm">
-                    <div className="flex items-start justify-between gap-4">
-                      <dt className="text-muted-foreground">Phone</dt>
-                      <dd className="text-right">{t.requester.phone_e164}</dd>
-                    </div>
-                  </dl>
-                </>
-              )}
-            </CardContent>
-          </Card>
-
-          <Card className="rounded-lg!">
-            <CardHeader>
-              <CardTitle>
-                <h2>Classification</h2>
-              </CardTitle>
-              <CardDescription>Routing and matter details.</CardDescription>
-            </CardHeader>
-            <CardContent className="flex flex-col">
-              <dl className="text-sm">
-                <div className="flex items-center justify-between gap-4">
-                  <dt className="text-muted-foreground">Channel</dt>
-                  <dd>
-                    <ChannelBadge channel={t.channel} />
-                  </dd>
-                </div>
-              </dl>
-              <Separator className="my-3" />
-              <dl className="text-sm">
-                <div className="flex items-start justify-between gap-4">
-                  <dt className="text-muted-foreground">Office</dt>
-                  <dd className="text-right">{t.office}</dd>
-                </div>
-              </dl>
-              <Separator className="my-3" />
-              <dl className="text-sm">
-                <div className="flex items-start justify-between gap-4">
-                  <dt className="text-muted-foreground">Service</dt>
-                  <dd className="text-right">{t.service}</dd>
-                </div>
-              </dl>
-              <Separator className="my-3" />
-              <dl className="text-sm">
-                <div className="flex items-start justify-between gap-4">
-                  <dt className="text-muted-foreground">Type</dt>
-                  <dd className="text-right">{t.request_type}</dd>
-                </div>
-              </dl>
-              {t.matter_reference && (
-                <>
-                  <Separator className="my-3" />
-                  <dl className="text-sm">
-                    <div className="flex items-start justify-between gap-4">
-                      <dt className="text-muted-foreground">Matter</dt>
-                      <dd className="break-all text-right text-xs">
-                        {t.matter_reference}
-                      </dd>
-                    </div>
-                  </dl>
-                </>
-              )}
-            </CardContent>
-          </Card>
+          <div className="border-b pb-5">
+            <OperationsPanel
+              ticket={ticket}
+              onUpdated={replaceTicket}
+              onReload={reloadTicket}
+            />
+          </div>
+          <div className="border-b pb-5">
+            <SlaClocks clocks={ticket.sla_clocks} />
+          </div>
+          <div className="border-b pb-5">
+            <Relationships relationships={ticket.relationships} />
+          </div>
+          <AttachmentUploader ticketNumber={ticket.number} />
+          <RequesterCard ticket={ticket} />
+          <ClassificationCard ticket={ticket} />
         </aside>
       </div>
     </section>
