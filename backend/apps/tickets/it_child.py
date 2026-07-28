@@ -15,6 +15,7 @@ from django.db import transaction
 from apps.catalogue.models import RequestType, Service
 from apps.contacts.models import Contact
 from apps.organisations.models import Office
+from apps.sla.services import sync_slas_for_transition
 from apps.workflow.models import Status, TransitionHistory
 
 from .events import record_ticket_event
@@ -131,6 +132,12 @@ def create_it_child_ticket(
         parent.status = waiting_it
         parent.waiting_reason = "Waiting for IT"
         parent.save(update_fields=["status", "waiting_reason", "updated_at"])
+        sync_slas_for_transition(
+            ticket=parent,
+            from_code=previous.code,
+            to_code=waiting_it.code,
+            actor_subject=event_actor,
+        )
         TransitionHistory.objects.create(
             ticket=parent,
             from_status=previous,
@@ -183,16 +190,23 @@ def sync_child_status_to_parent(*, child: Ticket, actor_subject: str = "") -> No
     parent.status = target
     parent.waiting_reason = ""
     parent.save(update_fields=["status", "waiting_reason", "updated_at"])
+    event_actor = actor_subject or "it-child-sync"
+    sync_slas_for_transition(
+        ticket=parent,
+        from_code=previous.code,
+        to_code=target.code,
+        actor_subject=event_actor,
+    )
     TransitionHistory.objects.create(
         ticket=parent,
         from_status=previous,
         to_status=target,
-        actor_subject=actor_subject or "it-child-sync",
+        actor_subject=event_actor,
         reason=f"IT child {child.number} returned: {child.status.name}",
     )
     record_ticket_event(
         ticket=parent,
-        actor_subject=actor_subject or "it-child-sync",
+        actor_subject=event_actor,
         action="ticket.transitioned",
         before={
             "status": previous.code,

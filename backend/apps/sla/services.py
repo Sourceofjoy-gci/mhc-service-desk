@@ -235,6 +235,19 @@ def sync_slas_for_transition(
                 reason=target_pause_state,
                 actor_subject=actor_subject,
             )
+        for instance in SlaInstance.objects.select_for_update().filter(
+            ticket=ticket,
+            state__in=(
+                SlaInstance.State.PAUSED_REQUESTER,
+                SlaInstance.State.PAUSED_INTERNAL,
+                SlaInstance.State.PAUSED_IT,
+            ),
+        ).exclude(state=target_pause_state):
+            pause_sla(
+                instance=instance,
+                reason=target_pause_state,
+                actor_subject=actor_subject,
+            )
     elif prior_pause_state is not None:
         for instance in SlaInstance.objects.select_for_update().filter(
             ticket=ticket,

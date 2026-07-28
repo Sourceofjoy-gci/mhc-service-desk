@@ -281,7 +281,7 @@ class TicketViewSet(viewsets.ModelViewSet):
     @action(detail=True, methods=["get"], url_path="activity")
     def activity(self, request, number=None):
         ticket = self.get_object()
-        return Response({"results": build_ticket_activity(ticket)})
+        return Response({"results": build_ticket_activity(ticket, request=request)})
 
     @action(detail=True, methods=["get", "post"], url_path="messages")
     def messages(self, request, number=None):

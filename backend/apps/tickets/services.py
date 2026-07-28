@@ -173,6 +173,8 @@ WORK_STATE_FIELDS = {
     "confidentiality",
 }
 
+FIRST_RESPONSE_DELIVERY_STATUSES = {"", "sent", "delivered"}
+
 
 def _validate_work_state_changes(changes: dict[str, Any]) -> None:
     fields: dict[str, list[str]] = {}
@@ -443,8 +445,9 @@ def add_message(
     delivery_status: str = "",
     event_metadata: dict[str, Any] | None = None,
 ) -> TicketMessage:
+    locked_ticket = Ticket.objects.select_for_update(of=("self",)).get(id=ticket.id)
     message = TicketMessage.objects.create(
-        ticket=ticket,
+        ticket=locked_ticket,
         direction=direction,
         body_text=body_text,
         body_html=body_html,
@@ -457,7 +460,7 @@ def add_message(
         delivery_status=delivery_status,
     )
     record_ticket_event(
-        ticket=ticket,
+        ticket=locked_ticket,
         actor_subject=actor_subject,
         action="ticket.message.created",
         before={},
@@ -468,15 +471,19 @@ def add_message(
         },
         metadata=event_metadata,
     )
-    if direction == TicketMessage.Direction.OUTBOUND and ticket.first_responded_at is None:
+    is_delivered_staff_reply = (
+        direction == TicketMessage.Direction.OUTBOUND
+        and delivery_status in FIRST_RESPONSE_DELIVERY_STATUSES
+    )
+    if is_delivered_staff_reply and locked_ticket.first_responded_at is None:
         from apps.sla.services import complete_sla
 
-        ticket.first_responded_at = timezone.now()
-        ticket.save(update_fields=["first_responded_at", "updated_at"])
+        locked_ticket.first_responded_at = timezone.now()
+        locked_ticket.save(update_fields=["first_responded_at", "updated_at"])
         complete_sla(
-            ticket=ticket,
+            ticket=locked_ticket,
             kind="first_response",
-            at=ticket.first_responded_at,
+            at=locked_ticket.first_responded_at,
         )
     return message
 

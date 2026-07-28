@@ -9,9 +9,11 @@ from rest_framework import serializers
 
 from apps.contacts.api import ContactSerializer
 from apps.files.views import attachment_metadata
+from apps.identity_access.scope import get_authority_snapshot
 from apps.sla.serializers import serialize_sla_clocks
 from apps.workflow.models import Status
 
+from .activity import scoped_ticket_relationships
 from .models import OutboxEvent, Ticket, TicketLink, TicketMessage, TicketNote, Watcher
 from .permissions import (
     can_change_confidentiality,
@@ -156,6 +158,17 @@ class TicketDetailSerializer(TicketListSerializer):
         }
 
     def get_relationships(self, obj: Ticket) -> list[dict[str, str]]:
+        request = self.context.get("request")
+        actor = getattr(request, "user", None)
+        if actor is None or not actor.is_authenticated:
+            return []
+        snapshot = get_authority_snapshot(actor, request=request)
+        scoped_links = scoped_ticket_relationships(
+            obj,
+            actor,
+            request=request,
+            snapshot=snapshot,
+        )
         relationships = [
             {
                 "id": str(link.id),
@@ -163,7 +176,8 @@ class TicketDetailSerializer(TicketListSerializer):
                 "ticket_number": link.to_ticket.number,
                 "direction": "outgoing",
             }
-            for link in obj.links_from.select_related("to_ticket")
+            for link in scoped_links
+            if link.from_ticket_id == obj.id
         ]
         relationships.extend(
             {
@@ -172,7 +186,8 @@ class TicketDetailSerializer(TicketListSerializer):
                 "ticket_number": link.from_ticket.number,
                 "direction": "incoming",
             }
-            for link in obj.links_to.select_related("from_ticket")
+            for link in scoped_links
+            if link.to_ticket_id == obj.id
         )
         return sorted(relationships, key=lambda relationship: relationship["id"])
 

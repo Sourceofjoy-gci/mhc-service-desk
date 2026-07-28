@@ -4,9 +4,13 @@ from __future__ import annotations
 import pytest
 from django.utils import timezone
 
+from apps.audit.models import AuditEvent
 from apps.catalogue.models import RequestType
+from apps.sla.models import SlaPauseHistory, SlaPolicy
+from apps.sla.services import instantiate_slas
 from apps.tickets import it_child, services
-from apps.tickets.models import TicketLink
+from apps.tickets.models import OutboxEvent, TicketLink
+from apps.workflow.models import Status, TransitionHistory
 
 pytestmark = pytest.mark.django_db
 
@@ -210,3 +214,81 @@ def test_child_sync_records_the_actual_non_default_parent_waiting_reason(world):
         "waiting_reason": "Awaiting privileged-access approval",
     }
     assert event.payload["after"] == {"status": "in_progress", "waiting_reason": ""}
+
+
+def test_it_child_parent_transition_pauses_and_resumes_sla_without_extra_events(world):
+    parent = services.create_ticket(
+        domain="operational",
+        title="IT dependency",
+        description="",
+        requester=world["contact"],
+        service=world["gen_info"],
+        request_type=world["op_rt"],
+        office=world["office"],
+        channel="email",
+        actor_subject="creator",
+    )
+    parent.status = Status.objects.get(domain="operational", code="in_progress")
+    parent.save(update_fields=["status", "updated_at"])
+    instantiate_slas(
+        ticket=parent,
+        policy=SlaPolicy.objects.get(domain="operational", priority=parent.priority),
+    )
+    resolution_sla = parent.sla_instances.get(kind="resolution")
+    before_history = TransitionHistory.objects.filter(ticket=parent).count()
+    before_audits = AuditEvent.objects.filter(
+        object_id=str(parent.id),
+        action="ticket.transitioned",
+    ).count()
+    before_outbox = OutboxEvent.objects.filter(
+        aggregate_id=str(parent.id),
+        event_type="ticket.transitioned",
+    ).count()
+
+    child = it_child.create_it_child_ticket(
+        parent=parent,
+        summary="Investigate dependency",
+        requester=world["contact"],
+        requester_office=world["office"],
+        technical_priority="P3",
+        actor_subject="ops-agent",
+    )
+
+    resolution_sla.refresh_from_db()
+    assert resolution_sla.state == "paused_it"
+    pause = SlaPauseHistory.objects.get(instance=resolution_sla)
+    assert pause.state == "paused_it"
+    assert pause.actor_subject == "ops-agent"
+    assert TransitionHistory.objects.filter(ticket=parent).count() == before_history + 1
+    assert AuditEvent.objects.filter(
+        object_id=str(parent.id), action="ticket.transitioned"
+    ).count() == before_audits + 1
+    assert OutboxEvent.objects.filter(
+        aggregate_id=str(parent.id), event_type="ticket.transitioned"
+    ).count() == before_outbox + 1
+
+    child.status = Status.objects.get(domain="it", code="resolved")
+    child.save(update_fields=["status", "updated_at"])
+    it_child.sync_child_status_to_parent(
+        child=child,
+        actor_subject="it-sync-agent",
+    )
+
+    parent.refresh_from_db()
+    resolution_sla.refresh_from_db()
+    sla_history = list(
+        SlaPauseHistory.objects.filter(instance=resolution_sla).order_by("at", "id")
+    )
+    assert parent.status.code == "in_progress"
+    assert resolution_sla.state == "active"
+    assert [(item.state, item.actor_subject) for item in sla_history] == [
+        ("paused_it", "ops-agent"),
+        ("active", "it-sync-agent"),
+    ]
+    assert TransitionHistory.objects.filter(ticket=parent).count() == before_history + 2
+    assert AuditEvent.objects.filter(
+        object_id=str(parent.id), action="ticket.transitioned"
+    ).count() == before_audits + 2
+    assert OutboxEvent.objects.filter(
+        aggregate_id=str(parent.id), event_type="ticket.transitioned"
+    ).count() == before_outbox + 2

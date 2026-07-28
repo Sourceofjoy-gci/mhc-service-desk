@@ -7,12 +7,59 @@ from apps.audit.models import AuditEvent
 from apps.files.models import Attachment
 from apps.files.views import attachment_metadata
 from apps.identity_access.models import User
+from apps.identity_access.scope import get_authority_snapshot, scope_ticket_queryset
 from apps.workflow.models import TransitionHistory
 
 from .models import Ticket, TicketLink, TicketMessage, TicketNote
 
 
-def build_ticket_activity(ticket: Ticket) -> list[dict[str, object]]:
+def scoped_ticket_relationships(
+    ticket: Ticket,
+    actor,
+    *,
+    request=None,
+    snapshot=None,
+) -> list[TicketLink]:
+    """Return links whose counterpart is visible in one canonical snapshot."""
+    relationships = list(
+        TicketLink.objects.filter(
+            Q(from_ticket=ticket) | Q(to_ticket=ticket)
+        ).select_related("from_ticket", "to_ticket")
+    )
+    counterpart_ids = {
+        relationship.to_ticket_id
+        if relationship.from_ticket_id == ticket.id
+        else relationship.from_ticket_id
+        for relationship in relationships
+    }
+    authority = snapshot or get_authority_snapshot(actor, request=request)
+    visible_ids = set(
+        scope_ticket_queryset(
+            actor,
+            Ticket.objects.filter(id__in=counterpart_ids),
+            request=request,
+            snapshot=authority,
+        ).values_list("id", flat=True)
+    )
+    return [
+        relationship
+        for relationship in relationships
+        if (
+            relationship.to_ticket_id
+            if relationship.from_ticket_id == ticket.id
+            else relationship.from_ticket_id
+        )
+        in visible_ids
+    ]
+
+
+def build_ticket_activity(
+    ticket: Ticket,
+    *,
+    request=None,
+    snapshot=None,
+    relationships: list[TicketLink] | None = None,
+) -> list[dict[str, object]]:
     """Return stable, typed activity items oldest first without audit duplicates."""
     messages = list(TicketMessage.objects.filter(ticket=ticket))
     notes = list(TicketNote.objects.filter(ticket=ticket))
@@ -35,11 +82,21 @@ def build_ticket_activity(ticket: Ticket) -> list[dict[str, object]]:
         )
     )
     attachments = list(Attachment.objects.filter(ticket=ticket))
-    relationships = list(
-        TicketLink.objects.filter(
-            Q(from_ticket=ticket) | Q(to_ticket=ticket)
-        ).select_related("from_ticket", "to_ticket")
-    )
+    if relationships is None:
+        actor = getattr(request, "user", None)
+        if actor is not None and actor.is_authenticated:
+            relationships = scoped_ticket_relationships(
+                ticket,
+                actor,
+                request=request,
+                snapshot=snapshot,
+            )
+        else:
+            relationships = list(
+                TicketLink.objects.filter(
+                    Q(from_ticket=ticket) | Q(to_ticket=ticket)
+                ).select_related("from_ticket", "to_ticket")
+            )
 
     relationship_actors = {
         str(event.payload.get("after", {}).get("relationship_id")): event.actor_subject

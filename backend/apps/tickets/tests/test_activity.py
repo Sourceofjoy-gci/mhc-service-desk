@@ -7,14 +7,17 @@ from uuid import uuid4
 import pytest
 from django.urls import reverse
 from django.utils import timezone
-from rest_framework.test import APIClient
+from rest_framework.request import Request
+from rest_framework.test import APIClient, APIRequestFactory
 
 from apps.audit.models import AuditEvent
 from apps.files.models import Attachment
 from apps.identity_access.models import User
+from apps.identity_access.scope import get_authority_snapshot
 from apps.sla.models import SlaInstance, SlaPolicy
 from apps.tickets import services as ticket_services
 from apps.tickets.activity import build_ticket_activity
+from apps.tickets.api import TicketDetailSerializer
 from apps.tickets.models import Ticket, TicketLink, TicketMessage, TicketNote
 from apps.workflow.models import Status, TransitionHistory
 
@@ -329,3 +332,68 @@ def test_ticket_detail_adds_workspace_context_without_removing_legacy_fields(
     assert response.data["attachments"][0]["download_available"] is True
     assert response.data["sla_clocks"]["first_response"]["state"] == "not_started"
     assert response.data["sla_clocks"]["resolution"]["state"] == "running"
+
+
+@pytest.mark.parametrize(
+    ("counterpart_domain", "counterpart_confidentiality"),
+    [
+        ("operational", "restricted"),
+        ("it", "normal"),
+    ],
+)
+def test_detail_and_activity_omit_out_of_scope_relationship_identifiers(
+    basic_world,
+    counterpart_domain,
+    counterpart_confidentiality,
+):
+    visible = _ticket(basic_world)
+    hidden = _ticket(basic_world, domain=counterpart_domain)
+    hidden.confidentiality = counterpart_confidentiality
+    hidden.save(update_fields=["confidentiality"])
+    TicketLink.objects.create(from_ticket=visible, to_ticket=hidden, kind="related")
+    actor = _user(["ops-agents"], subject=f"scoped-{counterpart_domain}")
+    client = APIClient()
+    client.force_authenticate(user=actor)
+
+    detail = client.get(reverse("tickets-detail", args=[visible.number]))
+    activity = client.get(reverse("tickets-activity", args=[visible.number]))
+
+    assert detail.status_code == 200
+    assert activity.status_code == 200
+    assert hidden.number not in str(detail.data["relationships"])
+    assert hidden.number not in str(activity.data["results"])
+    assert detail.data["relationships"] == []
+    assert not [
+        item for item in activity.data["results"] if item["type"] == "relationship"
+    ]
+
+
+@pytest.mark.parametrize(
+    ("initial_groups", "mutated_groups", "expected_visible"),
+    [
+        (["ops-agents"], ["ops-supervisors"], False),
+        (["ops-supervisors"], ["ops-agents"], True),
+    ],
+)
+def test_detail_and_activity_reuse_one_request_relationship_scope_snapshot(
+    basic_world,
+    initial_groups,
+    mutated_groups,
+    expected_visible,
+):
+    visible = _ticket(basic_world)
+    restricted = _ticket(basic_world)
+    restricted.confidentiality = "restricted"
+    restricted.save(update_fields=["confidentiality"])
+    TicketLink.objects.create(from_ticket=visible, to_ticket=restricted, kind="related")
+    actor = _user(initial_groups, subject=f"snapshot-{expected_visible}")
+    request = Request(APIRequestFactory().get(f"/tickets/{visible.number}/"))
+    request.user = actor
+    get_authority_snapshot(actor, request=request)
+    actor._groups = mutated_groups
+
+    detail = TicketDetailSerializer(visible, context={"request": request}).data
+    activity = build_ticket_activity(visible, request=request)
+
+    assert (restricted.number in str(detail["relationships"])) is expected_visible
+    assert (restricted.number in str(activity)) is expected_visible

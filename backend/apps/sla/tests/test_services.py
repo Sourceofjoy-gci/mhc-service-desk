@@ -191,6 +191,26 @@ def test_leaving_waiting_state_resumes_sla_and_records_history(basic_world):
     assert history.actor_subject == "agent-1"
 
 
+def test_waiting_to_different_waiting_state_remaps_pause_and_records_history(
+    basic_world,
+):
+    ticket = _ticket(basic_world, status_code="waiting_requester")
+    instance = _instance(ticket, state="paused_requester")
+
+    sync_slas_for_transition(
+        ticket=ticket,
+        from_code="waiting_requester",
+        to_code="waiting_internal",
+        actor_subject="agent-2",
+    )
+
+    instance.refresh_from_db()
+    history = SlaPauseHistory.objects.get(instance=instance)
+    assert instance.state == "paused_internal"
+    assert history.state == "paused_internal"
+    assert history.actor_subject == "agent-2"
+
+
 def test_resolution_completes_active_clock_but_preserves_breach(basic_world):
     ticket = _ticket(basic_world)
     active = _instance(ticket)
