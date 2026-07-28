@@ -12,7 +12,7 @@ import sys
 from django.core.exceptions import ImproperlyConfigured
 
 from .base import *  # noqa: F401,F403
-from .base import DATABASES, env
+from .base import DATABASES, LOGGING, env
 
 DEBUG = False
 ENVIRONMENT = "production"
@@ -94,7 +94,11 @@ DATABASES["default"]["OPTIONS"].setdefault("connect_timeout", 5)
 
 # --- Logging hardening ---------------------------------------------------
 
-LOGGING["loggers"]["django.request"]["level"] = "ERROR"  # noqa: F405
+request_logger = LOGGING["loggers"].setdefault(
+    "django.request",
+    {"handlers": ["console"], "propagate": False},
+)
+request_logger["level"] = "ERROR"
 
 # Tell the staticfiles finder to bail out cleanly if anything is missing.
 WHITENOISE_USE_FINDERS = True  # placeholder for future WhiteNoise use
