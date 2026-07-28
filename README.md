@@ -78,10 +78,11 @@ Git Bash with GNU Make installed rather than directly from PowerShell.
   use it only with the local `config.settings.dev` stack.
 
 Each frontend gate rebuilds the current `frontend/` context and runs in a new
-one-off container. Before the gate starts, it compares `package-lock.json`
-with the dependency-volume lock hash and installs the current dependencies
-when needed. This keeps checks aligned with both the working source and lock
-file without replacing the running development server.
+one-off container with an isolated anonymous `/app/node_modules` volume. The
+volume is seeded from dependencies installed in the freshly built image and
+removed with the gate container, so concurrent gates neither share installs
+nor modify the development server's dependency volume. Tests normalize only
+their API-base environment; type, lint, and build retain the Compose inputs.
 
 ## Current milestone
 

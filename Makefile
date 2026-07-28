@@ -1,7 +1,7 @@
 .PHONY: help up down logs build ps restart migrate seed backup restore test lint type verify pilot-smoke fmt clean keycloak-export
 
 define run_frontend
-docker compose run --rm --no-deps --build --env VITE_API_BASE_URL= frontend sh -c 'set -eu; LOCK_HASH=$$(sha256sum package-lock.json | cut -d " " -f 1); if [ ! -f node_modules/.mhc-package-lock-hash ] || [ "$$(cat node_modules/.mhc-package-lock-hash 2>/dev/null)" != "$$LOCK_HASH" ]; then npm install --no-audit --no-fund --legacy-peer-deps; printf "%s" "$$LOCK_HASH" > node_modules/.mhc-package-lock-hash; fi; exec "$$@"' sh $(1)
+docker compose run --rm --no-deps --build --volume /app/node_modules frontend $(1)
 endef
 
 help:
@@ -57,7 +57,7 @@ restore:
 
 test:
 	docker compose exec backend pytest -q
-	$(call run_frontend,npm test -- --run)
+	$(call run_frontend,env VITE_API_BASE_URL= npm test -- --run)
 
 lint:
 	docker compose exec backend ruff check .
@@ -74,7 +74,7 @@ verify:
 	docker compose exec backend python manage.py makemigrations --check --dry-run
 	docker compose exec backend pytest -q
 	docker compose exec backend ruff check .
-	$(call run_frontend,npm test -- --run)
+	$(call run_frontend,env VITE_API_BASE_URL= npm test -- --run)
 	$(call run_frontend,npm run typecheck)
 	$(call run_frontend,npm run lint)
 	$(call run_frontend,npm run build)
