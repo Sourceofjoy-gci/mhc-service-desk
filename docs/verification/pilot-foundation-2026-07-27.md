@@ -25,7 +25,7 @@ raw payloads, or full logs.
 |---|---|---:|---|
 | 2026-07-28T09:39:25Z | `docker compose exec backend python manage.py makemigrations --check --dry-run` | 0 | No changes detected |
 | 2026-07-28T09:39:32Z | `docker compose exec backend python manage.py check` | 0 | System check identified no issues (0 silenced) |
-| 2026-07-28T09:39:38Z | `docker compose exec backend pytest -q` | 2 | Collection stopped with 1 error before tests ran. `test_pilot_smoke_contract.py` derives `/scripts/m2_smoke.py`, but the current backend container mounts only `backend` at `/app`; `/scripts/m2_smoke.py` does not exist in that container. |
+| 2026-07-28T09:39:38Z | `docker compose exec backend pytest -q` | 1 (outer Docker Compose process) | Pytest stopped with 1 collection error and returned internal exit 2. `test_pilot_smoke_contract.py` derives `/scripts/m2_smoke.py`, but the current backend container mounts only `backend` at `/app`; `/scripts/m2_smoke.py` does not exist in that container. |
 | 2026-07-28T09:39:51Z | `docker compose exec backend ruff check .` | 1 | 64 repository-wide violations. Categories include line length, import placement/order, Django model `__str__`, bandit rules, and undefined names from star-imported settings. No product code was changed in this documentation task. |
 | 2026-07-28T09:39:53Z | `docker compose exec backend python scripts/permission_audit.py` | 0 | Audit passed: 67 route actions across 48 API paths; required lifecycle, attachment, and reporting route families were present. |
 | 2026-07-28T09:40:48Z | `docker compose run --rm --no-deps --build --volume /app/node_modules frontend env VITE_API_BASE_URL= npm test -- --run` | 0 | 16 test files passed; 216 tests passed. |
@@ -37,6 +37,11 @@ raw payloads, or full logs.
 The permission audit result is route-metadata evidence, not proof that every
 queryset is scoped. The permission matrix pairs it with current view logic and
 focused authorization tests.
+
+An independent review reconciliation on 2026-07-28 UTC repeated the direct
+Compose pytest command twice: the outer Docker Compose process exited 1. A
+bounded in-container shell probe captured pytest's own exit as 2. Both refer to
+the same single collection error above; neither is a passing test run.
 
 ## Implemented
 
@@ -71,7 +76,8 @@ permission, validation, or stale-conflict browser claim is made here.
 
 ## Open release blockers
 
-- Full backend pytest: collection error described above.
+- Full backend pytest: outer command exit 1 / internal pytest exit 2 for the
+  collection error described above.
 - Backend Ruff: 64 violations in the fresh run above.
 - Backend mypy: Task 1's fresh gate recorded 255 errors across 52 files. Mypy
   was not rerun by Task 3 because it is outside Task 3's command list; it

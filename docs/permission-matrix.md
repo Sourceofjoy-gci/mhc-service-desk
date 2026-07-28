@@ -114,14 +114,22 @@ to any authenticated caller; it is not currently restricted to administrators
 and auditors. `GET /api/v1/administration/` is likewise an authenticated
 placeholder. These facts supersede older aspirational matrix entries.
 
-## Shared API contracts
+## Shared API contracts and migration gaps
 
-- Cursor collections use `{ "next": string|null, "previous": string|null,
-  "results": [...] }`. Ticket pagination is stable across ties and treats a
-  malformed cursor as canonical `404`.
-- DRF errors use `{ "code": string, "detail": string, "fields":
-  {string: string[]}, "correlation_id": string }`. Ticket action and file
-  validation paths return the same shape.
+- The ticket list cursor uses `{ "next": string|null, "previous":
+  string|null, "results": [...] }`. Its focused collection tests prove stable
+  traversal across tied rows and a standardized `404` for a malformed cursor.
+  This is not a claim that every collection endpoint uses cursor pagination.
+- Raised DRF exceptions handled by
+  `identity_access.exception_handlers.problem_details_handler` use
+  `{ "code": string, "detail": string, "fields": {string: string[]},
+  "correlation_id": string }`. Transition, work-state, and attachment
+  validation helpers also return that envelope on their covered paths.
+- Manual `Response` branches have not all been migrated. IT-child and public-
+  intake validation, requester/CSAT routes, and integration endpoints include
+  legacy response shapes. Uniform error envelopes across those paths remain an
+  open API-consistency gap; clients must not assume the four-field envelope on
+  every endpoint.
 - Development bearer tokens use `dev:<username>:<comma-separated-groups>` and
   are accepted only while `settings.DEBUG` is true. Production settings set
   `DEBUG = False`; `backend/apps/identity_access/tests/test_authentication.py`
@@ -131,7 +139,11 @@ placeholder. These facts supersede older aspirational matrix entries.
 
 - Route metadata: `backend/scripts/permission_audit.py`
 - Scope and auditor behavior: `backend/apps/identity_access/tests/test_scope.py`
-- Canonical errors: `backend/apps/identity_access/tests/test_api_contracts.py`
+- Standardized exception and covered action errors:
+  `backend/apps/identity_access/tests/test_api_contracts.py`,
+  `backend/apps/tickets/tests/test_transition_api.py`,
+  `backend/apps/tickets/tests/test_work_state_api.py`, and
+  `backend/apps/files/tests/test_views.py`
 - Ticket scope and pagination: `backend/apps/tickets/tests/test_scope_api.py`
   and `test_api_collections.py`
 - Work state and transitions: `backend/apps/tickets/tests/test_work_state_api.py`,

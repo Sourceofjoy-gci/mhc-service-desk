@@ -30,9 +30,13 @@ pilot-ready.
   when `DEBUG=False`.
 - [x] Ticket authority supports domain, office, service, queue, restricted-
   only grants, persisted role precedence, and read-only auditors.
-- [x] Canonical API problems contain `code`, `detail`, `fields`, and
-  `correlation_id`; cursor collections contain `next`, `previous`, and
-  `results`.
+- [x] The shared DRF exception handler and covered transition, work-state, and
+  attachment validation paths return `code`, `detail`, `fields`, and
+  `correlation_id`.
+- [x] The ticket list cursor returns `next`, `previous`, and `results`; focused
+  tests cover tied-row traversal and malformed cursors.
+- [ ] Manual error responses on IT-child, public-intake, requester/CSAT, and
+  integration paths have not all been migrated to the standardized envelope.
 - [x] Ticket mutations write audit and outbox records transactionally on the
   tested service paths.
 
