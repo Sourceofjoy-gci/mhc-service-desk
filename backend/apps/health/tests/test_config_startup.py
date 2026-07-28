@@ -48,3 +48,15 @@ def test_auth_hook_is_not_installed_outside_debug_development(debug, environment
         _config_app().ready()
 
     patch_dev_auth.assert_not_called()
+
+
+def test_celery_debug_task_preserves_its_public_registration_name():
+    from config.celery import app, debug_task
+
+    registered_task = app.tasks["config.celery.debug_task"]
+
+    assert callable(debug_task)
+    assert debug_task.name == "config.celery.debug_task"
+    assert callable(registered_task)
+    assert registered_task.name == "config.celery.debug_task"
+    assert "config.celery._debug_task" not in app.tasks

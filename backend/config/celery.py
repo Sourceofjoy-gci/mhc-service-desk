@@ -24,5 +24,6 @@ def _debug_task(self: Task) -> None:  # pragma: no cover - debug aid
 _register_debug_task: Callable[[Callable[[Task], None]], Task] = app.task(
     bind=True,
     ignore_result=True,
+    name="config.celery.debug_task",
 )
 debug_task = _register_debug_task(_debug_task)
