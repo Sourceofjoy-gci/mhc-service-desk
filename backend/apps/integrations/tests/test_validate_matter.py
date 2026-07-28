@@ -129,5 +129,6 @@ def test_validate_matter_rejects_an_inactive_user_before_provider_or_outbox_acce
 
     response = client.get(reverse("validate-matter", args=[ticket.number]))
 
-    assert response.status_code == 403
+    assert response.status_code == 404
+    assert response.data == {"detail": "ticket not found"}
     assert not OutboxEvent.objects.exists()

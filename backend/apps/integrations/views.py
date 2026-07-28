@@ -22,7 +22,7 @@ from rest_framework.response import Response
 
 from apps.identity_access.authentication import KeycloakJWTAuthentication
 from apps.identity_access.models import User
-from apps.identity_access.scope import ScopePermission, scope_ticket_queryset
+from apps.identity_access.scope import scope_ticket_queryset
 from apps.tickets.models import OutboxEvent, Ticket
 
 # Simulated estate registry. In production this is an API call.
@@ -49,7 +49,7 @@ _FAKE_ESTATES = {
 
 
 @api_view(["GET"])
-@permission_classes([IsAuthenticated, ScopePermission])
+@permission_classes([IsAuthenticated])
 def validate_matter(request: Request, ticket_number: str) -> Response:
     """Validate the matter reference on a ticket against the e-Estate stub."""
     if not isinstance(request.user, User):
