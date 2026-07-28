@@ -6,6 +6,7 @@ from rest_framework.exceptions import AuthenticationFailed
 from rest_framework.test import APIRequestFactory
 
 from apps.identity_access.authentication import KeycloakJWTAuthentication
+from config.settings.dev import _patch_dev_auth
 
 pytestmark = pytest.mark.django_db
 
@@ -33,3 +34,21 @@ def test_dev_token_is_accepted_only_in_debug_mode():
         pytest.raises(AuthenticationFailed),
     ):
         authenticator.authenticate(request)
+
+
+def test_dev_auth_patch_delegates_without_recursing():
+    request = APIRequestFactory().get(
+        "/api/v1/tickets/",
+        HTTP_AUTHORIZATION="Bearer dev:patched:ops-agents",
+    )
+    original_authenticate = KeycloakJWTAuthentication.authenticate
+
+    try:
+        _patch_dev_auth()
+        with override_settings(DEBUG=True):
+            user, payload = KeycloakJWTAuthentication().authenticate(request)
+    finally:
+        KeycloakJWTAuthentication.authenticate = original_authenticate
+
+    assert user.username == "patched"
+    assert payload["groups"] == ["ops-agents"]

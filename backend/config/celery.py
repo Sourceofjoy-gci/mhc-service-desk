@@ -6,8 +6,9 @@ must go through Celery — never block a request thread.
 from __future__ import annotations
 
 import os
+from collections.abc import Callable
 
-from celery import Celery
+from celery import Celery, Task
 
 os.environ.setdefault("DJANGO_SETTINGS_MODULE", "config.settings")
 
@@ -16,6 +17,12 @@ app.config_from_object("django.conf:settings", namespace="CELERY")
 app.autodiscover_tasks()
 
 
-@app.task(bind=True, ignore_result=True)
-def debug_task(self):  # pragma: no cover - debug aid
+def _debug_task(self: Task) -> None:  # pragma: no cover - debug aid
     print(f"Request: {self.request!r}")
+
+
+_register_debug_task: Callable[[Callable[[Task], None]], Task] = app.task(
+    bind=True,
+    ignore_result=True,
+)
+debug_task = _register_debug_task(_debug_task)

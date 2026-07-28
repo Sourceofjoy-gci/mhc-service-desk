@@ -6,14 +6,21 @@ The frontend never grants access — it only renders what the backend approves.
 """
 from __future__ import annotations
 
+from collections.abc import Callable, Iterable, Sequence
 from dataclasses import dataclass
+from datetime import datetime
+from typing import Protocol, TypeGuard, TypeVar, runtime_checkable
 from uuid import UUID
 
-from django.db.models import Q, QuerySet
+from django.db.models import Model, Q, QuerySet
 from django.utils import timezone
 from rest_framework import permissions
+from rest_framework.request import Request
+from rest_framework.views import APIView
 
-_DEFAULT_ROLE_SCOPES = {
+type RawScope = dict[str, object]
+
+_DEFAULT_ROLE_SCOPES: dict[str, tuple[RawScope, ...]] = {
     "agent-operational": ({"domain": "operational"},),
     "ops-agents": ({"domain": "operational"},),
     "supervisor-operational": ({"domain": "operational"},),
@@ -44,7 +51,7 @@ _RESTRICTED_VIEW_ROLES = {
     "security-responders",
 }
 _VALID_SCOPE_DOMAINS = {"operational", "it", "admin"}
-_SCOPE_DIMENSIONS = ("office", "service", "queue")
+_SCOPE_DIMENSIONS: tuple[str, ...] = ("office", "service", "queue")
 _VALID_SCOPE_KEYS = {
     "domain",
     "restricted_only",
@@ -54,6 +61,40 @@ _VALID_SCOPE_KEYS = {
         for key in (dimension, f"{dimension}_id")
     ),
 }
+
+_ModelT = TypeVar("_ModelT", bound=Model)
+_ViewT = TypeVar("_ViewT", bound=APIView)
+_CallableT = TypeVar("_CallableT", bound=Callable[..., object])
+
+
+class _RoleConfig(Protocol):
+    keycloak_role: str
+    scopes: object
+
+
+class _RoleAssignment(Protocol):
+    role: _RoleConfig
+    office_id: object
+    expires_at: datetime | None
+
+
+@runtime_checkable
+class _AssignmentManager(Protocol):
+    def select_related(self, *fields: str) -> _AssignmentManager: ...
+
+    def all(self) -> Iterable[_RoleAssignment]: ...
+
+
+def _is_string_object_dict(value: object) -> TypeGuard[dict[str, object]]:
+    return isinstance(value, dict) and all(isinstance(key, str) for key in value)
+
+
+def _is_authenticated(user: object) -> bool:
+    return bool(getattr(user, "is_authenticated", False))
+
+
+def _is_superuser(user: object) -> bool:
+    return bool(getattr(user, "is_superuser", False))
 
 
 @dataclass(frozen=True)
@@ -92,13 +133,17 @@ class AuthoritySnapshot:
     restricted_scope_keys: frozenset[ScopeKey] = frozenset()
 
 
-def has_scope(user, required: Scope) -> bool:
-    if not user.is_authenticated:
+def has_scope(user: object, required: Scope) -> bool:
+    if not _is_authenticated(user):
         return False
-    if user.is_superuser:
+    if _is_superuser(user):
         return True
-    scopes = getattr(user, "_scopes", None) or []
-    return any(s.matches(required) for s in scopes)
+    raw_scopes: object = getattr(user, "_scopes", None)
+    if not isinstance(raw_scopes, list | tuple):
+        return False
+    return any(
+        scope.matches(required) for scope in raw_scopes if isinstance(scope, Scope)
+    )
 
 
 def _normalise_scopes(scopes: list[Scope]) -> list[Scope]:
@@ -115,7 +160,10 @@ def _scope_key(scope: Scope) -> ScopeKey:
     return (scope.domain, scope.office_id, scope.service_id, scope.queue_id)
 
 
-def _validated_scope_id(raw_scope: dict, name: str) -> tuple[bool, str | None]:
+def _validated_scope_id(
+    raw_scope: dict[str, object],
+    name: str,
+) -> tuple[bool, str | None]:
     keys = [key for key in (name, f"{name}_id") if key in raw_scope]
     if len(keys) > 1:
         return False, None
@@ -131,7 +179,9 @@ def _validated_scope_id(raw_scope: dict, name: str) -> tuple[bool, str | None]:
         return False, None
 
 
-def _validated_role_scopes(assignment) -> tuple[Scope, ...] | None:
+def _validated_role_scopes(
+    assignment: _RoleAssignment,
+) -> tuple[Scope, ...] | None:
     """Validate one persisted assignment atomically.
 
     ``None`` means the assignment is malformed. An empty tuple is a valid but
@@ -139,7 +189,7 @@ def _validated_role_scopes(assignment) -> tuple[Scope, ...] | None:
     """
     configured_scopes = assignment.role.scopes
     if configured_scopes == []:
-        raw_scopes = _DEFAULT_ROLE_SCOPES.get(
+        raw_scopes: Sequence[object] = _DEFAULT_ROLE_SCOPES.get(
             assignment.role.keycloak_role,
             (),
         )
@@ -150,7 +200,10 @@ def _validated_role_scopes(assignment) -> tuple[Scope, ...] | None:
 
     scopes: list[Scope] = []
     for raw_scope in raw_scopes:
-        if not isinstance(raw_scope, dict) or not set(raw_scope) <= _VALID_SCOPE_KEYS:
+        if (
+            not _is_string_object_dict(raw_scope)
+            or not set(raw_scope) <= _VALID_SCOPE_KEYS
+        ):
             return None
 
         domain = raw_scope.get("domain")
@@ -185,10 +238,12 @@ def _validated_role_scopes(assignment) -> tuple[Scope, ...] | None:
     return tuple(scopes)
 
 
-def _active_persisted_assignments(user) -> list | None:
+def _active_persisted_assignments(
+    user: object,
+) -> list[_RoleAssignment] | None:
     """Return active assignments, preserving ``None`` for the group fallback."""
-    assignments = getattr(user, "user_roles", None)
-    if assignments is None or not getattr(user, "pk", None):
+    assignments: object = getattr(user, "user_roles", None)
+    if not isinstance(assignments, _AssignmentManager) or not getattr(user, "pk", None):
         return None
 
     persisted = list(assignments.select_related("role", "office").all())
@@ -203,7 +258,9 @@ def _active_persisted_assignments(user) -> list | None:
     ]
 
 
-def _snapshot_from_persisted(assignments: list) -> AuthoritySnapshot:
+def _snapshot_from_persisted(
+    assignments: Sequence[_RoleAssignment],
+) -> AuthoritySnapshot:
     scopes: list[Scope] = []
     capabilities: set[str] = set()
     restricted_scope_keys: set[ScopeKey] = set()
@@ -230,13 +287,22 @@ def _snapshot_from_persisted(assignments: list) -> AuthoritySnapshot:
     )
 
 
-def _snapshot_from_groups(user) -> AuthoritySnapshot:
-    groups = set(getattr(user, "_groups", []) or [])
+def _snapshot_from_groups(user: object) -> AuthoritySnapshot:
+    raw_groups: object = getattr(user, "_groups", [])
+    groups = (
+        {group for group in raw_groups if isinstance(group, str)}
+        if isinstance(raw_groups, list | tuple | set | frozenset)
+        else set()
+    )
     scopes: list[Scope] = []
     capabilities: set[str] = set()
     restricted_scope_keys: set[ScopeKey] = set()
 
-    def add_scope(scope: Scope, *, can_view_restricted_rows: bool = False):
+    def add_scope(
+        scope: Scope,
+        *,
+        can_view_restricted_rows: bool = False,
+    ) -> None:
         scopes.append(scope)
         if can_view_restricted_rows:
             restricted_scope_keys.add(_scope_key(scope))
@@ -275,8 +341,8 @@ def _snapshot_from_groups(user) -> AuthoritySnapshot:
     )
 
 
-def _build_authority_snapshot(user) -> AuthoritySnapshot:
-    if not user or not user.is_authenticated:
+def _build_authority_snapshot(user: object) -> AuthoritySnapshot:
+    if not user or not _is_authenticated(user):
         return AuthoritySnapshot()
 
     assignments = _active_persisted_assignments(user)
@@ -285,7 +351,7 @@ def _build_authority_snapshot(user) -> AuthoritySnapshot:
     else:
         resolved = _snapshot_from_groups(user)
 
-    if not user.is_superuser:
+    if not _is_superuser(user):
         return resolved
 
     admin_scope = Scope(domain="admin")
@@ -296,7 +362,11 @@ def _build_authority_snapshot(user) -> AuthoritySnapshot:
     )
 
 
-def get_authority_snapshot(user, *, request=None) -> AuthoritySnapshot:
+def get_authority_snapshot(
+    user: object,
+    *,
+    request: object | None = None,
+) -> AuthoritySnapshot:
     """Resolve authority once per request, or freshly for a standalone caller."""
     if request is not None:
         snapshot = getattr(request, "_authority_snapshot", None)
@@ -306,15 +376,15 @@ def get_authority_snapshot(user, *, request=None) -> AuthoritySnapshot:
 
     snapshot = _build_authority_snapshot(user)
     if request is not None:
-        request._authority_snapshot = snapshot
-        request._authority_snapshot_user = user
+        vars(request)["_authority_snapshot"] = snapshot
+        vars(request)["_authority_snapshot_user"] = user
     return snapshot
 
 
 def _resolved_authority_snapshot(
-    user,
+    user: object,
     *,
-    request=None,
+    request: object | None = None,
     snapshot: AuthoritySnapshot | None = None,
 ) -> AuthoritySnapshot:
     if snapshot is not None:
@@ -323,9 +393,9 @@ def _resolved_authority_snapshot(
 
 
 def get_user_scopes(
-    user,
+    user: object,
     *,
-    request=None,
+    request: object | None = None,
     snapshot: AuthoritySnapshot | None = None,
 ) -> list[Scope]:
     """Compute canonical scopes from persisted assignments or group fallback.
@@ -347,9 +417,9 @@ def get_user_scopes(
 
 
 def is_auditor(
-    user,
+    user: object,
     *,
-    request=None,
+    request: object | None = None,
     snapshot: AuthoritySnapshot | None = None,
 ) -> bool:
     authority = _resolved_authority_snapshot(user, request=request, snapshot=snapshot)
@@ -357,25 +427,26 @@ def is_auditor(
 
 
 def has_unrestricted_domain_scope(
-    user,
+    user: object,
     domain: str,
     *,
-    request=None,
+    request: object | None = None,
     snapshot: AuthoritySnapshot | None = None,
 ) -> bool:
     authority = _resolved_authority_snapshot(user, request=request, snapshot=snapshot)
-    user._scopes = list(authority.scopes)
+    scopes = list(authority.scopes)
+    vars(user)["_scopes"] = scopes
     return any(
         scope.domain == "admin"
         or (scope.domain == domain and not scope.restricted_only)
-        for scope in user._scopes
+        for scope in scopes
     )
 
 
 def can_view_restricted(
-    user,
+    user: object,
     *,
-    request=None,
+    request: object | None = None,
     snapshot: AuthoritySnapshot | None = None,
 ) -> bool:
     """Restricted tickets (security, fraud, complaint) require a narrower
@@ -386,16 +457,16 @@ def can_view_restricted(
 
 
 def scope_ticket_queryset(
-    user,
-    queryset: QuerySet,
+    user: object,
+    queryset: QuerySet[_ModelT],
     *,
-    request=None,
+    request: object | None = None,
     snapshot: AuthoritySnapshot | None = None,
-) -> QuerySet:
+) -> QuerySet[_ModelT]:
     """Limit a ticket queryset to the caller's explicit scopes."""
     authority = _resolved_authority_snapshot(user, request=request, snapshot=snapshot)
     scopes = list(authority.scopes)
-    user._scopes = scopes
+    vars(user)["_scopes"] = scopes
     branches: list[Q] = []
 
     for scope in scopes:
@@ -426,15 +497,15 @@ def scope_ticket_queryset(
     return queryset.filter(combined)
 
 
-def attach_scopes(request):
+def attach_scopes(request: Request) -> object:
     """DRF authenticator-friendly helper: set ``request.user._scopes``."""
-    request.user._scopes = get_user_scopes(request.user, request=request)
+    vars(request.user)["_scopes"] = get_user_scopes(request.user, request=request)
     return request.user
 
 
-def public_endpoint(fn):  # pragma: no cover - marker decorator
+def public_endpoint(fn: _CallableT) -> _CallableT:  # pragma: no cover - marker decorator
     """Marker for endpoints that bypass authentication."""
-    fn._public = True
+    vars(fn)["_public"] = True
     return fn
 
 
@@ -443,7 +514,7 @@ class ScopePermission(permissions.BasePermission):
 
     required_scope: Scope | None = None
 
-    def has_permission(self, request, view):
+    def has_permission(self, request: Request, view: APIView) -> bool:
         if getattr(view, "_public", False):
             return True
         snapshot = get_authority_snapshot(request.user, request=request)
@@ -459,13 +530,26 @@ class ScopePermission(permissions.BasePermission):
         return has_scope(request.user, scope)
 
 
-def scope_required(domain: str, **kwargs):
+def scope_required(
+    domain: str,
+    *,
+    office_id: str | None = None,
+    service_id: str | None = None,
+    queue_id: str | None = None,
+    restricted_only: bool = False,
+) -> Callable[[type[_ViewT]], type[_ViewT]]:
     """Class decorator that attaches a required scope to a DRF view."""
-    required = Scope(domain=domain, **kwargs)
+    required = Scope(
+        domain=domain,
+        office_id=office_id,
+        service_id=service_id,
+        queue_id=queue_id,
+        restricted_only=restricted_only,
+    )
 
-    def deco(cls):
-        cls.required_scope = required
-        cls.permission_classes = [ScopePermission]
+    def deco(cls: type[_ViewT]) -> type[_ViewT]:
+        type.__setattr__(cls, "required_scope", required)
+        type.__setattr__(cls, "permission_classes", [ScopePermission])
         return cls
 
     return deco

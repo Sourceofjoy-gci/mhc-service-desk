@@ -8,6 +8,7 @@ here because ``DEBUG`` is unconditionally False.
 from __future__ import annotations
 
 import sys
+from typing import TypeGuard
 
 from django.core.exceptions import ImproperlyConfigured
 
@@ -94,10 +95,19 @@ DATABASES["default"]["OPTIONS"].setdefault("connect_timeout", 5)
 
 # --- Logging hardening ---------------------------------------------------
 
-request_logger = LOGGING["loggers"].setdefault(
+def _is_string_object_dict(value: object) -> TypeGuard[dict[str, object]]:
+    return isinstance(value, dict) and all(isinstance(key, str) for key in value)
+
+
+loggers: object = LOGGING.get("loggers")
+if not _is_string_object_dict(loggers):
+    raise ImproperlyConfigured("LOGGING['loggers'] must be a string-keyed mapping")
+request_logger = loggers.setdefault(
     "django.request",
     {"handlers": ["console"], "propagate": False},
 )
+if not _is_string_object_dict(request_logger):
+    raise ImproperlyConfigured("django.request logger configuration must be a mapping")
 request_logger["level"] = "ERROR"
 
 # Tell the staticfiles finder to bail out cleanly if anything is missing.

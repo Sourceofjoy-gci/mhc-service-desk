@@ -6,13 +6,16 @@ Tokens issued by Keycloak are verified against the realm's JWKS. The
 """
 from __future__ import annotations
 
+import json
 import logging
-from typing import Any
+from typing import TypeGuard
 
 import requests
+from cryptography.hazmat.primitives.asymmetric.rsa import RSAPublicKey
 from django.conf import settings
 from django.core.cache import cache
 from rest_framework import authentication, exceptions
+from rest_framework.request import Request
 from rest_framework_simplejwt.tokens import AccessToken
 
 from .models import User
@@ -22,22 +25,57 @@ logger = logging.getLogger(__name__)
 _JWKS_CACHE_KEY = "keycloak_jwks"
 _JWKS_TTL = 3600
 
+type JSONScalar = str | int | float | bool | None
+type JSONValue = JSONScalar | list[JSONValue] | dict[str, JSONValue]
+type JSONObject = dict[str, JSONValue]
 
-def _get_jwks() -> dict[str, Any]:
-    cached = cache.get(_JWKS_CACHE_KEY)
+
+def _is_json_value(value: object) -> TypeGuard[JSONValue]:
+    if value is None or isinstance(value, str | int | float | bool):
+        return True
+    if isinstance(value, list):
+        return all(_is_json_value(item) for item in value)
+    if isinstance(value, dict):
+        return all(
+            isinstance(key, str) and _is_json_value(item)
+            for key, item in value.items()
+        )
+    return False
+
+
+def _is_json_object(value: object) -> TypeGuard[JSONObject]:
+    return isinstance(value, dict) and all(
+        isinstance(key, str) and _is_json_value(item)
+        for key, item in value.items()
+    )
+
+
+def _require_json_object(value: object, *, source: str) -> JSONObject:
+    if not _is_json_object(value):
+        raise TypeError(f"{source} must be a JSON object")
+    return value
+
+
+def _get_jwks() -> JSONObject:
+    cached: object = cache.get(_JWKS_CACHE_KEY)
     if cached:
-        return cached
-    url = settings.KEYCLOAK["VERIFICATION_KEYS_URL"]
+        return _require_json_object(cached, source="Cached JWKS")
+    url: object = settings.KEYCLOAK["VERIFICATION_KEYS_URL"]
+    if not isinstance(url, str):
+        raise TypeError("KEYCLOAK verification URL must be a string")
     r = requests.get(url, timeout=3)
     r.raise_for_status()
-    data = r.json()
+    data = _require_json_object(r.json(), source="JWKS response")
     cache.set(_JWKS_CACHE_KEY, data, timeout=_JWKS_TTL)
     return data
 
 
-def _select_key(jwks: dict[str, Any], kid: str) -> dict[str, Any] | None:
-    for key in jwks.get("keys", []):
-        if key.get("kid") == kid:
+def _select_key(jwks: JSONObject, kid: str) -> JSONObject | None:
+    keys = jwks.get("keys", [])
+    if not isinstance(keys, list):
+        return None
+    for key in keys:
+        if _is_json_object(key) and key.get("kid") == kid:
             return key
     return None
 
@@ -52,7 +90,7 @@ class KeycloakJWTAuthentication(authentication.BaseAuthentication):
 
     keyword = "Bearer"
 
-    def authenticate(self, request):
+    def authenticate(self, request: Request) -> tuple[User, JSONObject] | None:
         header = request.META.get("HTTP_AUTHORIZATION", "")
         if not header.startswith(f"{self.keyword} "):
             return None
@@ -64,13 +102,17 @@ class KeycloakJWTAuthentication(authentication.BaseAuthentication):
             if len(parts) >= 2:
                 username = parts[1]
                 groups = parts[2].split(",") if len(parts) > 2 and parts[2] else []
-                user, _ = User.objects.get_or_create(
+                dev_user, _ = User.objects.get_or_create(
                     username=username,
                     defaults={"keycloak_subject": f"dev:{username}"},
                 )
                 groups = _normalize_groups(groups)
-                _synchronize_groups(user, groups)
-                return user, {"sub": f"dev:{username}", "groups": groups}
+                _synchronize_groups(dev_user, groups)
+                group_claims: list[JSONValue] = list(groups)
+                return dev_user, {
+                    "sub": f"dev:{username}",
+                    "groups": group_claims,
+                }
         # --------------------------------------------------------------------
 
         try:
@@ -80,7 +122,7 @@ class KeycloakJWTAuthentication(authentication.BaseAuthentication):
 
         unverified_header = _decode_unverified_header(token)
         kid = unverified_header.get("kid")
-        if not kid:
+        if not isinstance(kid, str) or not kid:
             raise exceptions.AuthenticationFailed("Token missing kid header")
 
         jwks = _get_jwks()
@@ -99,16 +141,23 @@ class KeycloakJWTAuthentication(authentication.BaseAuthentication):
             raise exceptions.AuthenticationFailed(f"Invalid signing key: {exc}") from exc
 
         try:
-            payload = _verify_jwt(token, public_key, audience=settings.KEYCLOAK["AUDIENCE"])
+            audience: object = settings.KEYCLOAK["AUDIENCE"]
+            if not isinstance(audience, str):
+                raise TypeError("KEYCLOAK audience must be a string")
+            payload = _verify_jwt(token, public_key, audience=audience)
         except Exception as exc:
             raise exceptions.AuthenticationFailed(f"Token verification failed: {exc}") from exc
 
         sub = payload.get("sub")
-        if not sub:
+        if not isinstance(sub, str) or not sub:
             raise exceptions.AuthenticationFailed("Token missing sub")
 
-        preferred_username = payload.get("preferred_username", sub)[:150]
-        email = payload.get("email", "")
+        raw_username = payload.get("preferred_username", sub)
+        preferred_username = (
+            raw_username[:150] if isinstance(raw_username, str) else sub[:150]
+        )
+        raw_email = payload.get("email", "")
+        email = raw_email if isinstance(raw_email, str) else ""
         mfa_enabled = bool(payload.get("acr") in ("mfa", "urn:mace:incommon:iap:silver"))
 
         # Look up by keycloak_subject first (the stable link to the IdP).
@@ -139,7 +188,7 @@ class KeycloakJWTAuthentication(authentication.BaseAuthentication):
         _synchronize_groups(user, groups)
         return user, payload
 
-    def authenticate_header(self, request):
+    def authenticate_header(self, request: Request) -> str:
         return f'{self.keyword} realm="{settings.KEYCLOAK["REALM"]}"'
 
 
@@ -155,24 +204,41 @@ def _synchronize_groups(user: User, groups: list[str]) -> None:
     if user.keycloak_groups != groups:
         user.keycloak_groups = groups
         user.save(update_fields=["keycloak_groups"])
-    user._groups = list(groups)
+    vars(user)["_groups"] = list(groups)
 
-def _decode_unverified_header(token: str) -> dict[str, Any]:
+
+def _decode_unverified_header(token: str) -> JSONObject:
     import jwt
-    return jwt.get_unverified_header(token)
+
+    return _require_json_object(
+        jwt.get_unverified_header(token),
+        source="JWT header",
+    )
 
 
-def _build_public_key(jwk: dict[str, Any]):
+def _build_public_key(jwk: JSONObject) -> RSAPublicKey:
     from jwt.algorithms import RSAAlgorithm
-    return RSAAlgorithm.from_jwk(jwk)
+
+    public_key = RSAAlgorithm.from_jwk(json.dumps(jwk))
+    if not isinstance(public_key, RSAPublicKey):
+        raise TypeError("JWK must contain an RSA public key")
+    return public_key
 
 
-def _verify_jwt(token: str, public_key, audience: str) -> dict[str, Any]:
+def _verify_jwt(
+    token: str,
+    public_key: RSAPublicKey,
+    audience: str,
+) -> JSONObject:
     import jwt
-    return jwt.decode(
-        token,
-        key=public_key,
-        algorithms=["RS256"],
-        audience=audience,
-        options={"verify_aud": True, "verify_iat": True, "verify_exp": True},
+
+    return _require_json_object(
+        jwt.decode(
+            token,
+            key=public_key,
+            algorithms=["RS256"],
+            audience=audience,
+            options={"verify_aud": True, "verify_iat": True, "verify_exp": True},
+        ),
+        source="JWT payload",
     )

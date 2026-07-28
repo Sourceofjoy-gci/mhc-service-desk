@@ -7,13 +7,18 @@ from __future__ import annotations
 
 from rest_framework.decorators import api_view, permission_classes
 from rest_framework.permissions import IsAuthenticated
+from rest_framework.request import Request
 from rest_framework.response import Response
+
+from .models import User
 
 
 @api_view(["GET"])
 @permission_classes([IsAuthenticated])
-def me(request):
+def me(request: Request) -> Response:
     user = request.user
+    if not isinstance(user, User):
+        raise TypeError("Authenticated identity must use the configured User model")
     payload = {
         "id": str(user.id),
         "username": user.username,

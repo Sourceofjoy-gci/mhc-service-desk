@@ -14,7 +14,7 @@ class ConfigConfig(AppConfig):
     label = "config"
     verbose_name = "MHC e-Ticketing config"
 
-    def ready(self):
+    def ready(self) -> None:
         from django.conf import settings
         if settings.DEBUG and getattr(settings, "ENVIRONMENT", "") == "development":
             try:
@@ -23,4 +23,4 @@ class ConfigConfig(AppConfig):
             except Exception:
                 # never block startup on dev hooks
                 logger.exception("Development auth hook setup failed")
-        return super().ready()
+        super().ready()

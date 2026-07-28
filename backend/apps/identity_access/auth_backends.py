@@ -5,6 +5,7 @@ from __future__ import annotations
 
 from django.contrib.auth.backends import ModelBackend
 from django.contrib.auth.hashers import check_password
+from django.http import HttpRequest
 
 from .models import User
 
@@ -12,7 +13,13 @@ from .models import User
 class KeycloakOIDCBackend(ModelBackend):
     """No password-based login for Keycloak-mirrored users."""
 
-    def authenticate(self, request, username=None, password=None, **kwargs):  # noqa: D401
+    def authenticate(
+        self,
+        request: HttpRequest | None,
+        username: str | None = None,
+        password: str | None = None,
+        **kwargs: object,
+    ) -> User | None:  # noqa: D401
         if username is None or password is None:
             return None
         try:

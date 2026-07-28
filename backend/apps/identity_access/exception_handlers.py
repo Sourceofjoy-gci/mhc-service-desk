@@ -1,11 +1,14 @@
 """Canonical error responses for the API."""
 from __future__ import annotations
 
+from typing import Any
+
 from rest_framework.exceptions import ValidationError
+from rest_framework.response import Response
 from rest_framework.views import exception_handler
 
 
-def _first_code(codes) -> str:
+def _first_code(codes: object) -> str:
     if isinstance(codes, dict):
         return _first_code(next(iter(codes.values()), "error"))
     if isinstance(codes, list | tuple):
@@ -13,7 +16,7 @@ def _first_code(codes) -> str:
     return str(getattr(codes, "code", codes))
 
 
-def _messages(value) -> list[str]:
+def _messages(value: object) -> list[str]:
     if isinstance(value, dict):
         return [message for nested in value.values() for message in _messages(nested)]
     if isinstance(value, list | tuple):
@@ -21,7 +24,10 @@ def _messages(value) -> list[str]:
     return [str(value)]
 
 
-def problem_details_handler(exc, context):
+def problem_details_handler(
+    exc: Exception,
+    context: dict[str, Any],
+) -> Response | None:
     response = exception_handler(exc, context)
     if response is None:
         return response

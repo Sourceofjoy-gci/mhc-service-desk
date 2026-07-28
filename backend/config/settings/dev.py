@@ -17,18 +17,21 @@ CORS_ALLOWED_ORIGINS = env.list(
 )
 
 
-def _patch_dev_auth():
+def _patch_dev_auth() -> None:
     """Late-bind the dev-token shortcut. Done in a function so Django's app
     registry is fully ready before we touch the auth class.
     """
+    from rest_framework.request import Request
+
     from apps.identity_access.authentication import KeycloakJWTAuthentication
 
-    def _authenticate(self, request):
-        from django.conf import settings as _s
-        header = request.META.get("HTTP_AUTHORIZATION", "")
-        if header.startswith("Bearer dev:") and _s.DEBUG:
-            # Hand off to the base class — it already handles dev tokens.
-            pass
-        return KeycloakJWTAuthentication.authenticate(self, request)
+    original_authenticate = KeycloakJWTAuthentication.authenticate
 
-    KeycloakJWTAuthentication.authenticate = _authenticate
+    def _authenticate(
+        self: KeycloakJWTAuthentication,
+        request: Request,
+    ) -> tuple[object, object] | None:
+        # The base class already enforces DEBUG for dev tokens.
+        return original_authenticate(self, request)
+
+    type.__setattr__(KeycloakJWTAuthentication, "authenticate", _authenticate)
