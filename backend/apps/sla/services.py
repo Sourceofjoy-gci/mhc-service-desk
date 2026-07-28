@@ -6,8 +6,9 @@ in PostgreSQL and evaluating periodically keeps the system honest.
 from __future__ import annotations
 
 import logging
-from datetime import datetime, time, timedelta
+from datetime import UTC, datetime, time, timedelta
 from typing import Iterable
+from zoneinfo import ZoneInfo
 
 from django.db import transaction
 from django.utils import timezone
@@ -36,8 +37,13 @@ def add_business_seconds(
     """
     if seconds <= 0:
         return start
+    if start.tzinfo is None or start.utcoffset() is None:
+        raise ValueError("SLA business-time calculations require an aware start")
+
+    output_timezone = start.tzinfo
+    calendar_timezone = ZoneInfo(calendar.timezone)
     remaining = seconds
-    cursor = start
+    cursor = start.astimezone(calendar_timezone)
     holiday_set = set(calendar.holidays)
 
     # Cap iterations to avoid infinite loops; each loop consumes at least
@@ -50,29 +56,43 @@ def add_business_seconds(
         day_key = str(iso_weekday)
         intervals = calendar.weekday_hours.get(day_key, [])
         if date.isoformat() in holiday_set or not intervals:
-            cursor = datetime.combine(date + timedelta(days=1), time.min, tzinfo=cursor.tzinfo)
+            cursor = datetime.combine(
+                date + timedelta(days=1),
+                time.min,
+                tzinfo=calendar_timezone,
+            )
             continue
 
         for interval in intervals:
             t_start = time.fromisoformat(interval["start"])
             t_end = time.fromisoformat(interval["end"])
-            slot_start = datetime.combine(date, t_start, tzinfo=cursor.tzinfo)
-            slot_end = datetime.combine(date, t_end, tzinfo=cursor.tzinfo)
-            if cursor >= slot_end:
+            slot_start = datetime.combine(date, t_start, tzinfo=calendar_timezone)
+            slot_end = datetime.combine(date, t_end, tzinfo=calendar_timezone)
+            cursor_utc = cursor.astimezone(UTC)
+            slot_start_utc = slot_start.astimezone(UTC)
+            slot_end_utc = slot_end.astimezone(UTC)
+            if cursor_utc >= slot_end_utc:
                 continue
-            if cursor < slot_start:
+            if cursor_utc < slot_start_utc:
                 cursor = slot_start
-            available = int((slot_end - cursor).total_seconds())
+                cursor_utc = slot_start_utc
+            available = int((slot_end_utc - cursor_utc).total_seconds())
             if available <= 0:
                 continue
             consume = min(available, remaining)
-            cursor = cursor + timedelta(seconds=consume)
+            cursor = (cursor_utc + timedelta(seconds=consume)).astimezone(
+                calendar_timezone
+            )
             remaining -= consume
             if remaining <= 0:
-                return cursor
+                return cursor.astimezone(output_timezone)
         # roll into the next day
-        cursor = datetime.combine(date + timedelta(days=1), time.min, tzinfo=cursor.tzinfo)
-    return cursor
+        cursor = datetime.combine(
+            date + timedelta(days=1),
+            time.min,
+            tzinfo=calendar_timezone,
+        )
+    return cursor.astimezone(output_timezone)
 
 
 def business_seconds_between(
@@ -83,25 +103,36 @@ def business_seconds_between(
     """Return business seconds in ``[start, end)`` for one calendar."""
     if end <= start:
         return 0
+    if (
+        start.tzinfo is None
+        or start.utcoffset() is None
+        or end.tzinfo is None
+        or end.utcoffset() is None
+    ):
+        raise ValueError("SLA business-time calculations require aware endpoints")
 
     total = 0
+    calendar_timezone = ZoneInfo(calendar.timezone)
     holiday_set = set(calendar.holidays)
-    current_date = start.date()
-    while current_date <= end.date():
+    start_utc = start.astimezone(UTC)
+    end_utc = end.astimezone(UTC)
+    current_date = start.astimezone(calendar_timezone).date()
+    end_date = end.astimezone(calendar_timezone).date()
+    while current_date <= end_date:
         if current_date.isoformat() not in holiday_set:
             for interval in calendar.weekday_hours.get(str(current_date.isoweekday()), []):
                 slot_start = datetime.combine(
                     current_date,
                     time.fromisoformat(interval["start"]),
-                    tzinfo=start.tzinfo,
-                )
+                    tzinfo=calendar_timezone,
+                ).astimezone(UTC)
                 slot_end = datetime.combine(
                     current_date,
                     time.fromisoformat(interval["end"]),
-                    tzinfo=start.tzinfo,
-                )
-                overlap_start = max(start, slot_start)
-                overlap_end = min(end, slot_end)
+                    tzinfo=calendar_timezone,
+                ).astimezone(UTC)
+                overlap_start = max(start_utc, slot_start)
+                overlap_end = min(end_utc, slot_end)
                 if overlap_end > overlap_start:
                     total += int((overlap_end - overlap_start).total_seconds())
         current_date += timedelta(days=1)
@@ -155,6 +186,34 @@ WAITING_SLA_STATES = {
     },
 }
 
+PAUSED_SLA_STATES = {
+    SlaInstance.State.PAUSED_REQUESTER,
+    SlaInstance.State.PAUSED_INTERNAL,
+    SlaInstance.State.PAUSED_IT,
+}
+
+
+def _recover_legacy_remaining_business_seconds(instance: SlaInstance) -> int:
+    """Recover a legacy paused clock, failing closed when history is absent."""
+    histories = instance.pause_history.all()
+    last_resumed_at = (
+        histories.filter(state=SlaInstance.State.ACTIVE)
+        .order_by("-at")
+        .values_list("at", flat=True)
+        .first()
+    )
+    current_pauses = histories.filter(state__in=PAUSED_SLA_STATES)
+    if last_resumed_at is not None:
+        current_pauses = current_pauses.filter(at__gt=last_resumed_at)
+    paused_at = current_pauses.order_by("at").values_list("at", flat=True).first()
+    if paused_at is None:
+        return 0
+    return business_seconds_between(
+        paused_at,
+        instance.due_at,
+        instance.policy.calendar,
+    )
+
 
 @transaction.atomic
 def pause_sla(
@@ -173,6 +232,10 @@ def pause_sla(
             timezone.now(),
             instance.due_at,
             instance.policy.calendar,
+        )
+    elif instance.remaining_business_seconds is None:
+        instance.remaining_business_seconds = (
+            _recover_legacy_remaining_business_seconds(instance)
         )
     instance.state = reason
     instance.save(update_fields=["state", "remaining_business_seconds", "updated_at"])
@@ -195,6 +258,10 @@ def resume_sla(*, instance: SlaInstance, reason: str, actor_subject: str = "") -
     if instance.state == "active":
         return instance
     remaining_business_seconds = instance.remaining_business_seconds
+    if remaining_business_seconds is None:
+        remaining_business_seconds = _recover_legacy_remaining_business_seconds(
+            instance
+        )
     if remaining_business_seconds is not None:
         instance.due_at = add_business_seconds(
             timezone.now(),
@@ -242,13 +309,8 @@ def complete_sla(*, ticket: Ticket, kind: str, at: datetime) -> SlaInstance | No
             or instance.remaining_business_seconds == 0
         )
     ) or (
-        instance.state
-        in {
-            SlaInstance.State.PAUSED_REQUESTER,
-            SlaInstance.State.PAUSED_INTERNAL,
-            SlaInstance.State.PAUSED_IT,
-        }
-        and instance.remaining_business_seconds == 0
+        instance.state in PAUSED_SLA_STATES
+        and instance.remaining_business_seconds in {None, 0}
     )
     instance.state = SlaInstance.State.BREACHED if overdue else SlaInstance.State.MET
     instance.completed_at = at
