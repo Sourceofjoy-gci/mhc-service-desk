@@ -406,22 +406,60 @@ describe("ticket operator workspace", () => {
 });
 
 describe("ticket detail route states", () => {
-  it("uses an admitted queue return location", async () => {
-    renderDetail({
-      state: { returnTo: "/tickets?status=triage&cursor=opaque" },
-    });
+  it.each([
+    {
+      returnTo: "/tickets?status=triage&cursor=opaque#current-queue",
+      expected: "/tickets?status=triage&cursor=opaque#current-queue",
+    },
+    {
+      returnTo: "/tickets/path?sort=updated#focused-ticket",
+      expected: "/tickets/path?sort=updated#focused-ticket",
+    },
+    {
+      returnTo: "/tickets/queue/../path?sort=updated#focused-ticket",
+      expected: "/tickets/path?sort=updated#focused-ticket",
+    },
+  ])(
+    "normalizes an admitted queue route while preserving search and hash",
+    async ({ returnTo, expected }) => {
+      renderDetail({ state: { returnTo } });
 
-    expect(
-      await screen.findByRole("link", { name: "Back to queue" }),
-    ).toHaveAttribute("href", "/tickets?status=triage&cursor=opaque");
-  });
+      expect(
+        await screen.findByRole("link", { name: "Back to queue" }),
+      ).toHaveAttribute("href", expected);
+    },
+  );
 
   it.each([
     "https://outside.example/tickets",
     "//outside.example/tickets",
+    "http://[",
+    "",
     "/dashboard",
     "/ticketsevil?status=triage",
+    "/tickets/../dashboard",
+    "/tickets/a/../../admin",
+    "/tickets/%2e%2e/dashboard",
+    "/tickets/%2E./dashboard",
+    "/tickets/.%2e/dashboard",
+    "/tickets/%252e%252e/dashboard",
+    "/tickets/%2e%2e%2fadmin",
+    "/tickets/%2e%2e%5cadmin",
+    "/tickets/%ZZ",
   ])("rejects unsafe or unrelated return location %s", async (returnTo) => {
+    renderDetail({ state: { returnTo } });
+
+    expect(
+      await screen.findByRole("link", { name: "Back to queue" }),
+    ).toHaveAttribute("href", "/tickets");
+  });
+
+  it.each([
+    { label: "null", returnTo: null },
+    { label: "number", returnTo: 42 },
+    { label: "object", returnTo: { pathname: "/tickets" } },
+    { label: "array", returnTo: ["/tickets"] },
+  ])("rejects a non-string $label return location", async ({ returnTo }) => {
     renderDetail({ state: { returnTo } });
 
     expect(

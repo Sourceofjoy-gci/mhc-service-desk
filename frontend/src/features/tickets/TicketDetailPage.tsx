@@ -31,17 +31,68 @@ import { OperationsPanel } from "./OperationsPanel";
 import { SlaClocks } from "./SlaClocks";
 import { TransitionActions } from "./TransitionActions";
 
-function admittedReturnTo(value: unknown): string {
-  if (typeof value !== "string") return "/tickets";
-  if (
-    value === "/tickets" ||
-    value.startsWith("/tickets?") ||
-    value.startsWith("/tickets#") ||
-    value.startsWith("/tickets/")
-  ) {
-    return value;
+const RETURN_URL_BASE = new URL("https://ticket-app.invalid/");
+
+function isTicketPath(pathname: string): boolean {
+  return pathname === "/tickets" || pathname.startsWith("/tickets/");
+}
+
+function decodedPathStaysInTickets(pathname: string): boolean {
+  let candidate = pathname;
+
+  for (let index = 0; index < 8; index += 1) {
+    let decoded: string;
+    try {
+      decoded = decodeURIComponent(candidate);
+    } catch {
+      return false;
+    }
+
+    let normalized: URL;
+    try {
+      normalized = new URL(decoded, RETURN_URL_BASE);
+    } catch {
+      return false;
+    }
+
+    if (
+      normalized.origin !== RETURN_URL_BASE.origin ||
+      !isTicketPath(normalized.pathname)
+    ) {
+      return false;
+    }
+    if (decoded === candidate) return true;
+    candidate = decoded;
   }
-  return "/tickets";
+
+  return false;
+}
+
+function admittedReturnTo(value: unknown): string {
+  if (
+    typeof value !== "string" ||
+    value.length === 0 ||
+    !value.startsWith("/") ||
+    value.startsWith("//") ||
+    /[\u0000-\u001f\u007f]/u.test(value)
+  ) {
+    return "/tickets";
+  }
+
+  try {
+    decodeURI(value);
+    const normalized = new URL(value, RETURN_URL_BASE);
+    if (
+      normalized.origin !== RETURN_URL_BASE.origin ||
+      !isTicketPath(normalized.pathname) ||
+      !decodedPathStaysInTickets(normalized.pathname)
+    ) {
+      return "/tickets";
+    }
+    return `${normalized.pathname}${normalized.search}${normalized.hash}`;
+  } catch {
+    return "/tickets";
+  }
 }
 
 function ticketPath(ticketNumber: string): string {
