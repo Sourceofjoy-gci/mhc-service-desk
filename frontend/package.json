@@ -10,7 +10,7 @@
     "lint": "eslint . --ext .ts,.tsx",
     "format": "prettier --write .",
     "typecheck": "tsc --noEmit",
-    "test": "vitest run"
+    "test": "vitest run --no-file-parallelism"
   },
   "dependencies": {
     "@base-ui/react": "^1.6.0",
