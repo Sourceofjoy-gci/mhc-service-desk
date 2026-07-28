@@ -13,11 +13,14 @@ from __future__ import annotations
 import hashlib
 import json
 import logging
+import os
+import tempfile
 from dataclasses import asdict, dataclass
 from datetime import UTC, datetime, timedelta
+from pathlib import Path
 from typing import TypedDict, TypeGuard, Unpack
 
-from django.core.management.base import BaseCommand, CommandParser
+from django.core.management.base import BaseCommand, CommandError, CommandParser
 from django.db import transaction
 from django.utils import timezone as djtz
 
@@ -50,7 +53,7 @@ class RetentionCommandOptions(TypedDict):
     out: str
 
 
-# --- Retention classes (operator-tunable, persisted in ConfigItem) -------
+# --- Preview retention classes (never used for destructive runs) --------
 
 DEFAULT_RETENTION: RetentionPolicy = {
     "ticket":              {"days": 2555, "description": "7 years (operational record)"},
@@ -143,62 +146,58 @@ RETENTION_SQL_PLANS: dict[str, RetentionSqlPlan] = {
         ),
     ),
     "auditevent": RetentionSqlPlan(
-        count_sql="SELECT count(*) FROM auditevent WHERE created_at < %s",
-        delete_sql="DELETE FROM auditevent WHERE created_at < %s",
+        count_sql="SELECT count(*) FROM auditevent WHERE occurred_at < %s",
+        delete_sql="DELETE FROM auditevent WHERE occurred_at < %s",
     ),
     "whatsapp_message": RetentionSqlPlan(
         count_sql="SELECT count(*) FROM whatsapp_message WHERE created_at < %s",
         delete_sql="DELETE FROM whatsapp_message WHERE created_at < %s",
     ),
     "integrationevent": RetentionSqlPlan(
-        count_sql="SELECT count(*) FROM integrationevent WHERE created_at < %s",
-        delete_sql="DELETE FROM integrationevent WHERE created_at < %s",
+        count_sql="SELECT count(*) FROM integrationevent WHERE processed_at < %s",
+        delete_sql="DELETE FROM integrationevent WHERE processed_at < %s",
     ),
     "email_delivery": RetentionSqlPlan(
         count_sql="SELECT count(*) FROM email_delivery WHERE created_at < %s",
         delete_sql="DELETE FROM email_delivery WHERE created_at < %s",
     ),
     "csat_response": RetentionSqlPlan(
-        count_sql="SELECT count(*) FROM csat_response WHERE created_at < %s",
-        delete_sql="DELETE FROM csat_response WHERE created_at < %s",
+        count_sql="SELECT count(*) FROM csat_response WHERE invited_at < %s",
+        delete_sql="DELETE FROM csat_response WHERE invited_at < %s",
     ),
 }
 
 
-def _is_json_value(value: object) -> TypeGuard[JSONValue]:
-    if value is None or isinstance(value, bool | int | float | str):
-        return True
-    if isinstance(value, list):
-        return all(_is_json_value(item) for item in value)
-    if isinstance(value, dict):
-        return all(
-            isinstance(key, str) and _is_json_value(item)
-            for key, item in value.items()
-        )
-    return False
-
-
 def _is_retention_policy(value: object) -> TypeGuard[RetentionPolicy]:
-    return isinstance(value, dict) and all(
+    return bool(value) and isinstance(value, dict) and all(
         isinstance(table, str)
         and isinstance(rule, dict)
-        and all(
-            isinstance(key, str) and _is_json_value(item)
-            for key, item in rule.items()
+        and type(rule.get("days")) is int
+        and rule["days"] > 0
+        and set(rule).issubset({"days", "description"})
+        and (
+            "description" not in rule or isinstance(rule["description"], str)
         )
         for table, rule in value.items()
     )
 
 
-def get_retention_policy() -> RetentionPolicy:
-    """Read the operator-tuned retention policy from ConfigItem, falling
-    back to the defaults baked into this module."""
+def get_retention_policy() -> RetentionPolicy | None:
+    """Return the explicitly configured retention policy, if one exists.
+
+    The baked-in schedule is preview-only because the PRD requires formal
+    approval before production disposal.
+    """
     item = ConfigItem.objects.filter(key="retention.policy.v1").first()
-    if item:
-        value: object = item.value
-        if _is_retention_policy(value):
-            return value
-    return DEFAULT_RETENTION
+    if item is None:
+        return None
+    value: object = item.value
+    if not _is_retention_policy(value):
+        raise CommandError(
+            "retention.policy.v1 is invalid; expected a non-empty mapping of "
+            "supported table names to positive integer days"
+        )
+    return value
 
 
 # --- Management command ----------------------------------------------------
@@ -220,27 +219,109 @@ class Command(BaseCommand):
         dry = options["dry_run"]
         only = set(options["table"])
         out_prefix = options["out"]
-        policy = get_retention_policy()
+        configured_policy = get_retention_policy()
+        if configured_policy is None:
+            if not dry:
+                raise CommandError(
+                    "No configured retention policy. Create an approved "
+                    "retention.policy.v1 ConfigItem before a destructive run."
+                )
+            policy = DEFAULT_RETENTION
+            self.stderr.write(
+                self.style.WARNING(
+                    "No configured retention policy; showing the unapproved "
+                    "preview schedule only."
+                )
+            )
+        else:
+            policy = configured_policy
+
+        unsupported = set(policy) - set(RETENTION_SQL_PLANS)
+        if unsupported:
+            names = ", ".join(sorted(unsupported))
+            raise CommandError(f"unsupported retention table(s): {names}")
+        missing = only - set(policy)
+        if missing:
+            names = ", ".join(sorted(missing))
+            raise CommandError(f"table(s) not present in retention policy: {names}")
+
         now = djtz.now()
-        summary: list[DisposalResult] = []
+        run_plan: list[tuple[str, RetentionRule, datetime]] = []
         for table, rule in policy.items():
             if only and table not in only:
                 continue
-            if table not in RETENTION_SQL_PLANS:
-                self.stdout.write(f"[skip] {table}: unsupported retention table")
-                continue
             days = rule.get("days")
-            if not isinstance(days, int) or days <= 0:
-                self.stdout.write(f"[skip] {table}: invalid days={days!r}")
-                continue
+            if type(days) is not int or days <= 0:
+                raise CommandError(f"invalid retention days for {table}: {days!r}")
             cutoff = now - timedelta(days=days)
-            summary.append(self._dispose_table(table, cutoff, rule, dry))
-        cert_path = f"{out_prefix}{now.strftime('%Y%m%dT%H%M%SZ')}.json"
-        with open(cert_path, "w", encoding="utf-8") as fh:
-            fh.write(json.dumps(summary, indent=2, sort_keys=True))
+            run_plan.append((table, rule, cutoff))
+
+        cert_path = Path(f"{out_prefix}{now.strftime('%Y%m%dT%H%M%SZ')}.json")
+        if dry:
+            summary = self._apply_run_plan(run_plan, dry=True)
+            self._write_certificate(cert_path, summary)
+        else:
+            with transaction.atomic():
+                self._validate_sql_plans(run_plan)
+                summary = self._apply_run_plan(run_plan, dry=False)
+                # Publish the complete certificate before the database commit.
+                # A certificate failure therefore rolls back every deletion.
+                self._write_certificate(cert_path, summary)
         self.stdout.write(self.style.SUCCESS(
             f"{'Would dispose' if dry else 'Disposed'} — certificate: {cert_path}"
         ))
+
+    def _apply_run_plan(
+        self,
+        run_plan: list[tuple[str, RetentionRule, datetime]],
+        *,
+        dry: bool,
+    ) -> list[DisposalResult]:
+        return [
+            self._dispose_table(table, cutoff, rule, dry)
+            for table, rule, cutoff in run_plan
+        ]
+
+    def _validate_sql_plans(
+        self,
+        run_plan: list[tuple[str, RetentionRule, datetime]],
+    ) -> None:
+        """Ask PostgreSQL to plan every query before any DELETE executes."""
+        from django.db import connection
+
+        with connection.cursor() as cur:
+            for table, _rule, cutoff in run_plan:
+                plan = RETENTION_SQL_PLANS[table]
+                statements = [plan.count_sql, plan.delete_sql]
+                if plan.legal_hold_count_sql is not None:
+                    statements.append(plan.legal_hold_count_sql)
+                for sql in statements:
+                    cur.execute(f"EXPLAIN {sql}", [cutoff])
+
+    @staticmethod
+    def _write_certificate(
+        cert_path: Path,
+        summary: list[DisposalResult],
+    ) -> None:
+        """Atomically publish a complete certificate without overwriting one."""
+        payload = json.dumps(summary, indent=2, sort_keys=True)
+        fd, temporary_name = tempfile.mkstemp(
+            dir=cert_path.parent,
+            prefix=f".{cert_path.name}.",
+            suffix=".tmp",
+            text=True,
+        )
+        try:
+            with os.fdopen(fd, "w", encoding="utf-8") as fh:
+                fh.write(payload)
+                fh.flush()
+                os.fsync(fh.fileno())
+            os.link(temporary_name, cert_path)
+        finally:
+            try:
+                os.unlink(temporary_name)
+            except FileNotFoundError:
+                pass
 
     @transaction.atomic
     def _dispose_table(

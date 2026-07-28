@@ -1,10 +1,12 @@
 from __future__ import annotations
 
 import json
+from dataclasses import replace
 from datetime import UTC, datetime, timedelta
 from types import MethodType
 
 import pytest
+from django.core.management.base import CommandError
 
 from apps.administration import retention
 
@@ -48,7 +50,7 @@ def _use_fake_cursor(monkeypatch, cursor: FakeCursor):
     monkeypatch.setattr(connection, "cursor", lambda: cursor)
 
 
-def test_unknown_policy_table_is_skipped_without_query_or_certificate(
+def test_unknown_policy_table_is_rejected_without_query_or_certificate(
     monkeypatch, tmp_path
 ):
     malicious_table = "ticket; DROP TABLE ticket; --"
@@ -66,13 +68,11 @@ def test_unknown_policy_table_is_skipped_without_query_or_certificate(
         retention.Command._dispose_table.__wrapped__, command
     )
 
-    command.handle(dry_run=True, table=[], out=str(tmp_path / "disposal-"))
+    with pytest.raises(CommandError, match="unsupported retention table"):
+        command.handle(dry_run=True, table=[], out=str(tmp_path / "disposal-"))
 
-    certificate = json.loads(
-        (tmp_path / "disposal-20260728T080000Z.json").read_text(encoding="utf-8")
-    )
     assert cursor.executed == []
-    assert certificate == []
+    assert list(tmp_path.iterdir()) == []
 
 
 @pytest.mark.parametrize(
@@ -138,15 +138,35 @@ def test_ticket_retention_uses_static_related_legal_hold_queries(
     assert certificate["legal_hold_preserved"] == 2
 
 
-def test_non_hold_table_counts_and_deletes_without_legal_hold_query(monkeypatch):
+@pytest.mark.parametrize(
+    ("table", "count_sql", "delete_sql"),
+    [
+        (
+            "auditevent",
+            "SELECT count(*) FROM auditevent WHERE occurred_at < %s",
+            "DELETE FROM auditevent WHERE occurred_at < %s",
+        ),
+        (
+            "integrationevent",
+            "SELECT count(*) FROM integrationevent WHERE processed_at < %s",
+            "DELETE FROM integrationevent WHERE processed_at < %s",
+        ),
+        (
+            "csat_response",
+            "SELECT count(*) FROM csat_response WHERE invited_at < %s",
+            "DELETE FROM csat_response WHERE invited_at < %s",
+        ),
+    ],
+)
+def test_non_hold_table_uses_its_current_schema_timestamp(
+    monkeypatch, table, count_sql, delete_sql
+):
     cutoff = datetime(2026, 6, 1, tzinfo=UTC)
-    count_sql = "SELECT count(*) FROM auditevent WHERE created_at < %s"
-    delete_sql = "DELETE FROM auditevent WHERE created_at < %s"
     cursor = FakeCursor({_compact(count_sql): 4}, delete_count=4)
     _use_fake_cursor(monkeypatch, cursor)
 
     certificate = _run_without_transaction(
-        retention.Command(), "auditevent", cutoff, {"days": 2555}, False
+        retention.Command(), table, cutoff, {"days": 2555}, False
     )
 
     assert [sql for sql, _ in cursor.executed] == [count_sql, delete_sql]
@@ -298,3 +318,220 @@ def test_child_retention_preserves_records_for_held_parent_ticket(
     assert getattr(tickets[1], related_name).count() == 0
     assert certificate["rows_disposed"] == 1
     assert certificate["legal_hold_preserved"] == 1
+
+
+@pytest.mark.django_db
+def test_default_retention_plans_execute_against_current_postgresql_schema(
+    capsys, tmp_path
+):
+    from django.db import connection
+
+    assert connection.vendor == "postgresql"
+
+    now = datetime(2026, 7, 28, 12, 0, tzinfo=UTC)
+    command = retention.Command()
+    with pytest.MonkeyPatch.context() as monkeypatch:
+        monkeypatch.setattr(retention.djtz, "now", lambda: now)
+        command.handle(
+            dry_run=True,
+            table=[],
+            out=str(tmp_path / "default-plans-"),
+        )
+
+    certificate = json.loads(
+        (tmp_path / "default-plans-20260728T120000Z.json").read_text(
+            encoding="utf-8"
+        )
+    )
+    assert {entry["table"] for entry in certificate} == set(
+        retention.DEFAULT_RETENTION
+    )
+    assert "unapproved preview schedule only" in capsys.readouterr().err
+
+
+@pytest.mark.django_db
+def test_destructive_run_requires_an_operator_configured_policy(tmp_path):
+    from apps.audit.models import AuditEvent
+
+    old_event = AuditEvent.objects.create(
+        actor_subject="retention-test",
+        action="retention.test",
+        object_type="test",
+        object_id="unconfigured-policy",
+        payload={},
+        payload_hash="0" * 64,
+    )
+    AuditEvent.objects.filter(pk=old_event.pk).update(
+        occurred_at=datetime(2000, 1, 1, tzinfo=UTC)
+    )
+
+    with pytest.raises(CommandError, match="configured retention policy"):
+        retention.Command().handle(
+            dry_run=False,
+            table=["auditevent"],
+            out=str(tmp_path / "unconfigured-"),
+        )
+
+    assert AuditEvent.objects.filter(pk=old_event.pk).exists()
+    assert list(tmp_path.iterdir()) == []
+
+
+@pytest.mark.django_db
+def test_invalid_later_policy_rule_is_rejected_before_any_deletion(tmp_path):
+    from apps.administration.models import ConfigItem
+    from apps.audit.models import AuditEvent
+
+    ConfigItem.objects.create(
+        key="retention.policy.v1",
+        value={
+            "auditevent": {"days": 1, "description": "configured"},
+            "invented_table": {"days": 1, "description": "invalid"},
+        },
+    )
+    old_event = AuditEvent.objects.create(
+        actor_subject="retention-test",
+        action="retention.test",
+        object_type="test",
+        object_id="invalid-later-rule",
+        payload={},
+        payload_hash="1" * 64,
+    )
+    AuditEvent.objects.filter(pk=old_event.pk).update(
+        occurred_at=datetime(2000, 1, 1, tzinfo=UTC)
+    )
+
+    with pytest.raises(CommandError, match="unsupported retention table"):
+        retention.Command().handle(
+            dry_run=False,
+            table=[],
+            out=str(tmp_path / "invalid-policy-"),
+        )
+
+    assert AuditEvent.objects.filter(pk=old_event.pk).exists()
+    assert list(tmp_path.iterdir()) == []
+
+
+@pytest.mark.django_db
+def test_later_table_failure_rolls_back_entire_run_without_certificate(
+    monkeypatch, tmp_path
+):
+    from apps.administration.models import ConfigItem
+    from apps.audit.models import AuditEvent
+
+    ConfigItem.objects.create(
+        key="retention.policy.v1",
+        value={
+            "auditevent": {"days": 1, "description": "configured"},
+            "integrationevent": {"days": 1, "description": "configured"},
+        },
+    )
+    old_event = AuditEvent.objects.create(
+        actor_subject="retention-test",
+        action="retention.test",
+        object_type="test",
+        object_id="later-table-failure",
+        payload={},
+        payload_hash="2" * 64,
+    )
+    AuditEvent.objects.filter(pk=old_event.pk).update(
+        occurred_at=datetime(2000, 1, 1, tzinfo=UTC)
+    )
+    original_dispose = retention.Command._dispose_table
+
+    def fail_on_second_table(command, table, cutoff, rule, dry):
+        if table == "integrationevent":
+            raise RuntimeError("simulated later-table failure")
+        return original_dispose(command, table, cutoff, rule, dry)
+
+    monkeypatch.setattr(retention.Command, "_dispose_table", fail_on_second_table)
+
+    with pytest.raises(RuntimeError, match="simulated later-table failure"):
+        retention.Command().handle(
+            dry_run=False,
+            table=[],
+            out=str(tmp_path / "later-failure-"),
+        )
+
+    assert AuditEvent.objects.filter(pk=old_event.pk).exists()
+    assert list(tmp_path.iterdir()) == []
+
+
+@pytest.mark.django_db
+def test_certificate_write_failure_rolls_back_all_disposals(tmp_path):
+    from apps.administration.models import ConfigItem
+    from apps.audit.models import AuditEvent
+
+    ConfigItem.objects.create(
+        key="retention.policy.v1",
+        value={"auditevent": {"days": 1, "description": "configured"}},
+    )
+    old_event = AuditEvent.objects.create(
+        actor_subject="retention-test",
+        action="retention.test",
+        object_type="test",
+        object_id="certificate-failure",
+        payload={},
+        payload_hash="3" * 64,
+    )
+    AuditEvent.objects.filter(pk=old_event.pk).update(
+        occurred_at=datetime(2000, 1, 1, tzinfo=UTC)
+    )
+    missing_directory = tmp_path / "missing"
+
+    with pytest.raises(FileNotFoundError):
+        retention.Command().handle(
+            dry_run=False,
+            table=[],
+            out=str(missing_directory / "certificate-"),
+        )
+
+    assert AuditEvent.objects.filter(pk=old_event.pk).exists()
+    assert not missing_directory.exists()
+
+
+@pytest.mark.django_db
+def test_all_sql_plans_are_validated_before_the_first_delete(monkeypatch, tmp_path):
+    from django.db import ProgrammingError
+
+    from apps.administration.models import ConfigItem
+    from apps.audit.models import AuditEvent
+
+    ConfigItem.objects.create(
+        key="retention.policy.v1",
+        value={
+            "auditevent": {"days": 1, "description": "configured"},
+            "integrationevent": {"days": 1, "description": "configured"},
+        },
+    )
+    old_event = AuditEvent.objects.create(
+        actor_subject="retention-test",
+        action="retention.test",
+        object_type="test",
+        object_id="preflight-validation",
+        payload={},
+        payload_hash="4" * 64,
+    )
+    AuditEvent.objects.filter(pk=old_event.pk).update(
+        occurred_at=datetime(2000, 1, 1, tzinfo=UTC)
+    )
+    valid_plan = retention.RETENTION_SQL_PLANS["integrationevent"]
+    monkeypatch.setitem(
+        retention.RETENTION_SQL_PLANS,
+        "integrationevent",
+        replace(
+            valid_plan,
+            delete_sql=(
+                "DELETE FROM integrationevent WHERE nonexistent_timestamp < %s"
+            ),
+        ),
+    )
+
+    with pytest.raises(ProgrammingError, match="nonexistent_timestamp"):
+        retention.Command().handle(
+            dry_run=False,
+            table=[],
+            out=str(tmp_path / "preflight-"),
+        )
+
+    assert AuditEvent.objects.filter(pk=old_event.pk).exists()
+    assert list(tmp_path.iterdir()) == []

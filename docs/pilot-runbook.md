@@ -116,10 +116,21 @@ mitigations, the key-rotation schedule, and the access-review cadence.
 
 ### 3.5 Retention and disposal
 
-* `manage.py apply_retention --dry-run` — previews what would be disposed.
-* `manage.py apply_retention` — actually disposes expired rows; writes a
-  disposal certificate to `backups/disposal-<timestamp>.json`.
-* Schedule monthly via cron.
+* Before enabling disposal, record the formally approved table/day mapping in
+  the `retention.policy.v1` `ConfigItem`. The values shown by the built-in
+  preview schedule are not an approval and are never used for deletion.
+* `manage.py apply_retention --dry-run` — previews what would be disposed. If
+  no policy is configured, it clearly labels the built-in schedule as an
+  unapproved preview.
+* `manage.py apply_retention` — refuses to run without a valid configured
+  policy. It validates every selected PostgreSQL query before deleting, applies
+  the complete run in one transaction, and atomically publishes the disposal
+  certificate to `backups/disposal-<timestamp>.json` before commit. A later
+  table or certificate-write failure rolls back every deletion; a database
+  commit failure may leave a certificate for a run that did not delete data and
+  should be investigated.
+* Schedule monthly via cron only after the policy has been formally approved
+  and configured.
 * `manage.py sar_export --email <addr>` — produces a Subject Access
   Request bundle for a requester within their data-subject rights window.
 
