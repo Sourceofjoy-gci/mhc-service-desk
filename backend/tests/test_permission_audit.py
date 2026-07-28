@@ -1,3 +1,5 @@
+from dataclasses import replace
+
 from scripts import permission_audit
 
 
@@ -109,3 +111,63 @@ def test_main_reports_actions_and_authentication_deterministically(capsys):
     assert "POST tickets-public-intake api/v1/tickets/public/intake/" in first
     assert "ACCESS=PUBLIC" in first
     assert "audit passed:" in first
+
+
+def test_main_deduplicates_repeated_normalized_router_actions(capsys):
+    """Catch repeated DefaultRouter roots inflating the authoritative action count."""
+    raw_routes = list(permission_audit._walk_views())
+    raw_identities = [
+        (route.path, route.method, route.action)
+        for route in raw_routes
+    ]
+    unique_identities = set(raw_identities)
+    assert raw_identities.count(("api/v1/", "GET", "api-root")) > 1
+
+    assert permission_audit.main() == 0
+
+    output = capsys.readouterr().out
+    api_root = "GET api-root api/v1/ |"
+
+    assert output.count(api_root) == 1
+    assert (
+        f"audit passed: {len(unique_identities)} route actions across "
+        f"{len({path for path, _method, _action in unique_identities})} API paths"
+    ) in output
+
+
+def test_main_fails_closed_on_conflicting_duplicate_metadata(monkeypatch, capsys):
+    """Catch deduplication silently choosing one security policy for a route action."""
+    routes = list(permission_audit._walk_views())
+    api_root = next(
+        route
+        for route in routes
+        if (route.path, route.method, route.action) == ("api/v1/", "GET", "api-root")
+    )
+    routes.append(
+        replace(
+            api_root,
+            permission_classes=("AllowAny",),
+            is_public=True,
+        )
+    )
+    monkeypatch.setattr(permission_audit, "_walk_views", lambda: iter(routes))
+
+    first_result = permission_audit.main()
+    first_output = capsys.readouterr().out
+
+    second_result = permission_audit.main()
+    second_output = capsys.readouterr().out
+
+    assert first_result == second_result == 1
+    assert first_output == second_output
+    conflict = "ERROR: conflicting metadata for GET api-root api/v1/"
+    assert conflict in first_output
+    conflict_details = first_output.split(conflict, 1)[1]
+    assert (
+        "  AUTH=KeycloakJWTAuthentication, JWTAuthentication "
+        "| PERMISSIONS=AllowAny | ACCESS=PUBLIC"
+    ) in conflict_details
+    assert (
+        "  AUTH=KeycloakJWTAuthentication, JWTAuthentication "
+        "| PERMISSIONS=IsAuthenticated | ACCESS=any auth"
+    ) in conflict_details

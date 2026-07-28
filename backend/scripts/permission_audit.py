@@ -14,6 +14,7 @@ import os
 import re
 import sys
 from dataclasses import dataclass
+from itertools import groupby
 
 # Ensure /app is on sys.path so `config.urls` is importable inside the
 # container (where the CWD is /app but sys.path is not set automatically
@@ -147,24 +148,60 @@ def _missing_required_routes(routes):
     }
 
 
-def main():
-    routes = sorted(
-        _walk_views(),
-        key=lambda item: (item.path, item.method, item.action),
+def _route_sort_key(route):
+    return (
+        route.path,
+        route.method,
+        route.action,
+        route.authentication_classes,
+        route.permission_classes,
+        route.required_scope or "",
+        route.is_public,
     )
+
+
+def _route_identity(route):
+    return route.path, route.method, route.action
+
+
+def _deduplicate_routes(routes):
+    deduplicated = []
+    conflicts = []
+    unique_routes = sorted(set(routes), key=_route_sort_key)
+    for identity, grouped_routes in groupby(unique_routes, key=_route_identity):
+        candidates = tuple(grouped_routes)
+        deduplicated.append(candidates[0])
+        if len(candidates) > 1:
+            conflicts.append((identity, candidates))
+    return deduplicated, conflicts
+
+
+def _metadata_label(route):
+    authentication = ", ".join(route.authentication_classes) or "none"
+    permissions = ", ".join(route.permission_classes) or "none"
+    access = "PUBLIC" if route.is_public else (route.required_scope or "any auth")
+    return f"AUTH={authentication} | PERMISSIONS={permissions} | ACCESS={access}"
+
+
+def main():
+    routes, conflicts = _deduplicate_routes(_walk_views())
     print("METHOD ACTION PATH | AUTHENTICATION | PERMISSIONS | SCOPE / PUBLIC")
     print("-" * 120)
     for route in routes:
-        authentication = ", ".join(route.authentication_classes) or "none"
-        permissions = ", ".join(route.permission_classes) or "none"
-        access = "PUBLIC" if route.is_public else (route.required_scope or "any auth")
         print(
             f"{route.method} {route.action} {route.path} "
-            f"| AUTH={authentication} | PERMISSIONS={permissions} | ACCESS={access}"
+            f"| {_metadata_label(route)}"
         )
 
     if not routes:
         print("\nERROR: no API views found")
+        return 1
+
+    if conflicts:
+        for (path, method, action), candidates in conflicts:
+            print(f"\nERROR: conflicting metadata for {method} {action} {path}")
+            for candidate in candidates:
+                print(f"  {_metadata_label(candidate)}")
         return 1
 
     missing = _missing_required_routes(routes)
