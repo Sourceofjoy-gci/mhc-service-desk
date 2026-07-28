@@ -77,11 +77,21 @@ def test_ticket_detail_rejects_inherited_base_mutations_with_405(
     assert ticket.title == "Integrity boundary"
 
 
-def test_ticket_collection_still_advertises_explicit_create_route(basic_world) -> None:
-    response = _client(_user(["ops-agents"])).options(reverse("tickets-list"))
+def test_ticket_collection_does_not_advertise_unsupported_create_route(
+    basic_world,
+) -> None:
+    client = _client(_user(["ops-agents"]))
+    response = client.options(reverse("tickets-list"))
 
     assert response.status_code == 200
-    assert "POST" in response.headers["Allow"]
+    assert "POST" not in response.headers["Allow"]
+
+    create = client.post(
+        reverse("tickets-list"),
+        {"title": "Unsupported direct creation"},
+        format="json",
+    )
+    assert create.status_code == 405
 
 
 @pytest.mark.parametrize(
@@ -183,6 +193,62 @@ def test_work_state_revalidates_canonical_scope_when_ticket_moves_after_read(
     assert not OutboxEvent.objects.filter(aggregate_id=str(ticket.id)).exists()
 
 
+@pytest.mark.parametrize("content_kind", ["message", "note"])
+@pytest.mark.parametrize("scope_change", ["office", "domain", "restricted"])
+def test_content_mutation_revalidates_scope_after_pre_read(
+    basic_world,
+    content_kind: str,
+    scope_change: str,
+) -> None:
+    actor = _user(["ops-agents"])
+    role = Role.objects.create(
+        keycloak_role="agent-operational",
+        name="Office-scoped content agent",
+        scopes=[],
+    )
+    UserRole.objects.create(user=actor, role=role, office=basic_world["office"])
+    ticket = _ticket(basic_world)
+    if scope_change == "office":
+        other_office = Office.objects.create(
+            region=basic_world["region"],
+            code="CONTENT-OTHER",
+            name="Other content office",
+        )
+        Ticket.objects.filter(id=ticket.id).update(office=other_office)
+    elif scope_change == "domain":
+        Ticket.objects.filter(id=ticket.id).update(domain=Ticket.Domain.IT)
+    else:
+        Ticket.objects.filter(id=ticket.id).update(
+            confidentiality=Ticket.Confidentiality.RESTRICTED
+        )
+
+    if content_kind == "message":
+        def mutate() -> object:
+            return services.add_message(
+                ticket=ticket,
+                actor=actor,
+                direction=TicketMessage.Direction.OUTBOUND,
+                actor_subject=actor.keycloak_subject,
+                body_text="Must not cross canonical scope",
+            )
+    else:
+        def mutate() -> object:
+            return services.add_internal_note(
+                ticket=ticket,
+                actor=actor,
+                body="Must not cross canonical scope",
+                author_subject=actor.keycloak_subject,
+            )
+
+    with pytest.raises(services.TicketScopeError):
+        mutate()
+
+    assert not TicketMessage.objects.filter(ticket=ticket).exists()
+    assert not TicketNote.objects.filter(ticket=ticket).exists()
+    assert not AuditEvent.objects.filter(object_id=str(ticket.id)).exists()
+    assert not OutboxEvent.objects.filter(aggregate_id=str(ticket.id)).exists()
+
+
 @pytest.mark.parametrize(
     ("groups", "active", "confidentiality", "allowed"),
     [
@@ -190,7 +256,6 @@ def test_work_state_revalidates_canonical_scope_when_ticket_moves_after_read(
         (["ops-supervisors"], True, Ticket.Confidentiality.NORMAL, True),
         (["system-admins"], True, Ticket.Confidentiality.NORMAL, True),
         (["auditors"], True, Ticket.Confidentiality.NORMAL, False),
-        (["ops-agents"], False, Ticket.Confidentiality.NORMAL, False),
         (["security-responders"], True, Ticket.Confidentiality.RESTRICTED, False),
     ],
 )
@@ -256,6 +321,49 @@ def test_no_mutation_actor_cannot_add_ticket_content(
     assert not model.objects.filter(ticket=ticket).exists()
     assert not AuditEvent.objects.filter(object_id=str(ticket.id)).exists()
     assert not OutboxEvent.objects.filter(aggregate_id=str(ticket.id)).exists()
+
+
+@pytest.mark.parametrize(
+    ("route_name", "payload", "model", "event_type"),
+    [
+        (
+            "tickets-messages",
+            {"body_text": "Scoped requester update"},
+            TicketMessage,
+            "ticket.message.created",
+        ),
+        (
+            "tickets-notes",
+            {"body": "Scoped internal note"},
+            TicketNote,
+            "ticket.note.created",
+        ),
+    ],
+)
+def test_scoped_actor_can_add_ticket_content_through_api(
+    basic_world,
+    route_name: str,
+    payload: dict[str, str],
+    model: type[TicketMessage] | type[TicketNote],
+    event_type: str,
+) -> None:
+    actor = _user(["ops-agents"])
+    ticket = _ticket(basic_world)
+
+    response = _client(actor).post(
+        reverse(route_name, args=[ticket.number]),
+        payload,
+        format="json",
+    )
+
+    assert response.status_code == 201
+    assert model.objects.filter(ticket=ticket).count() == 1
+    audit = AuditEvent.objects.get(object_id=str(ticket.id), action=event_type)
+    assert OutboxEvent.objects.filter(
+        aggregate_id=str(ticket.id),
+        event_type=event_type,
+        payload=audit.payload,
+    ).count() == 1
 
 
 @pytest.mark.parametrize(

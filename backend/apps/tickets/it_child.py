@@ -12,16 +12,22 @@ import logging
 
 from django.core.exceptions import ImproperlyConfigured
 from django.db import transaction
+from rest_framework.request import Request
 
 from apps.catalogue.models import RequestType, Service
-from apps.contacts.models import Contact
-from apps.organisations.models import Office
+from apps.identity_access.models import User
+from apps.identity_access.scope import (
+    AuthoritySnapshot,
+    get_authority_snapshot,
+    scope_ticket_queryset,
+)
 from apps.sla.services import sync_slas_for_transition
 from apps.workflow.models import Status, TransitionHistory
 
 from .events import record_ticket_event
 from .models import Ticket, TicketLink
-from .services import link_tickets
+from .permissions import can_add_ticket_content
+from .services import TicketPermissionError, TicketScopeError, link_tickets
 
 logger = logging.getLogger(__name__)
 
@@ -57,11 +63,11 @@ def create_it_child_ticket(
     *,
     parent: Ticket,
     summary: str,
-    requester: Contact,
-    requester_office: Office,
     technical_priority: str,
+    actor: User,
+    request: Request | None = None,
+    snapshot: AuthoritySnapshot | None = None,
     carry_matter_reference: bool = False,
-    actor_subject: str = "",
 ) -> Ticket:
     """Create a sanitised IT child ticket linked to an operational parent.
 
@@ -72,11 +78,21 @@ def create_it_child_ticket(
       4. IT cannot read the parent's message body or attachments
       5. The link is auditable
     """
-    parent = (
-        Ticket.objects.select_for_update(of=("self",))
-        .select_related("status", "office")
-        .get(id=parent.id)
-    )
+    authority = snapshot or get_authority_snapshot(actor, request=request)
+    try:
+        parent = (
+            scope_ticket_queryset(
+                actor,
+                Ticket.objects.select_for_update(of=("self",)),
+                snapshot=authority,
+            )
+            .select_related("status", "office", "requester")
+            .get(id=parent.id)
+        )
+    except Ticket.DoesNotExist as exc:
+        raise TicketScopeError from exc
+    if not can_add_ticket_content(actor, parent, request=request):
+        raise TicketPermissionError
     if parent.domain != "operational":
         raise ValueError("IT child can only be created from an operational parent")
     if parent.status.is_terminal or parent.status.code in {
@@ -90,7 +106,8 @@ def create_it_child_ticket(
 
     service, request_type = _resolve_it_service_and_type()
     initial_status = Status.objects.get(domain="it", code="new")
-    office = requester_office or parent.office
+    requester = parent.requester
+    office = parent.office
 
     # Find next IT number
     from .services import next_ticket_number
@@ -104,7 +121,7 @@ def create_it_child_ticket(
         status=initial_status,
         priority=technical_priority,
         channel="internal",
-        source_account=actor_subject or "operational-parent",
+        source_account=actor.keycloak_subject,
         requester=requester,  # the same requester for context; agent can override
         service=service,
         request_type=request_type,
@@ -113,7 +130,7 @@ def create_it_child_ticket(
         confidentiality="sensitive",
     )
 
-    event_actor = actor_subject or "system"
+    event_actor = actor.keycloak_subject
     record_ticket_event(
         ticket=child,
         actor_subject=event_actor,
@@ -154,7 +171,7 @@ def create_it_child_ticket(
             ticket=parent,
             from_status=previous,
             to_status=waiting_it,
-            actor_subject=actor_subject or "system",
+            actor_subject=event_actor,
             reason=f"IT child ticket {child.number} created",
         )
         record_ticket_event(

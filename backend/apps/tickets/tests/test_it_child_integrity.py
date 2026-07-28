@@ -6,7 +6,9 @@ from unittest.mock import patch
 import pytest
 
 from apps.audit.models import AuditEvent
-from apps.identity_access.models import User
+from apps.contacts.models import Contact
+from apps.identity_access.models import Role, User, UserRole
+from apps.organisations.models import Office
 from apps.tickets import it_child, services
 from apps.tickets.models import OutboxEvent, Ticket, TicketLink
 from apps.workflow.models import Status, TransitionHistory
@@ -29,13 +31,17 @@ def _parent(basic_world) -> Ticket:
 
 
 def _create_child(parent: Ticket, basic_world) -> Ticket:
+    actor = User.objects.create(
+        username="ops-integrity-agent",
+        keycloak_subject="ops-agent",
+        keycloak_groups=["ops-agents"],
+    )
+    actor._groups = ["ops-agents"]
     return it_child.create_it_child_ticket(
         parent=parent,
         summary="Sanitised investigation",
-        requester=basic_world["contact"],
-        requester_office=basic_world["office"],
         technical_priority="P3",
-        actor_subject="ops-agent",
+        actor=actor,
     )
 
 
@@ -46,6 +52,22 @@ def _it_actor() -> User:
         keycloak_groups=["it-agents"],
     )
     actor._groups = ["it-agents"]
+    return actor
+
+
+def _office_actor(office: Office, *, subject: str) -> User:
+    actor = User.objects.create(
+        username=subject,
+        keycloak_subject=subject,
+        keycloak_groups=["ops-agents"],
+    )
+    actor._groups = ["ops-agents"]
+    role = Role.objects.create(
+        keycloak_role=f"agent-operational-{subject}",
+        name=f"Office agent {subject}",
+        scopes=[{"domain": "operational"}],
+    )
+    UserRole.objects.create(user=actor, role=role, office=office)
     return actor
 
 
@@ -84,6 +106,64 @@ def test_child_creation_uses_fresh_parent_state_after_lock(basic_world) -> None:
     stale_parent.refresh_from_db()
     assert stale_parent.status.code == "waiting_it"
     assert stale_parent.waiting_reason == "Waiting for IT"
+
+
+def test_child_creation_denies_parent_moved_out_of_scope_after_pre_read(
+    basic_world,
+) -> None:
+    stale_parent = _parent(basic_world)
+    actor = _office_actor(basic_world["office"], subject="old-office-agent")
+    other_office = Office.objects.create(
+        region=basic_world["region"],
+        code="IT-CHILD-OTHER",
+        name="Other child office",
+    )
+    Ticket.objects.filter(id=stale_parent.id).update(office=other_office)
+    before_ids = set(Ticket.objects.values_list("id", flat=True))
+
+    with pytest.raises(services.TicketScopeError):
+        it_child.create_it_child_ticket(
+            parent=stale_parent,
+            summary="Must not cross office scope",
+            technical_priority="P3",
+            actor=actor,
+        )
+
+    assert set(Ticket.objects.values_list("id", flat=True)) == before_ids
+    assert not TicketLink.objects.filter(to_ticket=stale_parent, kind="it_child").exists()
+
+
+def test_child_creation_derives_copy_fields_from_canonical_locked_parent(
+    basic_world,
+) -> None:
+    stale_parent = _parent(basic_world)
+    other_office = Office.objects.create(
+        region=basic_world["region"],
+        code="IT-CHILD-FRESH",
+        name="Fresh child office",
+    )
+    fresh_requester = Contact.objects.create(
+        full_name="Fresh requester",
+        email="fresh-requester@example.test",
+    )
+    Ticket.objects.filter(id=stale_parent.id).update(
+        office=other_office,
+        requester=fresh_requester,
+        matter_reference="FRESH-MATTER",
+    )
+    actor = _office_actor(other_office, subject="fresh-office-agent")
+
+    child = it_child.create_it_child_ticket(
+        parent=stale_parent,
+        summary="Use locked parent fields",
+        technical_priority="P3",
+        carry_matter_reference=True,
+        actor=actor,
+    )
+
+    assert child.office == other_office
+    assert child.requester == fresh_requester
+    assert child.matter_reference == "FRESH-MATTER"
 
 
 def test_resolving_child_rolls_back_when_locked_parent_sync_fails(basic_world) -> None:

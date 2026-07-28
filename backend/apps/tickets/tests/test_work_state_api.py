@@ -359,7 +359,7 @@ def test_persisted_auditor_patch_is_forbidden_and_has_no_side_effects(basic_worl
     assert not OutboxEvent.objects.filter(aggregate_id=str(ticket.id)).exists()
 
 
-def test_inactive_elevated_user_has_no_mutating_capabilities(basic_world):
+def test_inactive_elevated_user_cannot_read_ticket_detail(basic_world):
     user = _user(["ops-supervisors"])
     user.is_active = False
     user.save(update_fields=["is_active"])
@@ -367,14 +367,6 @@ def test_inactive_elevated_user_has_no_mutating_capabilities(basic_world):
 
     response = _client(user).get(reverse("tickets-detail", args=[ticket.number]))
 
-    assert response.status_code == 200
-    assert response.data["capabilities"] == {
-        "can_update_work_state": False,
-        "can_self_assign": False,
-        "self_assignee_id": None,
-        "can_reassign": False,
-        "can_change_confidentiality": False,
-        "can_add_message": False,
-        "can_add_note": False,
-        "can_upload_attachment": False,
-    }
+    assert response.status_code == 403
+    assert not AuditEvent.objects.filter(object_id=str(ticket.id)).exists()
+    assert not OutboxEvent.objects.filter(aggregate_id=str(ticket.id)).exists()

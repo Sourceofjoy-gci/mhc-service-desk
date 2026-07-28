@@ -6,6 +6,7 @@ from django.utils import timezone
 
 from apps.audit.models import AuditEvent
 from apps.catalogue.models import RequestType
+from apps.identity_access.models import User
 from apps.sla.models import SlaPauseHistory, SlaPolicy
 from apps.sla.services import instantiate_slas
 from apps.tickets import it_child, services
@@ -13,6 +14,16 @@ from apps.tickets.models import OutboxEvent, TicketLink
 from apps.workflow.models import Status, TransitionHistory
 
 pytestmark = pytest.mark.django_db
+
+
+def _actor(subject: str = "tester") -> User:
+    actor = User.objects.create(
+        username=f"it-child-{subject}",
+        keycloak_subject=subject,
+        keycloak_groups=["ops-agents"],
+    )
+    actor._groups = ["ops-agents"]
+    return actor
 
 
 @pytest.fixture
@@ -30,7 +41,12 @@ def world(basic_world, db):
         name="Y",
         default_priority="P3",
     )
-    return {**basic_world, "op_rt": op_rt, "it_rt": it_rt}
+    return {
+        **basic_world,
+        "op_rt": op_rt,
+        "it_rt": it_rt,
+        "actor": _actor(),
+    }
 
 
 def test_create_it_child_records_link_and_parent_status(world):
@@ -40,8 +56,10 @@ def test_create_it_child_records_link_and_parent_status(world):
         office=world["office"], channel="email",
     )
     child = it_child.create_it_child_ticket(
-        parent=parent, summary="Investigate email routing", requester=world["contact"],
-        requester_office=world["office"], technical_priority="P2", actor_subject="tester",
+        parent=parent,
+        summary="Investigate email routing",
+        technical_priority="P2",
+        actor=world["actor"],
     )
     assert child.domain == "it"
     assert child.number.startswith("IT-")
@@ -58,9 +76,11 @@ def test_child_copies_only_approved_fields(world):
         office=world["office"], channel="email", matter_reference="EST-9999",
     )
     child = it_child.create_it_child_ticket(
-        parent=parent, summary="Investigate", requester=world["contact"],
-        requester_office=world["office"], technical_priority="P3",
-        carry_matter_reference=True, actor_subject="tester",
+        parent=parent,
+        summary="Investigate",
+        technical_priority="P3",
+        carry_matter_reference=True,
+        actor=world["actor"],
     )
     assert child.description == ""
     assert "PRIVATE" not in child.title
@@ -74,8 +94,10 @@ def test_child_resolution_syncs_parent_to_in_progress(world):
         office=world["office"], channel="email",
     )
     child = it_child.create_it_child_ticket(
-        parent=parent, summary="Investigate", requester=world["contact"],
-        requester_office=world["office"], technical_priority="P3", actor_subject="tester",
+        parent=parent,
+        summary="Investigate",
+        technical_priority="P3",
+        actor=world["actor"],
     )
     from apps.workflow.models import Status
     target = Status.objects.get(domain="it", code="resolved")
@@ -100,8 +122,10 @@ def test_it_child_material_mutations_have_canonical_event_pairs(world):
         office=world["office"], channel="email", actor_subject="creator",
     )
     child = it_child.create_it_child_ticket(
-        parent=parent, summary="Sanitised investigation", requester=world["contact"],
-        requester_office=world["office"], technical_priority="P3", actor_subject="tester",
+        parent=parent,
+        summary="Sanitised investigation",
+        technical_priority="P3",
+        actor=world["actor"],
     )
 
     child_events = AuditEvent.objects.filter(object_id=str(child.id))
@@ -129,8 +153,10 @@ def test_child_to_parent_sync_records_one_canonical_transition_pair(world):
         office=world["office"], channel="email", actor_subject="creator",
     )
     child = it_child.create_it_child_ticket(
-        parent=parent, summary="Investigate", requester=world["contact"],
-        requester_office=world["office"], technical_priority="P3", actor_subject="tester",
+        parent=parent,
+        summary="Investigate",
+        technical_priority="P3",
+        actor=world["actor"],
     )
     child.status = Status.objects.get(domain="it", code="resolved")
     child.save(update_fields=["status", "updated_at"])
@@ -173,8 +199,10 @@ def test_it_child_creation_records_the_actual_existing_parent_waiting_reason(wor
     parent.save(update_fields=["status", "waiting_reason", "updated_at"])
 
     it_child.create_it_child_ticket(
-        parent=parent, summary="Investigate", requester=world["contact"],
-        requester_office=world["office"], technical_priority="P3", actor_subject="tester",
+        parent=parent,
+        summary="Investigate",
+        technical_priority="P3",
+        actor=world["actor"],
     )
 
     event = AuditEvent.objects.filter(
@@ -196,8 +224,10 @@ def test_child_sync_records_the_actual_non_default_parent_waiting_reason(world):
         office=world["office"], channel="email", actor_subject="creator",
     )
     child = it_child.create_it_child_ticket(
-        parent=parent, summary="Investigate", requester=world["contact"],
-        requester_office=world["office"], technical_priority="P3", actor_subject="tester",
+        parent=parent,
+        summary="Investigate",
+        technical_priority="P3",
+        actor=world["actor"],
     )
     parent.waiting_reason = "Awaiting privileged-access approval"
     parent.save(update_fields=["waiting_reason", "updated_at"])
@@ -248,10 +278,8 @@ def test_it_child_parent_transition_pauses_and_resumes_sla_without_extra_events(
     child = it_child.create_it_child_ticket(
         parent=parent,
         summary="Investigate dependency",
-        requester=world["contact"],
-        requester_office=world["office"],
         technical_priority="P3",
-        actor_subject="ops-agent",
+        actor=_actor("ops-agent"),
     )
 
     resolution_sla.refresh_from_db()

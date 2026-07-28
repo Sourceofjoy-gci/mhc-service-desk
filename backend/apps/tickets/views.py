@@ -107,12 +107,11 @@ class PublicIntakeThrottle(AnonRateThrottle):
 
 
 class TicketViewSet(
-    mixins.CreateModelMixin,
     mixins.ListModelMixin,
     mixins.RetrieveModelMixin,
     viewsets.GenericViewSet[Ticket],
 ):
-    """Explicit create/read and lifecycle-safe ticket actions."""
+    """Scoped ticket reads and explicit lifecycle-safe ticket actions."""
 
     queryset = Ticket.objects.select_related(
         "status", "requester", "service", "request_type", "office", "assignee"
@@ -368,17 +367,27 @@ class TicketViewSet(
                 detail="You cannot perform this ticket action.",
                 code="ticket_action_forbidden",
             )
-        msg = services.add_message(
-            ticket=ticket,
-            direction="outbound",
-            actor_subject=actor.keycloak_subject,
-            author_subject=actor.keycloak_subject,
-            author_label=actor.display_name or actor.username,
-            body_text=ser.validated_data["body_text"],
-            body_html=ser.validated_data.get("body_html", ""),
-            template_key=ser.validated_data.get("template_key", ""),
-            template_version=ser.validated_data.get("template_version", ""),
-        )
+        try:
+            msg = services.add_message(
+                ticket=ticket,
+                actor=actor,
+                request=request,
+                direction="outbound",
+                actor_subject=actor.keycloak_subject,
+                author_subject=actor.keycloak_subject,
+                author_label=actor.display_name or actor.username,
+                body_text=ser.validated_data["body_text"],
+                body_html=ser.validated_data.get("body_html", ""),
+                template_key=ser.validated_data.get("template_key", ""),
+                template_version=ser.validated_data.get("template_version", ""),
+            )
+        except services.TicketScopeError as exc:
+            raise NotFound from exc
+        except services.TicketPermissionError:
+            raise PermissionDenied(
+                detail="You cannot perform this ticket action.",
+                code="ticket_action_forbidden",
+            ) from None
         return Response({"id": str(msg.id)}, status=status.HTTP_201_CREATED)
 
     @action(detail=True, methods=["get", "post"], url_path="notes")
@@ -399,11 +408,21 @@ class TicketViewSet(
                 detail="You cannot perform this ticket action.",
                 code="ticket_action_forbidden",
             )
-        note = services.add_internal_note(
-            ticket=ticket,
-            body=ser.validated_data["body"],
-            author_subject=actor.keycloak_subject,
-        )
+        try:
+            note = services.add_internal_note(
+                ticket=ticket,
+                actor=actor,
+                request=request,
+                body=ser.validated_data["body"],
+                author_subject=actor.keycloak_subject,
+            )
+        except services.TicketScopeError as exc:
+            raise NotFound from exc
+        except services.TicketPermissionError:
+            raise PermissionDenied(
+                detail="You cannot perform this ticket action.",
+                code="ticket_action_forbidden",
+            ) from None
         return Response({"id": str(note.id)}, status=status.HTTP_201_CREATED)
 
     @action(detail=True, methods=["post"], url_path="it-child")
@@ -435,12 +454,18 @@ class TicketViewSet(
             child = create_it_child_ticket(
                 parent=parent,
                 summary=summary,
-                requester=parent.requester,
-                requester_office=parent.office,
                 technical_priority=priority,
                 carry_matter_reference=carry,
-                actor_subject=actor.keycloak_subject,
+                actor=actor,
+                request=request,
             )
+        except services.TicketScopeError as exc:
+            raise NotFound from exc
+        except services.TicketPermissionError:
+            raise PermissionDenied(
+                detail="You cannot perform this ticket action.",
+                code="ticket_action_forbidden",
+            ) from None
         except ValueError as exc:
             return Response({"detail": str(exc)}, status=status.HTTP_400_BAD_REQUEST)
         return Response(

@@ -29,6 +29,7 @@ from apps.workflow.models import Status, Transition, TransitionHistory
 from .events import record_ticket_event
 from .models import Ticket, TicketLink, TicketMessage, TicketNote, Watcher
 from .permissions import (
+    can_add_ticket_content,
     can_change_confidentiality,
     can_reassign,
     can_update_work_state,
@@ -485,6 +486,32 @@ def transition_ticket(
 # Messages, notes, watchers, links
 # -----------------------------------------------------------------------------
 
+
+def _lock_ticket_for_content(
+    *,
+    ticket_id: UUID,
+    actor: User | None,
+    request: Request | None,
+    snapshot: AuthoritySnapshot | None,
+) -> Ticket:
+    query = Ticket.objects.select_for_update(of=("self",))
+    if actor is None:
+        return query.get(id=ticket_id)
+
+    authority = snapshot or get_authority_snapshot(actor, request=request)
+    try:
+        locked = scope_ticket_queryset(
+            actor,
+            query,
+            snapshot=authority,
+        ).get(id=ticket_id)
+    except Ticket.DoesNotExist as exc:
+        raise TicketScopeError from exc
+    if not can_add_ticket_content(actor, locked, request=request):
+        raise TicketPermissionError
+    return locked
+
+
 @transaction.atomic
 def add_message(
     *,
@@ -501,15 +528,24 @@ def add_message(
     external_message_id: str = "",
     delivery_status: str = "",
     event_metadata: dict[str, JSONValue] | None = None,
+    actor: User | None = None,
+    request: Request | None = None,
+    snapshot: AuthoritySnapshot | None = None,
 ) -> TicketMessage:
-    locked_ticket = Ticket.objects.select_for_update(of=("self",)).get(id=ticket.id)
+    locked_ticket = _lock_ticket_for_content(
+        ticket_id=ticket.id,
+        actor=actor,
+        request=request,
+        snapshot=snapshot,
+    )
+    event_actor = actor.keycloak_subject if actor is not None else actor_subject
     message = TicketMessage.objects.create(
         ticket=locked_ticket,
         direction=direction,
         body_text=body_text,
         body_html=body_html,
         body_html_sanitized=body_html_sanitized,
-        author_subject=author_subject or actor_subject,
+        author_subject=author_subject or event_actor,
         author_label=author_label,
         template_key=template_key,
         template_version=template_version,
@@ -518,7 +554,7 @@ def add_message(
     )
     record_ticket_event(
         ticket=locked_ticket,
-        actor_subject=actor_subject,
+        actor_subject=event_actor,
         action="ticket.message.created",
         before={},
         after={
@@ -546,15 +582,30 @@ def add_message(
 
 
 @transaction.atomic
-def add_internal_note(*, ticket: Ticket, body: str, author_subject: str) -> TicketNote:
+def add_internal_note(
+    *,
+    ticket: Ticket,
+    body: str,
+    author_subject: str,
+    actor: User | None = None,
+    request: Request | None = None,
+    snapshot: AuthoritySnapshot | None = None,
+) -> TicketNote:
+    locked_ticket = _lock_ticket_for_content(
+        ticket_id=ticket.id,
+        actor=actor,
+        request=request,
+        snapshot=snapshot,
+    )
+    event_actor = actor.keycloak_subject if actor is not None else author_subject
     note = TicketNote.objects.create(
-        ticket=ticket,
+        ticket=locked_ticket,
         body=body,
-        author_subject=author_subject,
+        author_subject=event_actor,
     )
     record_ticket_event(
-        ticket=ticket,
-        actor_subject=author_subject,
+        ticket=locked_ticket,
+        actor_subject=event_actor,
         action="ticket.note.created",
         before={},
         after={
