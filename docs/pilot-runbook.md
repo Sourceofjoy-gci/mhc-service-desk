@@ -49,6 +49,9 @@ mitigations, the key-rotation schedule, and the access-review cadence.
    * `POSTGRES_PASSWORD`, `REDIS_PASSWORD`, `RABBITMQ_PASSWORD`,
      `MINIO_ROOT_USER`, `MINIO_ROOT_PASSWORD`, `KEYCLOAK_ADMIN_PASSWORD`,
      `BACKUP_ENCRYPTION_KEY` — generate with `openssl rand -base64 32`
+   * `EMAIL_WEBHOOK_SECRET`, `WHATSAPP_APP_SECRET`, and
+     `WHATSAPP_VERIFY_TOKEN` — generate independently and store only in the
+     secret manager. Never reuse provider access tokens as webhook secrets.
 5. Mount the TLS certificates into `infrastructure/nginx/ssl/`.
 6. Bring the stack up:
    ```bash
@@ -57,9 +60,15 @@ mitigations, the key-rotation schedule, and the access-review cadence.
 7. Apply migrations and seed:
    ```bash
    docker compose exec -T backend python manage.py migrate
+   docker compose exec -T backend python manage.py migrate --check
    docker compose exec -T backend python /app/scripts/seed_dev.py
    python scripts/seed_keycloak_user.py   # creates 'alice' in the mhc realm
    ```
+   If this environment previously applied an earlier revision of the unshipped
+   `sla.0004_backfill_paused_remaining_business_seconds` migration, migration
+   history will not rerun the revised data operation. Manually reconcile its
+   affected paused SLA rows before use. Fresh deployments and the current live
+   pilot rows use the corrected semantics.
 8. Configure Keycloak:
    * Sign in to <https://mhc-ticketing.local/admin> with `KEYCLOAK_ADMIN`.
    * Import `infrastructure/keycloak/realm-mhc.json` if not done automatically.
@@ -103,6 +112,7 @@ mitigations, the key-rotation schedule, and the access-review cadence.
 | `DJANGO_SECRET_KEY` | 90 days | `manage.py rotate_secrets --what django`; redeploy; old key discarded after overlap window |
 | DB / Redis / Rabbit / MinIO | 180 days | Rotate in the secret store, redeploy worker + beat first, then web |
 | Keycloak admin | 90 days | Rotate in Keycloak admin console; redeploy backend |
+| Email/WhatsApp webhook secrets and verification token | 90 days or immediately after suspected disclosure | Rotate with the provider, redeploy backend, and verify signed challenge/event delivery before retiring the old value |
 | `BACKUP_ENCRYPTION_KEY` | 365 days | Re-encrypt existing backups first, then rotate |
 | TLS certificates | auto (Let's Encrypt) or 30 days before expiry | `CertificateExpiringSoon` alert fires 14d early |
 
@@ -114,7 +124,20 @@ mitigations, the key-rotation schedule, and the access-review cadence.
 * Quarterly: review `MfaRequired` exemption list.
 * Quarterly: review `WhitelistIP` (when added) and `IntegrationToken` set.
 
-### 3.5 Retention and disposal
+### 3.5 Channel webhook operations
+
+* Treat the email and WhatsApp endpoints as public transport, not anonymous
+  trust. Configure the required secrets and provider/account identifiers, then
+  validate signed challenge/event delivery using
+  [`channel-webhook-contract.md`](channel-webhook-contract.md).
+* Monitor rejected signature, stale timestamp, replay, unknown account, and
+  unknown provider-message outcomes without logging secrets or requester
+  message bodies.
+* Do not activate outbound WhatsApp in production yet. Provider approval and
+  credentials are necessary but not sufficient: the P1 leased idempotent
+  dispatch/retry worker and API-retry deduplication must ship first.
+
+### 3.6 Retention and disposal
 
 * Before enabling disposal, record the formally approved table/day mapping in
   the `retention.policy.v1` `ConfigItem`. The values shown by the built-in

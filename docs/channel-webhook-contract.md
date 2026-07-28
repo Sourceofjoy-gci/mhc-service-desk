@@ -77,7 +77,7 @@ the ticket message, audit record, and outbox event are then committed before
 the send call. The provider result advances both message records and emits a
 delivery-update event.
 
-## Known pilot-readiness blocker
+## P1 production-activation blocker
 
 Outbound dispatch is still synchronous after the pending transaction commits.
 There is not yet a leased, idempotent dispatch command and retry worker. A

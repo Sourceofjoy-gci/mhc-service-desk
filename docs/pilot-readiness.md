@@ -27,9 +27,11 @@ pilot-ready.
   Nginx configuration, and readiness/liveness endpoints are present.
 - [x] Keycloak bearer authentication and durable group snapshots are wired;
   development bearer tokens are conditional on `DEBUG=True` and are rejected
-  when `DEBUG=False`.
+  when `DEBUG=False`. Verified `sub` is authoritative, and new subjects cannot
+  relink existing authoritative usernames.
 - [x] Ticket authority supports domain, office, service, queue, restricted-
-  only grants, persisted role precedence, and read-only auditors.
+  only grants, persisted role precedence, and read-only auditors. Inactive
+  identities, including inactive superusers, fail closed.
 - [x] The shared DRF exception handler and covered transition, work-state, and
   attachment validation paths return `code`, `detail`, `fields`, and
   `correlation_id`.
@@ -39,9 +41,12 @@ pilot-ready.
   integration paths have not all been migrated to the standardized envelope.
 - [x] Ticket mutations write audit and outbox records transactionally on the
   tested service paths.
-- [x] WhatsApp template listing and outbound sending require an authenticated
-  identity; auditors cannot send. The inbound provider webhook remains
-  public.
+- [x] Public email and WhatsApp webhooks require configured signatures,
+  freshness, and replay protection before state changes. WhatsApp account and
+  phone identifiers are bound to the same active local account.
+- [x] WhatsApp template listing and outbound sending require a scoped mutable
+  ticket. The service derives the recipient and domain account, checks consent
+  and approved templates, and denies auditors and inactive users.
 - [x] Inbound email HTML is sanitized with Bleach 6.4.0, with a service-level
   regression covering invisible URI-scheme characters and `formaction`.
 
@@ -51,12 +56,20 @@ pilot-ready.
 - [x] The ticket workspace includes server-approved transitions, assignment
   and work-state controls, activity, replies/internal notes, SLA clocks,
   relationships, requester context, and attachment scan states.
+- [x] Queue and Kanban routes select only user-authorized domains. Ticket
+  content and lifecycle mutations revalidate scope and authority on locked
+  rows before committing.
 - [x] Work-state and transition requests use optimistic `updated_at`; a stale
   mutation returns `409 stale_ticket` and the UI offers an explicit reload.
 - [x] Resolve/reopen behavior preserves history while clearing active
   resolution fields on reopen.
 - [x] Attachments are stored outside PostgreSQL, scanned, and downloadable
-  through a short-lived signed URL only when scan status is clean.
+  through a short-lived signed URL only when scan status is clean. Intake is
+  bounded and atomic, and compensation/retention cleanup targets only the
+  exact owned object version.
+- [x] SLA clocks use calendar-local business-time arithmetic, freeze paused
+  entitlement, treat the exact deadline as breached, and fail closed when a
+  legacy paused row cannot be reconstructed.
 - [x] Operational/IT dashboards, scoped CSV export, and flow reporting exist.
 - [x] The repeatable pilot smoke creates fresh development records and checks
   lifecycle, activity, IT-child, dashboard denial, and out-of-domain hiding.
@@ -66,6 +79,9 @@ pilot-ready.
 - [x] Retention/legal-hold, SAR export, backup/restore scripts, structured
   logging, correlation IDs, monitoring configuration, and operational runbooks
   are present in the repository.
+- [x] Retention disposal locks and revalidates legal holds, preserves complete
+  held graphs, commits database changes atomically, queues exact-version object
+  cleanup, and publishes final certificates only from committed truth.
 - [x] The threat model, permission matrix, roadmap, traceability, pilot
   runbook, incident runbook, and agent guide are present.
 
@@ -78,7 +94,9 @@ Latest evidence shows:
 
 - [x] Migration drift check passed.
 - [x] Unapplied-migration check passed.
+- [x] All new migrations were applied to the live pilot database.
 - [x] Django system check passed.
+- [x] Python dependency consistency check passed.
 - [x] Permission route audit passed and included the required lifecycle,
   attachment, and reporting route families.
 - [x] Full backend pytest passed in a freshly built current-source image.
@@ -95,6 +113,8 @@ Latest evidence shows:
   production build passed. Non-fatal font and bundle-size warnings remain.
 - [x] Final live Operational/IT pilot smoke passed with fresh development
   tickets.
+- [x] Independent reviews passed for identity, tickets/frontend, attachments,
+  SLA, retention, and channels.
 
 The open items keep the automatic release gate open. See the dated evidence
 for exact totals and the dirty-worktree qualification; do not copy fixed totals
@@ -112,6 +132,9 @@ into this page.
 - [ ] Representative load/concurrency verification for response-time and
   session-volume objectives. Development health latency and configuration
   values are not substitutes for a load test.
+- [ ] Any environment that applied an earlier unshipped revision of SLA
+  migration `0004` must manually reconcile affected paused rows. Fresh
+  deployments and the current live pilot rows are correct.
 
 A supported browser-verification tool was unavailable for the latest run, so
 browser verification is open rather than passed.
@@ -130,6 +153,12 @@ browser verification is open rather than passed.
 - [ ] Product, technical, security, operations, records, and data-protection
   owners sign the pilot decision.
 
+## P1 production activation blocker
+
+- [ ] Do not activate outbound WhatsApp in production until a leased,
+  idempotent dispatch/retry worker and API-retry deduplication are implemented.
+  Signed webhooks, provider approval, and credentials do not close this gap.
+
 ## Deliberately deferred product scope
 
 - Native mobile application and biometric identity.
@@ -146,7 +175,8 @@ listed above.
 
 **Pilot readiness is open.** The application must not be labelled pilot-ready
 until clean-checkout Ruff, required browser checks, and owner-controlled
-prerequisites all have passing evidence.
+prerequisites all have passing evidence. Production WhatsApp also remains
+disabled until its P1 dispatch and retry-deduplication work is complete.
 
 | Role | Name | Date | Decision/signature |
 |---|---|---|---|
