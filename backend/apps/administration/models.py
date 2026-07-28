@@ -15,3 +15,6 @@ class ConfigItem(models.Model):
     class Meta:
         db_table = "configitem"
 
+    def __str__(self) -> str:
+        return f"config-item:{self.pk}"
+

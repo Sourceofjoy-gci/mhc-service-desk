@@ -19,3 +19,6 @@ class CsatResponse(models.Model):
 
     class Meta:
         db_table = "csat_response"
+
+    def __str__(self) -> str:
+        return f"csat-response:{self.pk}"

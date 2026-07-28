@@ -16,3 +16,6 @@ class IntegrationEvent(models.Model):
     class Meta:
         db_table = "integrationevent"
 
+    def __str__(self) -> str:
+        return f"integration-event:{self.pk}"
+

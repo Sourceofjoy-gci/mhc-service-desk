@@ -61,6 +61,9 @@ class Transition(models.Model):
         db_table = "workflow_transition"
         unique_together = [("domain", "from_status", "to_status")]
 
+    def __str__(self) -> str:
+        return f"transition:{self.pk}"
+
 
 class TransitionHistory(models.Model):
     """Append-only record of every status change. Drives reporting and audit."""
@@ -80,3 +83,6 @@ class TransitionHistory(models.Model):
     class Meta:
         db_table = "workflow_transition_history"
         ordering = ("-occurred_at",)
+
+    def __str__(self) -> str:
+        return f"transition-history:{self.pk}"

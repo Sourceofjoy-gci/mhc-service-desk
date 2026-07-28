@@ -18,6 +18,9 @@ class WhatsappAccount(models.Model):
     class Meta:
         db_table = "whatsapp_account"
 
+    def __str__(self) -> str:
+        return f"whatsapp-account:{self.pk}"
+
 
 class WhatsappMessage(models.Model):
     """Audit log of every inbound/outbound WhatsApp message we touch."""
@@ -53,3 +56,6 @@ class WhatsappMessage(models.Model):
     class Meta:
         db_table = "whatsapp_message"
         ordering = ("-created_at",)
+
+    def __str__(self) -> str:
+        return f"whatsapp-message:{self.pk}"

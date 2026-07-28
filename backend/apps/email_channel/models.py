@@ -22,6 +22,9 @@ class Mailbox(models.Model):
         db_table = "email_mailbox"
         ordering = ("address",)
 
+    def __str__(self) -> str:
+        return f"mailbox:{self.pk}"
+
 
 class EmailDelivery(models.Model):
     """An outbound email attempt and its result."""
@@ -51,3 +54,6 @@ class EmailDelivery(models.Model):
     class Meta:
         db_table = "email_delivery"
         ordering = ("-created_at",)
+
+    def __str__(self) -> str:
+        return f"email-delivery:{self.pk}"

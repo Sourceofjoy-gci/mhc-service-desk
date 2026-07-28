@@ -81,6 +81,9 @@ class ContactMethod(models.Model):
         db_table = "contact_method"
         unique_together = [("contact", "method", "value")]
 
+    def __str__(self) -> str:
+        return f"contact-method:{self.pk}"
+
 
 class VerificationToken(models.Model):
     """Magic link / one-time code sent to a contact for status access (FR-071)."""
@@ -96,6 +99,9 @@ class VerificationToken(models.Model):
     class Meta:
         db_table = "contact_verification_token"
         indexes = [models.Index(fields=["expires_at"])]
+
+    def __str__(self) -> str:
+        return f"verification-token:{self.pk}"
 
     def is_valid(self) -> bool:
         return self.used_at is None and self.expires_at > timezone.now()

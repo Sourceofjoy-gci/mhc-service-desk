@@ -46,6 +46,9 @@ class RequestType(models.Model):
         db_table = "catalogue_request_type"
         unique_together = [("service", "code")]
 
+    def __str__(self) -> str:
+        return f"request-type:{self.pk}"
+
 
 class CustomFieldDefinition(models.Model):
     """A field that a request type collects beyond the common ones."""
@@ -75,3 +78,6 @@ class CustomFieldDefinition(models.Model):
         db_table = "catalogue_custom_field"
         unique_together = [("request_type", "key")]
         ordering = ("order", "key")
+
+    def __str__(self) -> str:
+        return f"custom-field:{self.pk}"

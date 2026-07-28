@@ -17,3 +17,6 @@ class Notification(models.Model):
     class Meta:
         db_table = "notification"
 
+    def __str__(self) -> str:
+        return f"notification:{self.pk}"
+

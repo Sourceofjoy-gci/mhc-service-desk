@@ -36,6 +36,9 @@ class AutomationRule(models.Model):
         db_table = "automation_rule"
         ordering = ("priority", "name")
 
+    def __str__(self) -> str:
+        return f"automation-rule:{self.pk}"
+
 
 class AutomationExecution(models.Model):
     id = models.UUIDField(primary_key=True, default=uuid.uuid4, editable=False)
@@ -48,3 +51,6 @@ class AutomationExecution(models.Model):
 
     class Meta:
         db_table = "automation_execution"
+
+    def __str__(self) -> str:
+        return f"automation-execution:{self.pk}"

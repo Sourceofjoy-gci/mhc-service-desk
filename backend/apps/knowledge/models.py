@@ -39,6 +39,9 @@ class KnowledgeArticle(models.Model):
         db_table = "knowledge_article"
         indexes = [models.Index(fields=["audience", "status"])]
 
+    def __str__(self) -> str:
+        return f"knowledge-article:{self.pk}"
+
 
 class KnowledgeUsageLog(models.Model):
     id = models.UUIDField(primary_key=True, default=uuid.uuid4, editable=False)
@@ -49,3 +52,6 @@ class KnowledgeUsageLog(models.Model):
 
     class Meta:
         db_table = "knowledge_usage"
+
+    def __str__(self) -> str:
+        return f"knowledge-usage:{self.pk}"

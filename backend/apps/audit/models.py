@@ -20,3 +20,6 @@ class AuditEvent(models.Model):
     class Meta:
         db_table = "auditevent"
 
+    def __str__(self) -> str:
+        return f"audit-event:{self.pk}"
+
