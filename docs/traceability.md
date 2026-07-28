@@ -1,137 +1,97 @@
-# Requirement-to-Module Traceability (Complete)
+# Requirement-to-module traceability
 
-This matrix maps PRD §20 functional requirements to the module that owns
-their implementation across the six milestones.
+This document links pilot-foundation requirements to current code and focused
+tests. A linked test is evidence that a contract exists, not a claim that the
+complete release gate is green. Exact run totals and open gates are recorded
+in
+[`verification/pilot-foundation-2026-07-27.md`](verification/pilot-foundation-2026-07-27.md).
 
-> Source of truth: `docs/prd.md`. Status legend:
-> ✅ Implemented and tested · 🟡 Stub with tests scaffolded · ⬜ Deferred to P2 (P0 build)
+Status meanings:
 
-## FR-001 to FR-100 (P0 scope)
+- **Implemented**: a production code path exists.
+- **Partial**: a model, adapter, or backend path exists but the full user or
+  production workflow is not delivered.
+- **Deferred**: no current pilot implementation is claimed.
 
-| ID | Priority | Module | Status | Notes |
-|---|---|---|---|---|
-| FR-001 | P0 | tickets.services | ✅ | Per-domain sequences (OP-/IT-) implemented |
-| FR-002 | P0 | tickets.views.public_intake | ✅ | Public form creates operational tickets |
-| FR-003 | P0 | tickets.services | ✅ | `acknowledged_at` set on creation; CSAT queue planned |
-| FR-004 | P0 | email_channel.services | ✅ | Message-ID / In-Reply-To / References threading |
-| FR-005 | P0 | email_channel.services | ✅ | Idempotency via `external_message_id` |
-| FR-006 | P0 | (out of scope in P0) | ⬜ | Phone normalisation deferred to P1 |
-| FR-007 | P0 | contacts.views.duplicates | ✅ | Email / phone / name match |
-| FR-008 | P0 | tickets.views.public_intake | ✅ | Channel parameter records origin |
-| FR-009 | P0 | tickets.services | ✅ | Anonymous allowed for general enquiries |
-| FR-010 | P0 | (consent in form) | ✅ | Public form requires `consent: true` |
-| FR-011 | P0 | (admin) | 🟡 | Merge preview in admin; UI deferred |
-| FR-013 | P0 | tickets.models.Ticket | ✅ | All classification fields present |
-| FR-014 | P0 | tickets.api | ✅ | Timeline via TicketDetailSerializer |
-| FR-015 | P0 | tickets.models.TicketMessage vs TicketNote | ✅ | Two separate models, separate UI |
-| FR-016 | P0 | (UI + API) | ✅ | Internal notes never exposed via requester portal |
-| FR-017 | P0 | files | ✅ | S3 / MinIO + signed URLs |
-| FR-018 | P0 | tickets.models.Watcher | 🟡 | Model exists, UI deferred |
-| FR-019 | P0 | tickets.models.TicketLink | ✅ | Parent/child/related/duplicate/it_child kinds |
-| FR-020 | P0 | (admin) | ⬜ | Merge UI deferred |
-| FR-022 | P0 | tickets.services.transition_ticket | ✅ | Resolution code/summary required for resolved |
-| FR-023 | P0 | workflow seed | ✅ | Reopened status and transition defined |
-| FR-024 | P1 | (deferred) | ⬜ | Tasks/checklists in P1 |
-| FR-025 | P1 | (deferred) | ⬜ | Approvals in P1 |
-| FR-026 | P0 | tickets.views.TicketViewSet | ✅ | get_queryset filters by domain |
-| FR-027 | P0 | identity_access.scope | ✅ | IT users cannot see operational content |
-| FR-028 | P0 | tickets.it_child | ✅ | Sanitised child ticket pattern |
-| FR-029 | P0 | tickets.it_child.sync_child_status_to_parent | ✅ | Safe status summary on resolve |
-| FR-030 | P0 | tickets.it_child | ✅ | IT child resolution does not close parent |
-| FR-031 | P0 | tickets.services | ✅ | Manual + auto via service codes |
-| FR-032 | P0 | tickets.services | ✅ | Unmatched → public form default service |
-| FR-033 | P0 | tickets.models.Ticket.assignee | ✅ | Manual assignment via service layer |
-| FR-034 | P1 | (deferred) | ⬜ | Round-robin etc. in P1 |
-| FR-035 | P0 | automation rules | 🟡 | Engine scaffolded |
-| FR-036 | P0 | identity_access | 🟡 | OOO flagged via `is_active=False` |
-| FR-037 | P0 | (deferred) | ⬜ | Advisory lock UI |
-| FR-038 | P0 | workflow.models | ✅ | Statuses + Transitions in DB |
-| FR-039 | P0 | (queue view) | ✅ | QueuePage + KanbanPage |
-| FR-040 | P0 | tickets.services.transition_ticket | ✅ | Server-side validation; returns 400 on invalid |
-| FR-041 | P0 | frontend | ✅ | KeyboardSensor in KanbanPage |
-| FR-042 | P0 | tickets.api | ✅ | TicketCard + Kanban card show required fields |
-| FR-043 | P0 | frontend | ✅ | Saved filters via query params |
-| FR-044 | P0 | (deferred) | ⬜ | WIP limits in P2 |
-| FR-045 | P1 | (deferred) | ⬜ | Hard WIP limits in P1 |
-| FR-046 | P0 | (board) | ✅ | Status visible on cards |
-| FR-047 | P0 | (pagination) | ✅ | Cursor-style pagination in views |
-| FR-048 | P1 | (deferred) | ⬜ | Calendar view in P1 |
-| FR-049 | P1 | (deferred) | ⬜ | Swimlanes in P1 |
-| FR-050 | P0 | workflow | ✅ | Priority from impact/urgency matrix in service |
-| FR-051 | P0 | audit | ✅ | Override is logged in TransitionHistory |
-| FR-052 | P0 | sla | ✅ | SLA policy in DB; instantiated per ticket |
-| FR-053 | P0 | sla.services | ✅ | Business time math honoured |
-| FR-054 | P0 | sla.models | ✅ | SlaInstance persisted; Celery evaluator |
-| FR-055 | P0 | sla.services | ✅ | pause_sla + reason required |
-| FR-056 | P0 | (auto) | 🟡 | Email reply triggers resume (scaffold) |
-| FR-057 | P0 | sla.services.evaluate_open_slas | ✅ | Periodic evaluator marks breaches |
-| FR-058 | P0 | sla + frontend | ✅ | State visible on cards |
-| FR-059 | P0 | sla | ✅ | Breach reason recorded |
-| FR-060 | P1 | (deferred) | ⬜ | OLA in P1 |
-| FR-061 | P0 | notifications | 🟡 | TicketMessage.body_html_sanitized |
-| FR-062 | P0 | notifications | 🟡 | Channel layered for later |
-| FR-063 | P0 | (templates) | 🟡 | template_key / template_version columns |
-| FR-064 | P0 | notifications | 🟡 | No subjects; PII scrubbed by JSONFormatter |
-| FR-065 | P0 | notifications | 🟡 | Suppression rules in seed |
-| FR-066 | P0 | email_channel.models.EmailDelivery | ✅ | Status / error captured |
-| FR-067 | P1 | whatsapp | ✅ | Adapter abstraction; mock + cloud |
-| FR-068 | P1 | (deferred) | ⬜ | SMS provider in P1 |
-| FR-069 | P1 | (deferred) | ⬜ | Quiet hours in P1 |
-| FR-070 | P1 | csat | ✅ | Model + public submit endpoint |
-| FR-071 | P0 | contacts.views.requester_status | ✅ | Magic-link ticket view |
-| FR-072 | P0 | (views) | ✅ | Only outbound/inbound messages returned; notes hidden |
-| FR-073 | P0 | contacts.views.requester_status | ✅ | Uniform 404; SHA-256 token |
-| FR-074 | P1 | (deferred) | ⬜ | My Tickets portal in P1 (expiring link covers P0) |
-| FR-075 | P1 | contacts.views.requester_reply | ✅ | Reply endpoint in place; portal UI in P1 |
-| FR-076 | P1 | knowledge | ✅ | Audiences: public, internal_op, internal_it, restricted |
-| FR-077 | P1 | knowledge | ✅ | status (draft/in_review/published/retired) + version |
-| FR-078 | P1 | knowledge | 🟡 | Suggestion hook in agents; UI hint deferred |
-| FR-079 | P1 | knowledge | ✅ | Only published + matching-audience articles returned |
-| FR-080 | P1 | knowledge | 🟡 | `language` field present; siSwati seed data deferred |
-| FR-081 | P0 | tickets | ✅ | Server-side filtering by all listed fields |
-| FR-082 | P0 | (api) | ✅ | Search uses icontains; no autocomplete data leak |
-| FR-083 | P0 | reporting | ✅ | Operational + IT dashboards |
-| FR-084 | P0 | reporting | ✅ | All listed metrics implemented |
-| FR-085 | P0 | reporting | ✅ | IT metrics in it_dashboard |
-| FR-086 | P1 | reporting.flow | ✅ | Lead/cycle/WIP percentiles |
-| FR-087 | P0 | reporting | ✅ | CSV export, streaming, scope-limited |
-| FR-088 | P1 | (deferred) | ⬜ | Scheduled exports in P1 |
-| FR-089 | P0 | admin | ✅ | All catalog/admin models registered |
-| FR-090 | P0 | admin | ✅ | All changes go through audit |
-| FR-091 | P1 | automation | ✅ | Data-driven rules; no eval; execution log |
-| FR-092 | P0 | health | ✅ | Integration health endpoint |
-| FR-093 | P0 | files | ✅ | S3 / MinIO via boto3 |
-| FR-094 | P0 | files.services.scan_with_clamav | ✅ | INSTREAM protocol + sanitised response |
-| FR-095 | P0 | files.services.generate_signed_url | ✅ | 60s URL + access log |
-| FR-096 | P0 | audit | ✅ | Append-only AuditEvent + outbox |
-| FR-097 | P0 | audit | ✅ | Auth, restricted views, transitions, downloads logged |
-| FR-098 | P1 | (deferred) | ⬜ | Retention classes in P1 |
-| FR-099 | P1 | (deferred) | ⬜ | Redaction workflow in P1 |
-| FR-100 | P0 | audit.logging.JSONFormatter | ✅ | Redacts passwords, JWTs, PII keys |
+## Pilot foundation verification trace
 
-## PRD §33 P0 acceptance — checklist
+| Concern / PRD requirements | Endpoint or module | Focused automated evidence | Current verification status |
+|---|---|---|---|
+| Authentication and staff shell | `identity_access.authentication.KeycloakJWTAuthentication`; `GET /api/v1/identity/me`; `AuthProvider` | `backend/apps/identity_access/tests/test_authentication.py`; `frontend/src/features/auth/AuthProvider.test.tsx`; `frontend/src/app/App.test.tsx` | Frontend gate passed; full backend gate open |
+| Scope separation and restricted access (FR-026, FR-027) | `identity_access.scope`; scoped ticket/file/report querysets | `identity_access/tests/test_scope.py`; `tickets/tests/test_scope_api.py`; `files/tests/test_views.py`; `reporting/tests/test_permissions.py` | Permission audit passed; full backend gate open |
+| Assignment and work state (FR-033) | `PATCH /api/v1/tickets/{number}/work-state/`; `GET .../assignees/` | `tickets/tests/test_work_state_api.py`; `tickets/tests/test_permissions.py`; `frontend/src/features/tickets/OperationsPanel.test.tsx` | Frontend gate passed; full backend gate open |
+| Workflow and role-gated transitions (FR-038, FR-040) | `POST /api/v1/tickets/{number}/transition/`; `tickets.workflow.available_transitions` | `tickets/tests/test_transition_api.py`; `tickets/tests/test_workflow_capabilities.py`; `frontend/src/features/tickets/TransitionActions.test.tsx` | Live smoke and frontend gate passed; full backend gate open |
+| Resolution and reopen (FR-022, FR-023) | `tickets.services.transition_ticket`; chronological transition activity | `tickets/tests/test_services.py::test_resolve_reopen_and_close_record_lifecycle_and_canonical_events`; `tickets/tests/test_activity.py::test_reopen_activity_preserves_the_prior_resolution` | Live smoke passed; full backend gate open |
+| Queue, Kanban, URL filters (FR-039, FR-041, FR-043, FR-081, FR-082) | `GET /api/v1/tickets/`; `GET /api/v1/tickets/kanban/`; `QueuePage`; `KanbanPage` | `tickets/tests/test_api_collections.py`; `frontend/src/features/tickets/QueuePage.test.tsx`; `KanbanPage.test.tsx` | Frontend gate passed; rendered browser checks open |
+| Cursor pagination (FR-047) | `identity_access.pagination.TicketCursorPagination` | `tickets/tests/test_api_collections.py::test_ticket_list_uses_cursor_envelope_without_losing_boundary_rows`, tied-row traversal tests, tampered-cursor test; `frontend/src/lib/collections.test.ts` | Frontend gate passed; full backend gate open |
+| Ticket card/detail fields (FR-014, FR-042) | `TicketListSerializer`; `TicketDetailSerializer`; `TicketDetailPage` | `tickets/tests/test_activity.py::test_ticket_detail_adds_workspace_context_without_removing_legacy_fields`; `frontend/src/features/tickets/TicketDetailPage.test.tsx` | Frontend gate passed; rendered browser checks open |
+| Internal notes and requester replies (FR-015, FR-016) | `GET/POST .../messages/`; `GET/POST .../notes/`; `GET .../activity/` | `tickets/tests/test_activity.py`; `frontend/src/features/tickets/ActivityTimeline.test.tsx`; `MessageComposer.test.tsx` | Live smoke and frontend gate passed; full backend gate open |
+| SLA state/display (FR-052-FR-059) | `sla.services`; `sla.serializers.serialize_sla_clocks`; ticket `sla_clocks` | `sla/tests/test_services.py`; `sla/tests/test_serializers.py`; `frontend/src/features/tickets/SlaClocks.test.tsx` | Frontend gate passed; full backend gate open |
+| Attachments (FR-017, FR-093-FR-095) | `GET/POST /api/v1/tickets/{number}/attachments/`; `GET /api/v1/attachments/{id}/download/` | `files/tests/test_views.py`; `files/tests/test_events.py`; `frontend/src/features/tickets/AttachmentUploader.test.tsx` | Frontend gate passed; full backend and browser gates open |
+| Ticket relationships and IT child (FR-019, FR-028-FR-030) | `POST .../it-child/`; `tickets.it_child`; scoped relationships | `tickets/tests/test_it_child.py`; relationship tests in `tickets/tests/test_activity.py` | Live smoke passed; full backend gate open |
+| Dashboards and export (FR-083-FR-087) | `/api/v1/reports/dashboard/{domain}`; `/tickets.csv`; `/flow` | `reporting/tests/test_permissions.py`; live pilot-smoke dashboard assertions | Live smoke passed; full backend gate open |
+| Audit and outbox (FR-096, FR-097) | `tickets.events.record_ticket_event`; `AuditEvent`; `OutboxEvent` | `tickets/tests/test_events.py`; event assertions in `test_services.py`, `test_transition_api.py`, and `test_work_state.py`; `files/tests/test_events.py` | Focused contracts exist; full backend gate open |
+| Canonical errors and correlation | `identity_access.exception_handlers.problem_details_handler`; ticket/file action errors | `identity_access/tests/test_api_contracts.py`; error cases in `test_transition_api.py`, `test_work_state_api.py`, and `files/tests/test_views.py` | Focused contracts exist; full backend gate open |
+| Staff ticket workspace | `frontend/src/features/tickets/TicketDetailPage.tsx` and its component panels | `TicketDetailPage.test.tsx`, `TransitionActions.test.tsx`, `OperationsPanel.test.tsx`, `ActivityTimeline.test.tsx`, `MessageComposer.test.tsx`, `SlaClocks.test.tsx`, `AttachmentUploader.test.tsx` | Frontend automatic gate passed; desktop/mobile browser verification open |
 
-| # | Criterion | Evidence |
+The route audit inventories declared metadata. It does not replace the scoped
+queryset and service checks linked above.
+
+## Functional scope index
+
+| PRD IDs | Status | Owning modules and boundary |
 |---|---|---|
-| 1 | Call/walk-in/web/email intake creates/updates tickets | `scripts/m2_smoke.py`, `m4_smoke.py` |
-| 2 | Each valid ticket gets unique reference + acknowledgement | `OP-202607-000001` … `OP-202607-000017` etc. |
-| 3 | Operational/IT separated in catalogue, workflow, queues, permissions, reports | `Scope.matches()` + dashboard split |
-| 4 | IT child copies only selected data, no attachment | `apps/tickets/it_child.py` + `test_it_child.py` |
-| 5 | IT user cannot search/count/view/export operational | CSV scope test in `m4_smoke.py` |
-| 6 | Queue + Kanban enforce same permissions and transitions | Both call `TicketViewSet.get_queryset` + `transition` |
-| 7 | Drag-and-drop and keyboard transitions both work | KanbanPage uses PointerSensor + KeyboardSensor |
-| 8 | SLA passes business-calendar test cases | `test_skips_closed_days`, `test_spans_lunch`, etc. |
-| 9 | Email threading passes reply, duplicate, bounce, loop tests | `test_in_reply_to_attaches_to_existing_ticket`, `test_duplicate_message_id_returns_duplicate` |
-| 10 | Requester status/reply access requires valid token, resists enumeration | SHA-256 hash, uniform 404, 60-minute TTL |
-| 11 | Public users never see internal notes, internal statuses, restricted attachments, audit data | Serializer filtering + permission class |
-| 12 | Attachments stored outside PostgreSQL, scanned before access | MinIO via boto3, ClamAV INSTREAM |
-| 13 | Required audit events complete and attributable | 12+ event types logged |
-| 14 | Dashboards reconcile to source tickets | Verified by `m2_smoke.py` and `m4_smoke.py` |
-| 15 | Backup and restore demonstrated | `scripts/backup.sh` + `scripts/restore.sh` (CONFIRM=1) |
-| 16 | Deployment succeeds from a clean documented environment | `docker compose up -d --build` from empty clone |
-| 17 | Critical business logic and access controls have automated tests | 28 unit tests + 6 smoke scripts |
-| 18 | No unresolved critical or high security finding | n/a (formal review pending; STRIDE in `docs/threat-model.md`) |
-| 19 | Accessibility tests meet P0 target | Keyboard alternative in Kanban; semantic HTML; esc-key to close |
-| 20 | Administrators can configure catalogue, forms, statuses, SLA, templates without code | All in DB tables via Django admin |
-| 21 | Agent, admin, backup, restore, incident runbooks delivered | `docs/agent-guide.md`, `docs/runbooks/incident.md`, scripts |
-| 22 | DPIA, retention, production go-live approvals recorded | ⬜ Pending; PRD §38 open decision |
+| FR-001-FR-005, FR-008-FR-010 | Implemented | Ticket numbering/intake/acknowledgement and email idempotency in `tickets` and `email_channel`; public intake is Operational |
+| FR-006 | Deferred | Phone normalization beyond current field validation |
+| FR-007 | Implemented | `contacts` duplicate suggestions; no automatic merge |
+| FR-011, FR-020 | Partial | Administrative/model support exists; complete merge UI is not delivered |
+| FR-013-FR-017, FR-019, FR-022-FR-023 | Implemented | Ticket detail/activity, internal/requester separation, files, links, resolution, and reopen; exact pilot evidence linked above |
+| FR-018 | Partial | Watcher model exists; user workflow is deferred |
+| FR-024-FR-025 | Deferred | Tasks/checklists and approvals |
+| FR-026-FR-033, FR-038-FR-043, FR-046-FR-047 | Implemented | Scope separation, IT-child, assignment, DB workflow, queue/Kanban, filters, card fields, and cursor pagination |
+| FR-034-FR-037, FR-044-FR-045, FR-048-FR-049 | Deferred/Partial | Automation scaffolds or later scheduling/WIP/calendar/swimlane/advisory-lock experiences |
+| FR-050-FR-055, FR-057-FR-059 | Implemented | Priority, transition history, SLA policy/instances/business time/pause/evaluation/display/breach fields |
+| FR-056 | Partial | Reply-driven SLA behavior is not claimed as a verified complete workflow |
+| FR-060-FR-065 | Partial/Deferred | OLA and complete notification/template/suppression operations are not pilot-complete |
+| FR-066 | Implemented | Email delivery state/error capture |
+| FR-067 | Partial | WhatsApp mock/cloud adapter exists; production provider approval and credentials remain external |
+| FR-068-FR-069 | Deferred | SMS and quiet hours |
+| FR-070-FR-073, FR-075 | Implemented | CSAT model/submit, requester token status/reply, message filtering, uniform invalid-token response |
+| FR-074 | Partial | Expiring requester link exists; a full My Tickets portal is deferred |
+| FR-076-FR-077, FR-079 | Implemented | Knowledge audiences, lifecycle/version, and published-audience filtering |
+| FR-078, FR-080 | Partial | Suggestion hook/language field exist; complete UI and operator content are open |
+| FR-081-FR-087 | Implemented | Search/filtering, scoped dashboards, flow metrics, and scoped streaming CSV |
+| FR-088 | Deferred | Scheduled exports |
+| FR-089-FR-092 | Partial | Admin registrations, audit hooks, automation, and health endpoints exist; complete configurability/production integration is not asserted |
+| FR-093-FR-097, FR-100 | Implemented | Object storage, ClamAV protocol, clean-only signed download, audit/outbox, and log redaction paths |
+| FR-098-FR-099 | Partial/Deferred | Retention assets exist, but the full redaction/records workflow is not claimed complete |
+
+## P0 acceptance trace
+
+| # | Acceptance criterion | Repository evidence | Outstanding evidence |
+|---:|---|---|---|
+| 1 | Supported intake creates tickets | `public_intake`; email service; `scripts/pilot_foundation_smoke.py`; legacy smoke scripts | Full backend gate and channel-provider UAT |
+| 2 | Unique reference and acknowledgement | `tickets.services`; `tickets/tests/test_services.py::test_ticket_numbering_is_per_domain_and_sequential` | Full backend gate |
+| 3 | Operational/IT separation | Scope/queryset/report/file tests linked above; live pilot smoke | Full backend gate and role-based browser/UAT checks |
+| 4 | Sanitized IT child | `tickets.it_child`; `tickets/tests/test_it_child.py` | Full backend gate |
+| 5 | IT cannot enumerate Operational data | Scope, reporting, file, and live-smoke `404`/`403` assertions | Full backend gate |
+| 6 | Queue/Kanban share server permissions/transitions | `TicketViewSet.get_queryset`; server-derived transition codes; Queue/Kanban tests | Browser keyboard/drag verification |
+| 7 | Keyboard and pointer workflows | `KanbanPage` sensors and component tests | Rendered keyboard and focus verification |
+| 8 | SLA business-calendar cases | `sla/tests/test_services.py` and serializer tests | Full backend gate and operator policy validation |
+| 9 | Email threading/idempotency | `email_channel/tests/test_services.py`; legacy M3 smoke | Provider test and full backend gate |
+| 10 | Requester token resists enumeration | `contacts.views`; token hashing/uniform response code | Full backend/security gate |
+| 11 | Public users do not receive internal records | Requester serializers/views; separate notes/activity authorization | Full backend and browser security checks |
+| 12 | Files are external and clean-only | File service/view tests and AttachmentUploader tests | Full backend gate and production object-store/ClamAV exercise |
+| 13 | Material events are attributable | Ticket/file event tests and transition/work-state event assertions | Full backend gate; `GET /api/v1/audit/` remains a placeholder |
+| 14 | Dashboard scope reconciles to tickets | Reporting permission tests and live pilot smoke | Full backend gate and UAT reconciliation |
+| 15 | Backup/restore demonstrated | Backup/restore/verification scripts exist | Fresh operator restore drill |
+| 16 | Clean documented deployment | Docker/README assets exist | Fresh clean-environment deployment evidence |
+| 17 | Critical logic/access controls automated | Focused suites linked in this document | Full backend pytest, Ruff, and mypy must pass |
+| 18 | No critical/high security finding | Threat model exists | External penetration test and security sign-off |
+| 19 | Accessibility target | Semantic component tests and keyboard-capable UI code | Desktop/mobile browser accessibility verification |
+| 20 | Configurable catalogue/workflow/SLA/templates | Models/admin registrations exist | Administrator UAT and configuration coverage |
+| 21 | Runbooks delivered | Agent, pilot, incident, backup, and restore documentation/scripts | Operator rehearsal |
+| 22 | Governance/go-live approvals | Templates and checklist exist | DPIA, TLS/secrets, provider, security, and owner approvals remain open |
+
+The P0 acceptance set is not complete while the outstanding evidence column
+contains required release or external gates.

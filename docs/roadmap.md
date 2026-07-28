@@ -1,68 +1,74 @@
-# Delivery Roadmap
+# Delivery roadmap
 
-The PRD organises delivery into six outcome-based milestones. Each milestone
-has explicit exit criteria and a definition of done. We re-validate the
-milestone before moving to the next.
+Milestone status is evidence-linked rather than a blanket completion claim.
+Exact automated totals live only in the dated
+[`verification/pilot-foundation-2026-07-27.md`](verification/pilot-foundation-2026-07-27.md)
+record.
 
-| # | Milestone | Status | Exit evidence |
-|---|---|---|---|
-| M0 | Service & Governance Baseline | ⬜ Pending | Service catalogue approved, DPIA drafted, retention classes agreed |
-| M1 | Platform Foundation | ✅ Done | Auth via Keycloak, 9 containers up, health green, 7 tests |
-| M2 | Operational Vertical Slice | ✅ Done | 13 smoke checks, 18 unit tests, full ticket lifecycle |
-| M3 | IT Separation & Cross-Domain | ✅ Done | Sanitised IT child pattern, scope guards, email channel |
-| M4 | P0 Channels & Pilot Readiness | ✅ Done | Call/walk-in intake, attachments, CSV export, requester link |
-| M5 | P1 Omnichannel | ✅ Done | WhatsApp (mock+cloud), knowledge, CSAT, automation rules, e-Estate |
-| M6 | Optimisation | ✅ Done | Problem/Change managers, monitoring correlation, flow metrics, AI assist guard |
+| # | Milestone | Implemented | Automatically verified | Manual/external work still open |
+|---|---|---|---|---|
+| M0 | Service and governance baseline | Governance templates, retention model, permission documentation, and runbooks exist | Repository presence only; not a governance approval | DPIA and owner approvals remain unsigned |
+| M1 | Platform foundation | Django/React stack, Keycloak integration, health routes, scoped identity model, and Docker development tooling exist | Migration drift, Django check, permission audit, and current frontend gates passed in the latest evidence | Full backend tests, Ruff, mypy, production TLS/secrets, and browser verification are open |
+| M2 | Operational vertical slice | Intake, scoped queue/Kanban, ticket workspace, SLA presentation, lifecycle, activity, and Operational dashboard exist | Live Operational lifecycle smoke passed | Operational UAT and rendered desktop/mobile verification remain open |
+| M3 | IT separation and cross-domain work | Scoped IT queues/reporting, sanitized IT-child flow, restricted tickets, and email-threading code exist | Live smoke demonstrated dashboard denials, out-of-domain `404`, IT-child visibility, and material activity | IT UAT, provider/integration validation, and browser verification remain open |
+| M4 | P0 channels and pilot operations | Call/walk-in/web/email fields, requester link, attachments, CSV export, and operational scripts exist | Attachment/reporting focused tests are linked in traceability; the latest full backend gate did not complete | Restore drill, attachment/provider operations, accessibility review, and external go-live approvals remain open |
+| M5 | P1 omnichannel | WhatsApp adapter, knowledge, CSAT, automation, and e-Estate stub are present | No current release-wide green claim | Meta/e-Estate approvals and production credentials remain external; selected features remain stubs or deferred |
+| M6 | Optimization | Problem/change models, monitoring correlation, flow metrics, and guarded AI-assist code are present | No load/performance or production-operability claim | Capacity, response-time, reporting, and AI governance validation remain open |
 
-## Milestone coverage map
+## Implemented foundation by outcome
 
-### M2 — Operational Vertical Slice
-- Contacts, catalogue, ticket model, workflow engine, basic SLA, public form
-- Kanban (dnd-kit), queue, ticket detail, dashboard
-- Auth (Keycloak OIDC + dev-bypass), cross-domain scope guard
+### Operational work
 
-### M3 — IT Separation & Cross-Domain
-- `apps.tickets.it_child.create_it_child_ticket()` — sanitised child pattern
-- `sync_child_status_to_parent()` — safe status sync when IT child resolves
-- Restricted-ticket visibility via `can_view_restricted()`
-- Inbound email channel with Message-ID idempotency + thread matching
-- HTML sanitisation (bleach allow-list)
+- Server-filtered queue and Kanban views use the same scoped ticket source.
+- Queue state is encoded in URL parameters and uses opaque cursor links.
+- Ticket detail exposes server-approved transitions and request-derived
+  mutation capabilities.
+- Assignment/work-state, requester replies, internal notes, activity, SLA,
+  relationships, and attachments are combined in the staff workspace.
+- Resolve/reopen and optimistic conflict behavior are implemented in the
+  service/API layers.
 
-### M4 — P0 Channels
-- Call-centre + walk-in intake pages
-- Attachment upload to MinIO with ClamAV scan
-- Signed download URLs with audit
-- CSV export, scope-limited
-- Requester magic-link status + reply
+### IT separation
 
-### M5 — P1 Omnichannel
-- WhatsApp adapter (`apps.whatsapp`): mock + Meta Cloud API provider abstraction
-- WhatsApp webhook → email pipeline (reuses idempotency / threading)
-- Knowledge base with versioned articles, audience scoping, public search
-- CSAT model and public survey endpoint
-- Automation rules (data-driven, no eval): triggers, conditions, actions
-- e-Estate validation stub
+- Operational and IT domain scopes are separate.
+- Security responders receive restricted-only rows across both domains unless
+  another grant supplies ordinary-domain authority.
+- Auditors are read-only across both domains.
+- IT-child creation copies an intentionally limited payload, and child
+  resolution does not directly close the Operational parent.
+- Reporting dashboards require unrestricted authority for their domain;
+  scoped exports and flow metrics cannot broaden access.
 
-### M6 — Optimisation
-- Problem manager (`ProblemManager.open_problem`) with related-incident links
-- Change manager with risk tagging
-- Monitoring webhook with alert correlation / dedup
-- Flow metrics endpoint (lead/cycle time, WIP, percentiles)
-- AI assist guard (`apps.automation.ai_assist`) — suggestion → human approval → application
+### Channels and records
 
-## Out of scope (deliberately deferred)
+- Public intake, inbound email, WhatsApp/provider abstractions, requester
+  token routes, attachment scan/download, knowledge, CSAT, and automation
+  surfaces exist.
+- Audit/outbox event pairs are transactional on the tested ticket mutation
+  paths.
+- Retention, SAR, backup, restore, incident, and pilot runbook assets exist.
 
-- Native mobile applications
-- Biometric identity verification
-- Real-time WebSocket presence (short polling + optimistic updates used in P0)
-- Metabase reporting replica (deferred to P2 production)
-- Full Kubernetes HA/DR automation (Docker Compose pilot)
-- Real e-Estate API integration (P1 stub only)
-- Real Meta Cloud API (P1 mock only; cloud provider wired and ready)
-- Real ClamAV signatures in dev (soft pass; production deployment pulls them)
+## Verification sequence to close the pilot foundation
 
-## Test totals
+1. Repair the backend full-test collection path and rerun all backend tests.
+2. Resolve the repository-wide Ruff and strict-mypy baselines, then rerun the
+   complete backend gate.
+3. Preserve the passing current-source frontend test/type/lint/build gate and
+   resolve or accept the documented build warnings.
+4. Repeat the live Operational/IT smoke after backend repairs.
+5. Perform desktop and mobile browser verification, including controlled
+   loading, empty, forbidden, validation, and stale-conflict states.
+6. Complete UAT, restore/load exercises, security testing, production
+   TLS/secret configuration, provider approvals, and governance signatures.
 
-- 28 unit tests, 0 failures
-- 6 smoke scripts covering M2 through M6
-- Every smoke check is idempotent and re-runnable
+No milestone in this roadmap overrides the readiness checklist. The pilot
+decision remains open while any required release or external gate is open.
+
+## Deliberately deferred scope
+
+- Native mobile and biometric identity.
+- WebSocket presence.
+- Multi-region Kubernetes HA and a separate Metabase replica.
+- Real e-Estate production integration and operator-approved Meta WhatsApp
+  setup until their owners provide contracts and credentials.
+- Remaining P1/P2 items identified as deferred in traceability.

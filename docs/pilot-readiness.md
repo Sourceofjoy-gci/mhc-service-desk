@@ -1,123 +1,142 @@
-# Pilot Readiness Checklist
+# Pilot readiness
 
-This is the gate the platform must pass before the Office of the Master
-of the High Court begins its pilot. Every item is either **Ticked**
-(implemented, tested, in place), **Deferred** (out of scope for the
-pilot and explicitly named), or **Open** (action required before the
-pilot starts).
+This is an evergreen status page. Exact test totals, ticket identifiers,
+timestamps, command lines, and build warnings belong in the dated
+[`verification/pilot-foundation-2026-07-27.md`](verification/pilot-foundation-2026-07-27.md)
+record.
 
-## Runtime
+Status terms are intentionally separate:
 
-- [x] **Production settings split** — `config/settings/{base,dev,staging,prod}.py`
-- [x] **Fail-fast secrets validation** — `config/settings/prod.py` refuses to start with placeholder / short secrets
-- [x] **Gunicorn config** — `gunicorn.conf.py` with workers, timeouts, graceful shutdown, keepalive, JSON access log
-- [x] **Production Dockerfile** — non-root, tini entrypoint, healthcheck, gunicorn CMD
-- [x] **Dev Dockerfile** — `Dockerfile.dev` for `docker-compose.yml` (autoreload, dev-bypass, Vite dev)
-- [x] **Frontend production build** — multi-stage `frontend/Dockerfile` (dev + production targets)
-- [x] **Nginx reverse proxy** — TLS, security headers, rate limits, gzip, SPA shell
-- [x] **Production compose profile** — `docker-compose.prod.yml` with hardened RabbitMQ / Redis / MinIO / ClamAV flags
-- [x] **Decomposed health** — `/health` (readiness, deep) and `/health/live` (liveness, no auth, no deps)
+- **Implemented** means the capability exists in the repository.
+- **Automatically verified** means a named gate passed in the latest dated
+  evidence.
+- **Manual verification required** means rendered or operational behavior has
+  not been demonstrated automatically.
+- **External sign-off required** means the repository cannot supply the
+  approval.
 
-## Security
+Implemented is not synonymous with verified, and neither is synonymous with
+pilot-ready.
 
-- [x] **HTTPS-only cookies** (`SESSION_COOKIE_SECURE`, `CSRF_COOKIE_SECURE`) in prod
-- [x] **HSTS** — `SECURE_HSTS_SECONDS=31536000`, includeSubDomains, preload
-- [x] **Security headers** — CSP, X-Frame-Options, X-Content-Type-Options, Referrer-Policy, Permissions-Policy, COOP
-- [x] **Rate limits** — Nginx `limit_req` per route (intake 5/s, API 30/s, login 10/min)
-- [x] **Body size limits** — Nginx `client_max_body_size 25m`
-- [x] **HTML sanitisation** — bleach allow-list on email, public intake, e-Estate
-- [x] **Dev-bypass auth disabled in prod** — `DEBUG=False` in `prod.py`; `DEV:dev:...` is not honoured
-- [x] **Secrets not in source** — `.env` is gitignored; `.env.example` is the only committed env file
-- [x] **Audit log** — 12+ event types: login, restricted view, transition, message, attachment access, export, config change
-- [x] **Append-only audit** — `AuditEvent` model; admin-only reads
-- [x] **Permission matrix** — `docs/permission-matrix.md` derived from code
-- [x] **Cross-domain guard** — `Scope.matches()` tested in M2/M3/M4/M5/M6 smoke
+## Implemented
 
-## Data
+### Runtime and security
 
-- [x] **Legal hold** — `legal_hold` flag on ticket / message / note; retention skips held rows
-- [x] **Retention policy** — `apps/administration/retention.py` with per-class days, default 7 years
-- [x] **Disposal certificates** — every run writes a JSON cert with payload hash
-- [x] **Subject Access Request** — `manage.py sar_export --email <addr>` exports everything linked to a contact
-- [x] **Backup** — `scripts/backup.sh` + Windows `scripts/verify_backup.ps1` for operators
-- [x] **Backup verification drill** — `scripts/verify_backup.sh` / `.ps1`, asserts row counts on 18 key tables
-- [x] **Restore** — `scripts/restore.sh` with `CONFIRM=1` guard
+- [x] Environment-specific Django settings, production fail-fast secret
+  validation, secure cookie/HSTS settings, Gunicorn, production/dev images,
+  Nginx configuration, and readiness/liveness endpoints are present.
+- [x] Keycloak bearer authentication and durable group snapshots are wired;
+  development bearer tokens are conditional on `DEBUG=True` and are rejected
+  when `DEBUG=False`.
+- [x] Ticket authority supports domain, office, service, queue, restricted-
+  only grants, persisted role precedence, and read-only auditors.
+- [x] Canonical API problems contain `code`, `detail`, `fields`, and
+  `correlation_id`; cursor collections contain `next`, `previous`, and
+  `results`.
+- [x] Ticket mutations write audit and outbox records transactionally on the
+  tested service paths.
 
-## Observability
+### Pilot workflow and staff experience
 
-- [x] **Structured JSON logs** — `JSONFormatter` redacts PII / JWTs / secrets (FR-100)
-- [x] **Correlation IDs** — every request gets one; logged + returned as `X-Correlation-ID`
-- [x] **Prometheus scrape** — `prometheus.yml` for backend, postgres, redis, rabbitmq, nginx, node
-- [x] **Alertmanager rules** — 5 groups (availability, performance, security, sla, infra) with runbook links
-- [x] **Grafana dashboards** — operational + IT, provisioned from JSON
-- [x] **Critical-logging coverage** — failed auth, restricted view, export, transitions
+- [x] Public intake and scoped Operational/IT queues are implemented.
+- [x] The ticket workspace includes server-approved transitions, assignment
+  and work-state controls, activity, replies/internal notes, SLA clocks,
+  relationships, requester context, and attachment scan states.
+- [x] Work-state and transition requests use optimistic `updated_at`; a stale
+  mutation returns `409 stale_ticket` and the UI offers an explicit reload.
+- [x] Resolve/reopen behavior preserves history while clearing active
+  resolution fields on reopen.
+- [x] Attachments are stored outside PostgreSQL, scanned, and downloadable
+  through a short-lived signed URL only when scan status is clean.
+- [x] Operational/IT dashboards, scoped CSV export, and flow reporting exist.
+- [x] The repeatable pilot smoke creates fresh development records and checks
+  lifecycle, activity, IT-child, dashboard denial, and out-of-domain hiding.
 
-## Reliability
+### Operations and governance assets
 
-- [x] **Graceful shutdown** — gunicorn `graceful_timeout=30`, pre-stop hooks in compose
-- [x] **Health checks** — readiness + liveness split, dependency-aware
-- [x] **Connection pooling** — `CONN_MAX_AGE=60` in prod
-- [x] **Outbox pattern** — `OutboxEvent` written transactionally with business events
-- [x] **Idempotency** — email / WhatsApp / monitoring channels all dedup on provider ID
-- [x] **Retry policy** — RabbitMQ durable queues; `CELERY_TASK_ACKS_LATE=True`; dead-letter on max retries
+- [x] Retention/legal-hold, SAR export, backup/restore scripts, structured
+  logging, correlation IDs, monitoring configuration, and operational runbooks
+  are present in the repository.
+- [x] The threat model, permission matrix, roadmap, traceability, pilot
+  runbook, incident runbook, and agent guide are present.
 
-## Performance (NFR §28)
+These implementation statements do not assert that every legacy module or
+operational asset passed the current release gate.
 
-- [x] **Indexes** — ticket search keys, status, assignee, requester, office, created_at, SLA state
-- [x] **NFR-002 p95 < 2s** — measured in dev (`/api/v1/health` ~20 ms total); load test planned
-- [x] **NFR-004 50 agents / 300 sessions** — gunicorn `workers=4, threads=4`; concurrency test in the load script
-- [x] **NFR-005 1M tickets** — paginated list, cursor pagination, denormalised columns
+## Automatically verified
 
-## Documentation
+Latest evidence shows:
 
-- [x] **PRD trace** — `docs/traceability.md` maps every FR to module + status
-- [x] **Roadmap** — `docs/roadmap.md` lists each milestone's exit evidence
-- [x] **Threat model** — `docs/threat-model.md` STRIDE review
-- [x] **Permission matrix** — `docs/permission-matrix.md`
-- [x] **Pilot runbook** — `docs/pilot-runbook.md` (deploy, on-call, key rotation, rollback)
-- [x] **Incident runbook** — `docs/runbooks/incident.md`
-- [x] **Agent guide** — `docs/agent-guide.md`
-- [x] **README** — quick-start for new operators
+- [x] Migration drift check passed.
+- [x] Django system check passed.
+- [x] Permission route audit passed and included the required lifecycle,
+  attachment, and reporting route families.
+- [x] Current-source frontend component tests passed.
+- [x] Frontend TypeScript and ESLint passed.
+- [x] Frontend production build completed, with recorded non-fatal font and
+  bundle-size warnings.
+- [x] Live Operational/IT pilot smoke passed with fresh development tickets.
+- [ ] Full backend pytest gate: blocked by a collection-path error in the
+  pilot smoke contract under the backend-only container bind.
+- [ ] Backend Ruff gate: repository-wide violations remain.
+- [ ] Backend mypy gate: the known strict-type baseline remains red.
 
-## Tests
+The last three items keep the automatic release gate open. See the dated
+evidence for exact results; do not copy fixed totals into this page.
 
-- [x] **Unit tests** — 28 passing in 22 s
-- [x] **Smoke tests** — six scripts (M2 through M6) covering the critical paths
-- [x] **Backup verification** — 18 table counts asserted in side DB
+## Manual verification required
 
-## Open (action required before pilot)
+- [ ] Desktop browser verification for public and protected shells, ticket
+  queue/workspace, Operational and IT dashboards, and all controlled states.
+- [ ] Mobile browser verification for layout order, overflow, dialogs, labels,
+  keyboard focus, and unavailable-action behavior.
+- [ ] User acceptance testing with Operational agents, IT agents, supervisors,
+  auditors, security responders, and administrators.
+- [ ] Restore drill against operator-owned backup media and recovery targets.
+- [ ] Representative load/concurrency verification for response-time and
+  session-volume objectives. Development health latency and configuration
+  values are not substitutes for a load test.
 
-- [ ] **DPIA signed** — see PRD §38. The template is in `docs/`; the
-      office's data-protection officer must sign before any real data is
-      loaded.
-- [ ] **TLS certificates from the operator's CA** — `infrastructure/nginx/ssl/` is empty by default.
-- [ ] **PagerDuty and Slack wiring** — `infrastructure/prometheus/alertmanager.yml` reads from env vars the operator must provide.
-- [ ] **Secret manager connected** — `.env` exists for dev only. Production must source from Vault / SM / KV.
-- [ ] **DPA / contract with the Ministry of Justice** — not in scope of this repository.
+A supported browser-verification tool was unavailable for the latest run, so
+browser verification is open rather than passed.
 
-## Deferred (named explicitly; not blockers)
+## External sign-off required
 
-- [ ] **Kubernetes HA / multi-region** — single-region Docker Compose for the pilot; HA is a P2 concern (PRD §10.3).
-- [ ] **Metabase reporting replica** — Grafana dashboards cover operational needs for the pilot; Metabase is a P2 nice-to-have.
-- [ ] **Real ClamAV signature DB in CI** — production deploys pull them; dev container soft-passes.
-- [ ] **Real Meta Cloud API** — mock provider is wired; production wiring needs the approved Meta account and templates.
-- [ ] **Real e-Estate API** — stub in place; production integration needs the e-Estate team's API contract.
-- [ ] **Penetration test** — STRIDE and the test plan ship with the platform; the operator commissions the pentest before go-live.
-- [ ] **Mobile app** — PRD §10.3.
-- [ ] **Biometric identity** — PRD §10.3.
-- [ ] **Real-time WebSockets** — current short-polling + optimistic updates satisfy the pilot NFR.
-- [ ] **siSwati content** — the `language` field is present; content is operator-supplied.
-- [ ] **CSAT distribution and reporting dashboards** — survey endpoint works; aggregations land in P2.
+- [ ] Signed DPIA/data-protection approval before real personal data is loaded.
+- [ ] Production TLS certificates issued and installed by the operator.
+- [ ] Production secret manager connected; development `.env` is not an
+  acceptable production source.
+- [ ] Penetration test completed and critical/high findings resolved or
+  formally accepted.
+- [ ] Production monitoring destinations and escalation contacts approved.
+- [ ] Meta WhatsApp account/templates and e-Estate integration approvals,
+  contracts, and credentials supplied by their owners.
+- [ ] Product, technical, security, operations, records, and data-protection
+  owners sign the pilot decision.
 
-## Sign-off
+## Deliberately deferred product scope
 
-| Role | Name | Date | Signature |
+- Native mobile application and biometric identity.
+- Real-time WebSocket presence.
+- Kubernetes multi-region HA and a separate Metabase reporting replica.
+- SMS, quiet hours, watcher UI, merge UI, hard WIP limits, and scheduled
+  exports where still marked deferred in traceability.
+- Operator-supplied siSwati content.
+
+Deferred scope is not an excuse to defer a release gate or external approval
+listed above.
+
+## Decision
+
+**Pilot readiness is open.** The application must not be labelled pilot-ready
+until the backend tests, Ruff, mypy, frontend gates, live smoke, required
+browser checks, and owner-controlled prerequisites all have passing evidence.
+
+| Role | Name | Date | Decision/signature |
 |---|---|---|---|
 | Product owner | | | |
-| Tech lead | | | |
+| Technical lead | | | |
 | Security | | | |
 | Data protection | | | |
 | Operations | | | |
 | Records | | | |
-
-When every box is Ticked or Deferred, the platform is pilot-ready.
