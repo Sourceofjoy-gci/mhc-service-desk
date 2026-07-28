@@ -189,6 +189,58 @@ describe("server-driven ticket operations", () => {
     expect(harness.assignees).toHaveBeenCalledWith(TICKET.number);
   });
 
+  it("fails reassignment safely while preserving other work after an assignee lookup error", async () => {
+    const supervisor = {
+      ...TICKET,
+      capabilities: {
+        ...TICKET.capabilities,
+        can_reassign: true,
+        can_change_confidentiality: true,
+      },
+    };
+    harness.assignees.mockRejectedValue(
+      new ApiError(503, {
+        code: "assignees_unavailable",
+        detail: "Eligible assignees are temporarily unavailable.",
+        fields: {},
+        correlation_id: "corr-assignees-503",
+      }),
+    );
+    harness.updateWorkState.mockResolvedValue({
+      ...supervisor,
+      team: "Escalations",
+    });
+    const user = userEvent.setup();
+    renderPanel(supervisor);
+
+    expect(
+      await screen.findByText(/Eligible assignees are temporarily unavailable\./),
+    ).toBeVisible();
+    expect(screen.getByText(/corr-assignees-503/)).toBeVisible();
+
+    const assignee = screen.getByRole("combobox", { name: "Assignee" });
+    expect(assignee).toBeDisabled();
+    expect(assignee).toHaveValue("agent-1");
+    expect(
+      screen.getByRole("option", { name: "Case Agent" }),
+    ).toBeInTheDocument();
+    expect(screen.getByRole("textbox", { name: "Team" })).toBeEnabled();
+    expect(
+      screen.getByRole("combobox", { name: "Confidentiality" }),
+    ).toBeEnabled();
+
+    await user.clear(screen.getByRole("textbox", { name: "Team" }));
+    await user.type(screen.getByRole("textbox", { name: "Team" }), "Escalations");
+    await user.click(screen.getByRole("button", { name: "Save" }));
+
+    await waitFor(() =>
+      expect(harness.updateWorkState).toHaveBeenCalledWith(TICKET.number, {
+        team: "Escalations",
+        updated_at: TICKET.updated_at,
+      }),
+    );
+  });
+
   it("does not infer elevated controls when capability flags deny them", () => {
     renderPanel(TICKET);
 

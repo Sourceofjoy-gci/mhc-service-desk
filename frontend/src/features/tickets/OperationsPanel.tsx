@@ -189,6 +189,7 @@ export function OperationsPanel({
   };
 
   const problem = apiProblem(update.error);
+  const assigneesProblem = apiProblem(assignees.error);
   const stale = update.isError && problem?.code === "stale_ticket";
   const fieldErrors = problem?.fields ?? {};
   const canEditWorkState = ticket.capabilities.can_update_work_state;
@@ -237,11 +238,20 @@ export function OperationsPanel({
                   id="operations-assignee"
                   className={controlClassName}
                   value={values.assignee}
-                  disabled={disabled || assignees.isLoading}
+                  disabled={
+                    disabled || assignees.isLoading || assignees.isError
+                  }
                   aria-invalid={Boolean(fieldErrors.assignee)}
                   onChange={(event) => change("assignee", event.target.value)}
                 >
                   <option value="">Unassigned</option>
+                  {!assignees.isSuccess &&
+                  values.assignee &&
+                  ticket.assignee_detail ? (
+                    <option value={values.assignee}>
+                      {ticket.assignee_detail.display_name}
+                    </option>
+                  ) : null}
                   {assignees.data?.results.map((assignee) => (
                     <option key={assignee.id} value={assignee.id}>
                       {assignee.display_name}
@@ -436,7 +446,13 @@ export function OperationsPanel({
             <Alert variant="destructive">
               <AlertCircle data-icon="inline-start" aria-hidden />
               <AlertTitle>Could not load eligible assignees</AlertTitle>
-              <AlertDescription>Please reload the ticket and try again.</AlertDescription>
+              <AlertDescription>
+                {assigneesProblem?.detail ??
+                  "Please reload the ticket and try again."}
+                {assigneesProblem
+                  ? ` Reference: ${assigneesProblem.correlation_id}`
+                  : ""}
+              </AlertDescription>
             </Alert>
           ) : null}
 
