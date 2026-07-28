@@ -3,6 +3,7 @@ from __future__ import annotations
 
 from django.db.models import Q, QuerySet
 
+from apps.identity_access.models import User
 from apps.identity_access.scope import (
     AuthoritySnapshot,
     get_authority_snapshot,
@@ -16,9 +17,9 @@ from .permissions import user_groups
 
 def available_transitions(
     ticket: Ticket,
-    actor,
+    actor: object,
     *,
-    request=None,
+    request: object | None = None,
     snapshot: AuthoritySnapshot | None = None,
 ) -> QuerySet[Transition]:
     """Return active current-state transitions the actor may execute."""
@@ -27,7 +28,7 @@ def available_transitions(
         from_status=ticket.status,
         is_active=True,
     ).select_related("to_status")
-    if actor is None or not getattr(actor, "is_authenticated", False):
+    if not isinstance(actor, User) or not actor.is_authenticated:
         return transitions.none()
     authority = snapshot or get_authority_snapshot(actor, request=request)
     ticket_is_in_scope = scope_ticket_queryset(

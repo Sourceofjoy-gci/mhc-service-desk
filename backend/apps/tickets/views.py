@@ -6,17 +6,22 @@ ticket's domain. The frontend never gets to decide what to show.
 from __future__ import annotations
 
 import logging
+from collections.abc import Mapping, Sequence
+from importlib import import_module
+from typing import Never, Protocol, runtime_checkable
 
-from django.db.models import Q
+from django.db.models import Q, QuerySet
 from rest_framework import serializers, status, viewsets
 from rest_framework.decorators import action, api_view, permission_classes, throttle_classes
 from rest_framework.exceptions import PermissionDenied
 from rest_framework.permissions import AllowAny, IsAuthenticated
+from rest_framework.request import Request
 from rest_framework.response import Response
 from rest_framework.throttling import AnonRateThrottle
 
 from apps.contacts.models import Contact
 from apps.identity_access.authentication import KeycloakJWTAuthentication
+from apps.identity_access.models import User
 from apps.identity_access.pagination import TicketCursorPagination
 from apps.identity_access.scope import (
     ScopePermission,
@@ -45,7 +50,37 @@ from .permissions import eligible_assignee_queryset
 logger = logging.getLogger(__name__)
 
 
-def _ticket_action_error(request, *, code, detail, fields, response_status):
+@runtime_checkable
+class _TextCleaner(Protocol):
+    def __call__(self, text: str, *, strip: bool) -> str: ...
+
+
+def _clean_public_text(text: str) -> str:
+    """Call Bleach through one checked boundary without importing untyped APIs."""
+    cleaner: object = getattr(import_module("bleach"), "clean", None)
+    if not isinstance(cleaner, _TextCleaner):
+        raise RuntimeError("Bleach text cleaning is unavailable.")
+    return cleaner(text, strip=True)
+
+
+def _authenticated_user(request: Request) -> User:
+    """Narrow the authenticated DRF principal to the local staff model."""
+    if isinstance(request.user, User):
+        return request.user
+    raise PermissionDenied(
+        detail="Authentication credentials were not provided.",
+        code="not_authenticated",
+    )
+
+
+def _ticket_action_error(
+    request: Request,
+    *,
+    code: str,
+    detail: str,
+    fields: Mapping[str, Sequence[str]],
+    response_status: int,
+) -> Response:
     return Response(
         {
             "code": code,
@@ -57,7 +92,9 @@ def _ticket_action_error(request, *, code, detail, fields, response_status):
     )
 
 
-def _serializer_error_fields(errors):
+def _serializer_error_fields(
+    errors: Mapping[str, Sequence[object]],
+) -> dict[str, list[str]]:
     return {
         field: [str(message) for message in messages]
         for field, messages in errors.items()
@@ -69,7 +106,7 @@ class PublicIntakeThrottle(AnonRateThrottle):
     scope = "public_intake"
 
 
-class TicketViewSet(viewsets.ModelViewSet):
+class TicketViewSet(viewsets.ModelViewSet[Ticket]):
     """CRUD + transition endpoints for tickets."""
 
     queryset = Ticket.objects.select_related(
@@ -81,15 +118,20 @@ class TicketViewSet(viewsets.ModelViewSet):
     lookup_value_regex = "[A-Z]{2}-\\d{6}-\\d{6}"
     pagination_class = TicketCursorPagination
 
-    def permission_denied(self, request, message=None, code=None):
+    def permission_denied(
+        self,
+        request: Request,
+        message: str | None = None,
+        code: str | None = None,
+    ) -> Never:
         if self.action in {"transition", "work_state"} and request.user.is_authenticated:
             raise PermissionDenied(
                 detail="You cannot perform this ticket action.",
                 code="ticket_action_forbidden",
             )
-        return super().permission_denied(request, message=message, code=code)
+        super().permission_denied(request, message=message, code=code)
 
-    def get_serializer_class(self):
+    def get_serializer_class(self) -> type[serializers.BaseSerializer[Ticket]]:
         if self.action in (
             "retrieve",
             "transition",
@@ -103,14 +145,14 @@ class TicketViewSet(viewsets.ModelViewSet):
             return TicketDetailSerializer
         return TicketListSerializer
 
-    def get_queryset(self):
+    def get_queryset(self) -> QuerySet[Ticket]:
         return scope_ticket_queryset(
             self.request.user,
             super().get_queryset(),
             request=self.request,
         ).order_by("priority", "-created_at", "-id")
 
-    def filter_queryset(self, queryset):
+    def filter_queryset(self, queryset: QuerySet[Ticket]) -> QuerySet[Ticket]:
         qs = super().filter_queryset(queryset)
         params = self.request.query_params
         if "domain" in params:
@@ -139,7 +181,11 @@ class TicketViewSet(viewsets.ModelViewSet):
         return qs
 
     @action(detail=True, methods=["post"])
-    def transition(self, request, number=None):
+    def transition(
+        self,
+        request: Request,
+        number: str | None = None,
+    ) -> Response:
         ticket = self.get_object()
         serializer = TransitionRequestSerializer(data=request.data)
         if not serializer.is_valid():
@@ -150,10 +196,11 @@ class TicketViewSet(viewsets.ModelViewSet):
                 fields=_serializer_error_fields(serializer.errors),
                 response_status=status.HTTP_400_BAD_REQUEST,
             )
+        actor = _authenticated_user(request)
         try:
             ticket = services.transition_ticket(
                 ticket_id=ticket.id,
-                actor=request.user,
+                actor=actor,
                 expected_updated_at=serializer.validated_data["updated_at"],
                 to_status_code=serializer.validated_data["to_status"],
                 reason=serializer.validated_data.get("reason", ""),
@@ -191,7 +238,10 @@ class TicketViewSet(viewsets.ModelViewSet):
         # If an IT child reaches resolved, sync parent from waiting_it -> in_progress
         if ticket.domain == "it" and ticket.status.code == "resolved":
             from .it_child import sync_child_status_to_parent
-            sync_child_status_to_parent(child=ticket, actor_subject=request.user.keycloak_subject)
+            sync_child_status_to_parent(
+                child=ticket,
+                actor_subject=actor.keycloak_subject,
+            )
         return Response(
             TicketDetailSerializer(ticket, context=self.get_serializer_context()).data
         )
@@ -202,7 +252,11 @@ class TicketViewSet(viewsets.ModelViewSet):
         url_path="work-state",
         permission_classes=[IsAuthenticated, ScopePermission],
     )
-    def work_state(self, request, number=None):
+    def work_state(
+        self,
+        request: Request,
+        number: str | None = None,
+    ) -> Response:
         ticket = self.get_object()
         serializer = WorkStateRequestSerializer(data=request.data)
         if not serializer.is_valid():
@@ -216,10 +270,11 @@ class TicketViewSet(viewsets.ModelViewSet):
 
         changes = dict(serializer.validated_data)
         expected_updated_at = changes.pop("updated_at")
+        actor = _authenticated_user(request)
         try:
             updated = services.update_work_state(
                 ticket_id=ticket.id,
-                actor=request.user,
+                actor=actor,
                 expected_updated_at=expected_updated_at,
                 changes=changes,
             )
@@ -258,7 +313,11 @@ class TicketViewSet(viewsets.ModelViewSet):
         )
 
     @action(detail=True, methods=["get"], url_path="assignees")
-    def assignees(self, request, number=None):
+    def assignees(
+        self,
+        request: Request,
+        number: str | None = None,
+    ) -> Response:
         ticket = self.get_object()
         candidates = eligible_assignee_queryset(ticket).order_by(
             "display_name",
@@ -279,12 +338,20 @@ class TicketViewSet(viewsets.ModelViewSet):
         )
 
     @action(detail=True, methods=["get"], url_path="activity")
-    def activity(self, request, number=None):
+    def activity(
+        self,
+        request: Request,
+        number: str | None = None,
+    ) -> Response:
         ticket = self.get_object()
         return Response({"results": build_ticket_activity(ticket, request=request)})
 
     @action(detail=True, methods=["get", "post"], url_path="messages")
-    def messages(self, request, number=None):
+    def messages(
+        self,
+        request: Request,
+        number: str | None = None,
+    ) -> Response:
         ticket = self.get_object()
         if request.method == "GET":
             from .api import TicketMessageSerializer
@@ -294,12 +361,13 @@ class TicketViewSet(viewsets.ModelViewSet):
             })
         ser = MessageCreateSerializer(data=request.data)
         ser.is_valid(raise_exception=True)
+        actor = _authenticated_user(request)
         msg = services.add_message(
             ticket=ticket,
             direction="outbound",
-            actor_subject=request.user.keycloak_subject,
-            author_subject=request.user.keycloak_subject,
-            author_label=request.user.display_name or request.user.username,
+            actor_subject=actor.keycloak_subject,
+            author_subject=actor.keycloak_subject,
+            author_label=actor.display_name or actor.username,
             body_text=ser.validated_data["body_text"],
             body_html=ser.validated_data.get("body_html", ""),
             template_key=ser.validated_data.get("template_key", ""),
@@ -308,22 +376,31 @@ class TicketViewSet(viewsets.ModelViewSet):
         return Response({"id": str(msg.id)}, status=status.HTTP_201_CREATED)
 
     @action(detail=True, methods=["get", "post"], url_path="notes")
-    def notes(self, request, number=None):
+    def notes(
+        self,
+        request: Request,
+        number: str | None = None,
+    ) -> Response:
         ticket = self.get_object()
         if request.method == "GET":
             from .api import TicketNoteSerializer
             return Response({"results": TicketNoteSerializer(ticket.notes.all(), many=True).data})
         ser = NoteCreateSerializer(data=request.data)
         ser.is_valid(raise_exception=True)
+        actor = _authenticated_user(request)
         note = services.add_internal_note(
             ticket=ticket,
             body=ser.validated_data["body"],
-            author_subject=request.user.keycloak_subject,
+            author_subject=actor.keycloak_subject,
         )
         return Response({"id": str(note.id)}, status=status.HTTP_201_CREATED)
 
     @action(detail=True, methods=["post"], url_path="it-child")
-    def it_child(self, request, number=None):
+    def it_child(
+        self,
+        request: Request,
+        number: str | None = None,
+    ) -> Response:
         """Create a sanitised IT child ticket from this operational parent.
 
         Body: {"summary": "...", "technical_priority": "P1|P2|P3|P4",
@@ -342,6 +419,7 @@ class TicketViewSet(viewsets.ModelViewSet):
             return Response({"detail": "summary is required"}, status=status.HTTP_400_BAD_REQUEST)
         priority = body.get("technical_priority") or "P3"
         carry = bool(body.get("carry_matter_reference", True))
+        actor = _authenticated_user(request)
         try:
             child = create_it_child_ticket(
                 parent=parent,
@@ -350,7 +428,7 @@ class TicketViewSet(viewsets.ModelViewSet):
                 requester_office=parent.office,
                 technical_priority=priority,
                 carry_matter_reference=carry,
-                actor_subject=request.user.keycloak_subject,
+                actor_subject=actor.keycloak_subject,
             )
         except ValueError as exc:
             return Response({"detail": str(exc)}, status=status.HTTP_400_BAD_REQUEST)
@@ -367,7 +445,7 @@ class TicketViewSet(viewsets.ModelViewSet):
         )
 
     @action(detail=False, methods=["get"], url_path="kanban")
-    def kanban(self, request):
+    def kanban(self, request: Request) -> Response:
         """Return tickets grouped by status, ready for the Kanban view."""
         attach_scopes(request)
         qs = self.get_queryset()
@@ -378,7 +456,7 @@ class TicketViewSet(viewsets.ModelViewSet):
         from apps.workflow.models import Status
         terminal = Status.objects.filter(is_terminal=True).values_list("code", flat=True)
         qs = qs.exclude(status__code__in=list(terminal))
-        grouped: dict[str, list] = {}
+        grouped: dict[str, list[object]] = {}
         from .api import TicketListSerializer
         for ticket in qs.order_by("priority", "-created_at")[:300]:
             code = ticket.status.code
@@ -395,14 +473,12 @@ class TicketViewSet(viewsets.ModelViewSet):
 @permission_classes([AllowAny])
 @throttle_classes([PublicIntakeThrottle])
 @public_endpoint
-def public_intake(request):
+def public_intake(request: Request) -> Response:
     """Public web form intake — creates a ticket and returns its number.
 
     Rate-limited by ``PublicIntakeThrottle`` (5/min per IP).
     No authentication required.
     """
-    import bleach
-
     from apps.catalogue.models import RequestType, Service
     from apps.organisations.models import Office
 
@@ -451,8 +527,8 @@ def public_intake(request):
 
     ticket = services.create_ticket(
         domain="operational",
-        title=bleach.clean(data["title"], strip=True)[:255],
-        description=bleach.clean(data["description"], strip=True),
+        title=_clean_public_text(data["title"])[:255],
+        description=_clean_public_text(data["description"]),
         requester=contact,
         service=service,
         request_type=request_type,
@@ -488,7 +564,7 @@ def public_intake(request):
 
 @api_view(["GET"])
 @permission_classes([IsAuthenticated, ScopePermission])
-def operational_dashboard(request):
+def operational_dashboard(request: Request) -> Response:
     """Essential operational dashboard data for the M2 milestone.
 
     Restricted to authenticated users with an operational scope. IT-only

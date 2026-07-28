@@ -25,7 +25,7 @@ def user_groups(user: User) -> set[str]:
     return groups
 
 
-def _cannot_mutate(user: User, *, request=None) -> bool:
+def _cannot_mutate(user: User, *, request: object | None = None) -> bool:
     groups = user_groups(user)
     return (
         not user.is_active
@@ -38,7 +38,7 @@ def can_reassign(
     user: User,
     *,
     ticket: Ticket | None = None,
-    request=None,
+    request: object | None = None,
 ) -> bool:
     if _cannot_mutate(user, request=request):
         return False
@@ -55,12 +55,17 @@ def can_change_confidentiality(
     user: User,
     *,
     ticket: Ticket | None = None,
-    request=None,
+    request: object | None = None,
 ) -> bool:
     return can_reassign(user, ticket=ticket, request=request)
 
 
-def can_update_work_state(user: User, ticket: Ticket, *, request=None) -> bool:
+def can_update_work_state(
+    user: User,
+    ticket: Ticket,
+    *,
+    request: object | None = None,
+) -> bool:
     groups = user_groups(user)
     if _cannot_mutate(user, request=request):
         return False

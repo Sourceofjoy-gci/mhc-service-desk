@@ -6,7 +6,11 @@ from __future__ import annotations
 
 from apps.workflow.models import Status, Transition
 
-OPERATIONAL_STATUSES = [
+type StatusSeed = tuple[str, str, bool, bool, int, str]
+type TransitionSeed = tuple[str, str, str] | tuple[str, str, str, bool]
+type WorkflowSeed = tuple[str, list[StatusSeed], list[TransitionSeed]]
+
+OPERATIONAL_STATUSES: list[StatusSeed] = [
     ("new", "New", True, False, 10, "Received"),
     ("triage", "Triage", False, False, 20, "Being reviewed"),
     ("assigned", "Assigned", False, False, 30, "Assigned"),
@@ -31,7 +35,7 @@ OPERATIONAL_STATUSES = [
     ("reopened", "Reopened", False, False, 45, "Being worked on"),
 ]
 
-OPERATIONAL_TRANSITIONS = [
+OPERATIONAL_TRANSITIONS: list[TransitionSeed] = [
     ("new", "triage", "Begin triage"),
     ("triage", "assigned", "Assign"),
     ("triage", "in_progress", "Start work"),
@@ -62,7 +66,7 @@ OPERATIONAL_TRANSITIONS = [
     ("spam", "closed", "Close"),
 ]
 
-IT_STATUSES = [
+IT_STATUSES: list[StatusSeed] = [
     ("new", "New", True, False, 10, "Received"),
     ("triage", "Triage", False, False, 20, "Being reviewed"),
     ("assigned", "Assigned", False, False, 30, "Assigned"),
@@ -78,7 +82,7 @@ IT_STATUSES = [
     ("reopened", "Reopened", False, False, 55, "Being worked on"),
 ]
 
-IT_TRANSITIONS = [
+IT_TRANSITIONS: list[TransitionSeed] = [
     ("new", "triage", "Begin triage"),
     ("triage", "assigned", "Assign"),
     ("triage", "in_progress", "Start work"),
@@ -104,10 +108,11 @@ IT_TRANSITIONS = [
 
 def seed_workflow() -> None:
     """Idempotent seed of statuses and transitions for both domains."""
-    for domain, statuses, transitions in [
+    workflows: tuple[WorkflowSeed, ...] = (
         ("operational", OPERATIONAL_STATUSES, OPERATIONAL_TRANSITIONS),
         ("it", IT_STATUSES, IT_TRANSITIONS),
-    ]:
+    )
+    for domain, statuses, transitions in workflows:
         status_map: dict[str, Status] = {}
         for code, name, is_initial, is_terminal, order, public_label in statuses:
             obj, _ = Status.objects.update_or_create(

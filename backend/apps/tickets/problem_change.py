@@ -7,12 +7,40 @@ the same domain logic (numbering, status, SLA, scope) continues to work.
 from __future__ import annotations
 
 import logging
+from datetime import datetime
 from typing import TYPE_CHECKING
 
+from django.core.exceptions import ImproperlyConfigured
+
 if TYPE_CHECKING:
+    from apps.catalogue.models import RequestType, Service
+    from apps.organisations.models import Office
+
     from .models import Ticket
 
 logger = logging.getLogger(__name__)
+
+
+def _require_it_catalogue() -> tuple[Service, RequestType, Office]:
+    """Return the configured IT intake records or fail before partial writes."""
+    from apps.catalogue.models import RequestType, Service
+    from apps.organisations.models import Office
+
+    service = Service.objects.filter(domain="it", code="IT-INC").first()
+    if service is None:
+        raise ImproperlyConfigured("Missing IT incident service IT-INC.")
+
+    request_type = RequestType.objects.filter(
+        service=service,
+        code="OUTAGE",
+    ).first()
+    if request_type is None:
+        raise ImproperlyConfigured("Missing OUTAGE request type for IT-INC.")
+
+    office = Office.objects.filter(is_active=True).first()
+    if office is None:
+        raise ImproperlyConfigured("Missing active office for ticket intake.")
+    return service, request_type, office
 
 
 class ProblemManager:
@@ -26,21 +54,12 @@ class ProblemManager:
         opened_by: str,
         related_incident_ids: list[str] | None = None,
     ) -> Ticket:
-        from apps.catalogue.models import RequestType, Service
         from apps.contacts.models import Contact
-        from apps.organisations.models import Office
 
         from .models import Ticket
         from .services import create_ticket, link_tickets
 
-        # Open problems in IT domain
-        service = Service.objects.filter(domain="it", code="IT-INC").first()
-        request_type = (
-            RequestType.objects.filter(service=service, code="OUTAGE").first()
-            if service
-            else None
-        )
-        office = Office.objects.filter(is_active=True).first()
+        service, request_type, office = _require_it_catalogue()
         requester, _ = Contact.objects.get_or_create(
             email="problems@mhc.local",
             defaults={"full_name": "Problem Manager"},
@@ -83,23 +102,15 @@ class ChangeManager:
         *,
         title: str,
         description: str,
-        scheduled_at,
+        scheduled_at: datetime,
         risk: str,
         opened_by: str,
     ) -> Ticket:
-        from apps.catalogue.models import RequestType, Service
         from apps.contacts.models import Contact
-        from apps.organisations.models import Office
 
         from .services import create_ticket
 
-        service = Service.objects.filter(domain="it", code="IT-INC").first()
-        request_type = (
-            RequestType.objects.filter(service=service, code="OUTAGE").first()
-            if service
-            else None
-        )
-        office = Office.objects.filter(is_active=True).first()
+        service, request_type, office = _require_it_catalogue()
         requester, _ = Contact.objects.get_or_create(
             email="changes@mhc.local",
             defaults={"full_name": "Change Manager"},

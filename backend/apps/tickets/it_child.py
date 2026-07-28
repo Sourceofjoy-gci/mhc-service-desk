@@ -34,7 +34,7 @@ SANITISED_CARRY_OVER = {
 }
 
 
-def _resolve_it_service_and_type():
+def _resolve_it_service_and_type() -> tuple[Service, RequestType]:
     """Pick a default IT service + request type. The operational agent can
     override these in the UI; for the smoke path we use the seeded values."""
     service = Service.objects.filter(domain="it", code="IT-INC").first()

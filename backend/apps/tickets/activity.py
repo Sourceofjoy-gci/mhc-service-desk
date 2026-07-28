@@ -1,24 +1,46 @@
 """Assemble durable ticket records into one chronological staff timeline."""
 from __future__ import annotations
 
+from datetime import datetime
+from typing import TypedDict
+
 from django.db.models import Q
+from rest_framework.request import Request
 
 from apps.audit.models import AuditEvent
 from apps.files.models import Attachment
 from apps.files.views import attachment_metadata
 from apps.identity_access.models import User
-from apps.identity_access.scope import get_authority_snapshot, scope_ticket_queryset
+from apps.identity_access.scope import (
+    AuthoritySnapshot,
+    get_authority_snapshot,
+    scope_ticket_queryset,
+)
 from apps.workflow.models import TransitionHistory
 
 from .models import Ticket, TicketLink, TicketMessage, TicketNote
 
 
+class ActivityActor(TypedDict):
+    subject: str
+    display_name: str
+
+
+class ActivityItem(TypedDict):
+    id: str
+    type: str
+    occurred_at: datetime
+    actor: ActivityActor | None
+    visibility: str
+    payload: dict[str, object]
+
+
 def scoped_ticket_relationships(
     ticket: Ticket,
-    actor,
+    actor: User,
     *,
-    request=None,
-    snapshot=None,
+    request: Request | None = None,
+    snapshot: AuthoritySnapshot | None = None,
 ) -> list[TicketLink]:
     """Return links whose counterpart is visible in one canonical snapshot."""
     relationships = list(
@@ -56,10 +78,10 @@ def scoped_ticket_relationships(
 def build_ticket_activity(
     ticket: Ticket,
     *,
-    request=None,
-    snapshot=None,
+    request: Request | None = None,
+    snapshot: AuthoritySnapshot | None = None,
     relationships: list[TicketLink] | None = None,
-) -> list[dict[str, object]]:
+) -> list[ActivityItem]:
     """Return stable, typed activity items oldest first without audit duplicates."""
     messages = list(TicketMessage.objects.filter(ticket=ticket))
     notes = list(TicketNote.objects.filter(ticket=ticket))
@@ -87,11 +109,11 @@ def build_ticket_activity(
         if relationships is not None
         else None
     )
-    actor = getattr(request, "user", None)
-    if actor is not None and actor.is_authenticated:
+    request_actor = request.user if request is not None else None
+    if isinstance(request_actor, User) and request_actor.is_authenticated:
         relationships = scoped_ticket_relationships(
             ticket,
-            actor,
+            request_actor,
             request=request,
             snapshot=snapshot,
         )
@@ -134,7 +156,7 @@ def build_ticket_activity(
         key=lambda event: (event.occurred_at, str(event.id)),
     )
 
-    def transition_payload(transition) -> dict[str, object]:
+    def transition_payload(transition: TransitionHistory) -> dict[str, object]:
         payload: dict[str, object] = {
             "from": transition.from_status.code if transition.from_status else None,
             "to": transition.to_status.code,
@@ -174,7 +196,7 @@ def build_ticket_activity(
             payload["after"] = after
         return payload
 
-    def actor(subject: str) -> dict[str, str] | None:
+    def actor_details(subject: str) -> ActivityActor | None:
         if not subject:
             return None
         return {
@@ -182,13 +204,13 @@ def build_ticket_activity(
             "display_name": display_names.get(subject) or subject,
         }
 
-    items: list[dict[str, object]] = []
+    items: list[ActivityItem] = []
     items.extend(
         {
             "id": f"message:{message.id}",
             "type": "message",
             "occurred_at": message.created_at,
-            "actor": actor(message.author_subject),
+            "actor": actor_details(message.author_subject),
             "visibility": "requester",
             "payload": {
                 "direction": message.direction,
@@ -205,7 +227,7 @@ def build_ticket_activity(
             "id": f"note:{note.id}",
             "type": "internal_note",
             "occurred_at": note.created_at,
-            "actor": actor(note.author_subject),
+            "actor": actor_details(note.author_subject),
             "visibility": "internal",
             "payload": {"body": note.body},
         }
@@ -216,7 +238,7 @@ def build_ticket_activity(
             "id": f"transition:{transition.id}",
             "type": "status_transition",
             "occurred_at": transition.occurred_at,
-            "actor": actor(transition.actor_subject),
+            "actor": actor_details(transition.actor_subject),
             "visibility": "internal",
             "payload": transition_payload(transition),
         }
@@ -227,7 +249,7 @@ def build_ticket_activity(
             "id": f"audit:{event.id}",
             "type": "work_state",
             "occurred_at": event.occurred_at,
-            "actor": actor(event.actor_subject),
+            "actor": actor_details(event.actor_subject),
             "visibility": "internal",
             "payload": {
                 "before": event.payload.get("before", {}),
@@ -243,7 +265,7 @@ def build_ticket_activity(
             "id": f"attachment:{attachment.id}",
             "type": "attachment",
             "occurred_at": attachment.uploaded_at,
-            "actor": actor(attachment.uploaded_by_subject),
+            "actor": actor_details(attachment.uploaded_by_subject),
             "visibility": "internal",
             "payload": attachment_metadata(attachment),
         }
@@ -254,7 +276,9 @@ def build_ticket_activity(
             "id": f"relationship:{relationship.id}",
             "type": "relationship",
             "occurred_at": relationship.created_at,
-            "actor": actor(relationship_actors.get(str(relationship.id), "")),
+            "actor": actor_details(
+                relationship_actors.get(str(relationship.id), "")
+            ),
             "visibility": "internal",
             "payload": {
                 "kind": relationship.kind,

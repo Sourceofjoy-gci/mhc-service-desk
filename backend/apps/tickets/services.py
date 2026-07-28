@@ -8,14 +8,17 @@ from __future__ import annotations
 import logging
 import secrets
 from dataclasses import dataclass
-from datetime import datetime
-from typing import Any
+from datetime import datetime, timedelta
+from uuid import UUID
 
 from django.db import transaction
 from django.utils import timezone
+from rest_framework.request import Request
 
 from apps.catalogue.models import RequestType, Service
 from apps.contacts.models import Contact, VerificationToken
+from apps.identity_access.models import User
+from apps.identity_access.scope import AuthoritySnapshot
 from apps.organisations.models import Office
 from apps.workflow.models import Status, Transition, TransitionHistory
 
@@ -30,6 +33,11 @@ from .permissions import (
 from .workflow import available_transitions
 
 logger = logging.getLogger(__name__)
+
+type JSONValue = (
+    None | bool | int | float | str | list[JSONValue] | dict[str, JSONValue]
+)
+type WorkStateValue = str | datetime | UUID | None
 
 
 # -----------------------------------------------------------------------------
@@ -86,7 +94,7 @@ def create_ticket(
     matter_reference: str = "",
     priority: str | None = None,
     initial_status_code: str = "new",
-    custom_fields: dict[str, Any] | None = None,
+    custom_fields: dict[str, JSONValue] | None = None,
     actor_subject: str = "system",
     ip_address: str | None = None,
 ) -> Ticket:
@@ -150,7 +158,7 @@ class TransitionError(Exception):
 
 
 class TicketConflictError(Exception):
-    def __init__(self, current_updated_at):
+    def __init__(self, current_updated_at: datetime) -> None:
         self.current_updated_at = current_updated_at
 
 
@@ -176,7 +184,7 @@ WORK_STATE_FIELDS = {
 FIRST_RESPONSE_DELIVERY_STATUSES = {"", "sent", "delivered"}
 
 
-def _validate_work_state_changes(changes: dict[str, Any]) -> None:
+def _validate_work_state_changes(changes: dict[str, WorkStateValue]) -> None:
     fields: dict[str, list[str]] = {}
     unknown = changes.keys() - WORK_STATE_FIELDS
     if unknown:
@@ -198,6 +206,12 @@ def _validate_work_state_changes(changes: dict[str, Any]) -> None:
     if "blocked_reason" in changes and not isinstance(changes["blocked_reason"], str):
         fields["blocked_reason"] = ["Must be a string."]
     if (
+        "assignee" in changes
+        and changes["assignee"] is not None
+        and not isinstance(changes["assignee"], UUID)
+    ):
+        fields["assignee"] = ["Select a valid assignee."]
+    if (
         "next_action_at" in changes
         and changes["next_action_at"] is not None
         and not isinstance(changes["next_action_at"], datetime)
@@ -215,10 +229,10 @@ def _validate_work_state_changes(changes: dict[str, Any]) -> None:
 @transaction.atomic
 def update_work_state(
     *,
-    ticket_id,
-    actor,
-    expected_updated_at,
-    changes: dict[str, Any],
+    ticket_id: UUID,
+    actor: User,
+    expected_updated_at: datetime,
+    changes: dict[str, WorkStateValue],
 ) -> Ticket:
     """Atomically validate and apply optimistic work-state changes."""
     locked = (
@@ -232,12 +246,15 @@ def update_work_state(
         raise TicketPermissionError
 
     _validate_work_state_changes(changes)
-    before: dict[str, Any] = {}
-    after: dict[str, Any] = {}
+    before: dict[str, WorkStateValue] = {}
+    after: dict[str, WorkStateValue] = {}
     update_fields: list[str] = []
 
     if "assignee" in changes:
-        target_id = changes["assignee"]
+        target_value = changes["assignee"]
+        if target_value is not None and not isinstance(target_value, UUID):
+            raise TicketValidationError({"assignee": ["Select a valid assignee."]})
+        target_id = target_value
         if target_id is None:
             if not can_reassign(actor, ticket=locked):
                 raise TicketPermissionError
@@ -281,15 +298,15 @@ def update_work_state(
 @transaction.atomic
 def transition_ticket(
     *,
-    ticket_id,
-    actor,
-    expected_updated_at,
+    ticket_id: UUID,
+    actor: User,
+    expected_updated_at: datetime,
     to_status_code: str,
     reason: str = "",
     resolution_code: str = "",
     resolution_summary: str = "",
-    request=None,
-    snapshot=None,
+    request: Request | None = None,
+    snapshot: AuthoritySnapshot | None = None,
 ) -> Ticket:
     """Atomically validate and apply an optimistic workflow transition."""
     locked = (
@@ -337,8 +354,8 @@ def transition_ticket(
     now = timezone.now()
     previous = locked.status
     target = workflow_transition.to_status
-    before: dict[str, Any] = {"status": previous.code}
-    after: dict[str, Any] = {"status": target.code}
+    before: dict[str, WorkStateValue] = {"status": previous.code}
+    after: dict[str, WorkStateValue] = {"status": target.code}
     update_fields = ["status"]
     locked.status = target
 
@@ -443,7 +460,7 @@ def add_message(
     template_version: str = "",
     external_message_id: str = "",
     delivery_status: str = "",
-    event_metadata: dict[str, Any] | None = None,
+    event_metadata: dict[str, JSONValue] | None = None,
 ) -> TicketMessage:
     locked_ticket = Ticket.objects.select_for_update(of=("self",)).get(id=ticket.id)
     message = TicketMessage.objects.create(
@@ -509,7 +526,7 @@ def add_internal_note(*, ticket: Ticket, body: str, author_subject: str) -> Tick
     return note
 
 
-def add_watcher(*, ticket: Ticket, user) -> Watcher:
+def add_watcher(*, ticket: Ticket, user: User) -> Watcher:
     watcher, _ = Watcher.objects.get_or_create(ticket=ticket, user=user)
     return watcher
 
@@ -521,7 +538,7 @@ def link_tickets(
     target: Ticket,
     kind: str,
     actor_subject: str,
-    metadata: dict[str, Any] | None = None,
+    metadata: dict[str, JSONValue] | None = None,
 ) -> TicketLink:
     link = TicketLink.objects.create(from_ticket=source, to_ticket=target, kind=kind)
     record_ticket_event(
@@ -553,7 +570,7 @@ def issue_requester_token(
     raw = secrets.token_urlsafe(32)
     import hashlib
     token_hash = hashlib.sha256(raw.encode()).hexdigest()
-    expires_at = timezone.now() + timezone.timedelta(minutes=ttl_minutes)
+    expires_at = timezone.now() + timedelta(minutes=ttl_minutes)
     token = VerificationToken.objects.create(
         contact=ticket.requester, token_hash=token_hash, expires_at=expires_at
     )
