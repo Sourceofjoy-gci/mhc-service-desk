@@ -19,9 +19,25 @@ def email_message_ids():
     }
 
 
+def correlation_id(resp):
+    value = resp.headers.get("X-Correlation-ID", "")
+    if value:
+        return value
+    try:
+        payload = resp.json()
+    except (requests.JSONDecodeError, ValueError):
+        return "unavailable"
+    if isinstance(payload, dict):
+        return str(payload.get("correlation_id") or "unavailable")
+    return "unavailable"
+
+
 def must(resp, expected, label):
     if resp.status_code != expected:
-        print(f"FAIL {label}: HTTP {resp.status_code} — {resp.text[:200]}")
+        print(
+            f"FAIL {label}: HTTP {resp.status_code}; "
+            f"correlation_id={correlation_id(resp)}"
+        )
         sys.exit(2)
     print(f"OK   {label}: HTTP {resp.status_code}")
 

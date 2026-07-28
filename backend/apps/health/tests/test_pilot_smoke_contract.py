@@ -4,18 +4,27 @@ from __future__ import annotations
 import importlib.util
 from pathlib import Path
 from types import MappingProxyType
-from unittest.mock import Mock
+from unittest.mock import Mock, call
 
 import pytest
 
 from scripts import pilot_foundation_smoke as smoke
 
-M3_PATH = Path(__file__).resolve().parents[4] / "scripts" / "m3_smoke.py"
-M3_SPEC = importlib.util.spec_from_file_location("legacy_m3_smoke", M3_PATH)
-assert M3_SPEC is not None
-assert M3_SPEC.loader is not None
-m3_smoke = importlib.util.module_from_spec(M3_SPEC)
-M3_SPEC.loader.exec_module(m3_smoke)
+REPOSITORY_ROOT = Path(__file__).resolve().parents[4]
+
+
+def _load_legacy_smoke(name: str):
+    path = REPOSITORY_ROOT / "scripts" / f"{name}_smoke.py"
+    spec = importlib.util.spec_from_file_location(f"legacy_{name}_smoke", path)
+    assert spec is not None
+    assert spec.loader is not None
+    module = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(module)
+    return module
+
+
+m2_smoke = _load_legacy_smoke("m2")
+m3_smoke = _load_legacy_smoke("m3")
 
 
 def _response(*, status: int = 200, payload: dict | None = None) -> Mock:
@@ -100,6 +109,25 @@ def test_conversation_refreshes_detail_after_reply_changes_ticket_timestamp():
         headers=smoke.OPS_HEADERS,
         timeout=smoke.REQUEST_TIMEOUT,
     )
+    assert session.method_calls == [
+        call.post(
+            f"{smoke.API_BASE}/tickets/OP-202607-000001/messages/",
+            headers=smoke.OPS_HEADERS,
+            json={"body_text": "Your request is being handled by the pilot team."},
+            timeout=smoke.REQUEST_TIMEOUT,
+        ),
+        call.post(
+            f"{smoke.API_BASE}/tickets/OP-202607-000001/notes/",
+            headers=smoke.OPS_HEADERS,
+            json={"body": "Internal pilot verification note."},
+            timeout=smoke.REQUEST_TIMEOUT,
+        ),
+        call.get(
+            f"{smoke.API_BASE}/tickets/OP-202607-000001/",
+            headers=smoke.OPS_HEADERS,
+            timeout=smoke.REQUEST_TIMEOUT,
+        ),
+    ]
 
 
 def test_transition_rejects_response_without_refreshed_timestamp():
@@ -138,3 +166,97 @@ def test_legacy_m3_email_ids_are_unique_per_run_and_related_within_a_run():
     assert first["initial"] != second["initial"]
     assert all(value.startswith("<m3-") for value in first.values())
     assert all(value.endswith("@example.com>") for value in first.values())
+
+
+@pytest.mark.parametrize(
+    ("legacy_smoke", "headers", "json_payload"),
+    [
+        (m2_smoke, {"X-Correlation-ID": "corr-safe"}, {}),
+        (m3_smoke, {}, {"correlation_id": "corr-safe"}),
+    ],
+)
+def test_legacy_validators_report_only_safe_correlation_context(
+    legacy_smoke,
+    headers,
+    json_payload,
+    capsys,
+):
+    response = Mock(
+        status_code=403,
+        headers=headers,
+        text="PRIVATE-TICKET-BODY",
+    )
+    response.json.return_value = json_payload
+
+    with pytest.raises(SystemExit):
+        legacy_smoke.must(response, 200, "safe label")
+
+    output = capsys.readouterr().out
+    assert "safe label" in output
+    assert "HTTP 403" in output
+    assert "corr-safe" in output
+    assert "PRIVATE-TICKET-BODY" not in output
+
+
+@pytest.mark.parametrize("legacy_smoke", [m2_smoke, m3_smoke])
+def test_legacy_validators_handle_non_json_errors_without_body_disclosure(
+    legacy_smoke,
+    capsys,
+):
+    response = Mock(
+        status_code=500,
+        headers={},
+        text="PRIVATE-TICKET-BODY",
+    )
+    response.json.side_effect = ValueError("not JSON")
+
+    with pytest.raises(SystemExit):
+        legacy_smoke.must(response, 200, "safe label")
+
+    output = capsys.readouterr().out
+    assert "HTTP 500" in output
+    assert "correlation_id=unavailable" in output
+    assert "PRIVATE-TICKET-BODY" not in output
+
+
+def test_work_state_validation_accepts_equivalent_aware_timestamps():
+    smoke.validate_work_state_response(
+        {
+            "team": "Pilot Operations",
+            "next_action": "Confirm the pilot outcome with the requester",
+            "next_action_at": "2026-07-29T10:00:00+02:00",
+            "updated_at": "2026-07-28T08:00:01Z",
+        },
+        previous_updated_at="2026-07-28T08:00:00+00:00",
+        team="Pilot Operations",
+        next_action="Confirm the pilot outcome with the requester",
+        next_action_at="2026-07-29T08:00:00Z",
+    )
+
+
+@pytest.mark.parametrize(
+    "override",
+    [
+        {"team": "Wrong team"},
+        {"next_action": "Wrong next action"},
+        {"next_action_at": "2026-07-29T08:00:01Z"},
+        {"updated_at": "2026-07-28T08:00:00Z"},
+    ],
+)
+def test_work_state_validation_rejects_wrong_values_and_stale_timestamp(override):
+    response = {
+        "team": "Pilot Operations",
+        "next_action": "Confirm the pilot outcome with the requester",
+        "next_action_at": "2026-07-29T08:00:00Z",
+        "updated_at": "2026-07-28T08:00:01Z",
+        **override,
+    }
+
+    with pytest.raises(smoke.SmokeError):
+        smoke.validate_work_state_response(
+            response,
+            previous_updated_at="2026-07-28T08:00:00Z",
+            team="Pilot Operations",
+            next_action="Confirm the pilot outcome with the requester",
+            next_action_at="2026-07-29T08:00:00Z",
+        )

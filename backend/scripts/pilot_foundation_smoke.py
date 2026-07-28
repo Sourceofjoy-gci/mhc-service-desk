@@ -2,6 +2,7 @@
 from __future__ import annotations
 
 import os
+import re
 import sys
 from collections.abc import Mapping
 from datetime import UTC, datetime, timedelta
@@ -27,6 +28,11 @@ OPS_LEAD_HEADERS: Mapping[str, str] = MappingProxyType(
 
 class SmokeError(RuntimeError):
     """A safe-to-print smoke assertion failure."""
+
+
+_AWARE_ISO_DATETIME = re.compile(
+    r"^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}(?:\.\d{1,6})?(?:Z|[+-]\d{2}:\d{2})$"
+)
 
 
 def _correlation_id(response: requests.Response) -> str:
@@ -130,6 +136,55 @@ def _require_field(payload: dict[str, Any], field: str, label: str) -> Any:
 def _require(condition: bool, label: str) -> None:
     if not condition:
         raise SmokeError(label)
+
+
+def _aware_datetime(value: Any, label: str) -> datetime:
+    if not isinstance(value, str) or not _AWARE_ISO_DATETIME.fullmatch(value):
+        raise SmokeError(f"{label}: expected a timezone-aware ISO timestamp")
+    try:
+        parsed = datetime.fromisoformat(value.replace("Z", "+00:00"))
+    except ValueError as exc:
+        raise SmokeError(f"{label}: expected a valid ISO timestamp") from exc
+    if parsed.utcoffset() is None:
+        raise SmokeError(f"{label}: expected a timezone-aware ISO timestamp")
+    return parsed
+
+
+def validate_work_state_response(
+    ticket: dict[str, Any],
+    *,
+    previous_updated_at: str,
+    team: str,
+    next_action: str,
+    next_action_at: str,
+) -> None:
+    """Fail closed unless the response proves the requested work-state mutation."""
+    _require(ticket.get("team") == team, "work-state response returned the wrong team")
+    _require(
+        ticket.get("next_action") == next_action,
+        "work-state response returned the wrong next action",
+    )
+    returned_next_action_at = _aware_datetime(
+        ticket.get("next_action_at"),
+        "work-state next action time",
+    )
+    requested_next_action_at = _aware_datetime(
+        next_action_at,
+        "requested next action time",
+    )
+    _require(
+        returned_next_action_at == requested_next_action_at,
+        "work-state response returned the wrong next action time",
+    )
+    returned_updated_at = _aware_datetime(
+        ticket.get("updated_at"),
+        "work-state updated time",
+    )
+    previous_updated = _aware_datetime(previous_updated_at, "previous updated time")
+    _require(
+        returned_updated_at != previous_updated,
+        "work-state response returned a stale updated time",
+    )
 
 
 def transition(
@@ -253,21 +308,29 @@ def run(session: requests.Session) -> tuple[str, str, str]:
         "Operational self-assignment did not refresh the assignee",
     )
 
+    work_state_team = "Pilot Operations"
+    work_state_next_action = "Confirm the pilot outcome with the requester"
     next_action_at = (datetime.now(UTC) + timedelta(days=1)).isoformat()
+    previous_updated_at = str(_require_field(ticket, "updated_at", "assigned detail"))
     ticket = _patch_json(
         session,
         f"/tickets/{operational_number}/work-state/",
         headers=OPS_HEADERS,
         payload={
-            "updated_at": _require_field(ticket, "updated_at", "assigned detail"),
-            "team": "Pilot Operations",
-            "next_action": "Confirm the pilot outcome with the requester",
+            "updated_at": previous_updated_at,
+            "team": work_state_team,
+            "next_action": work_state_next_action,
             "next_action_at": next_action_at,
         },
         label="Operational work-state update",
     )
-    _require(ticket.get("team") == "Pilot Operations", "team was not refreshed")
-    _require(bool(ticket.get("next_action_at")), "next action time was not refreshed")
+    validate_work_state_response(
+        ticket,
+        previous_updated_at=previous_updated_at,
+        team=work_state_team,
+        next_action=work_state_next_action,
+        next_action_at=next_action_at,
+    )
 
     ticket = add_reply_and_note(session, operational_number)
 
