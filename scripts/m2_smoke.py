@@ -7,12 +7,13 @@ Exercises:
   * transition — `/api/v1/tickets/{number}/transition/`
   * scope denial — IT agent should not see operational tickets
 """
-import json
 import sys
 
 import requests
 
 BASE = "http://localhost:8000/api/v1"
+REQUEST_TIMEOUT = 10
+OPS_HEADERS = {"Authorization": "Bearer dev:alice:ops-agents"}
 
 
 def must(resp, expected=200, label=""):
@@ -23,8 +24,10 @@ def must(resp, expected=200, label=""):
 
 
 def main():
+    session = requests.Session()
+
     # 1. List
-    r = requests.get(f"{BASE}/tickets/", headers={"Authorization": "Bearer dev:alice:ops-agents"})
+    r = session.get(f"{BASE}/tickets/", headers=OPS_HEADERS, timeout=REQUEST_TIMEOUT)
     must(r, 200, "list operational (alice/ops-agents)")
     data = r.json()
     if isinstance(data, dict):
@@ -34,15 +37,23 @@ def main():
     print(f"     results={len(items)}")
 
     # 2. Kanban
-    r = requests.get(f"{BASE}/tickets/kanban/?domain=operational", headers={"Authorization": "Bearer dev:alice:ops-agents"})
+    r = session.get(
+        f"{BASE}/tickets/kanban/?domain=operational",
+        headers=OPS_HEADERS,
+        timeout=REQUEST_TIMEOUT,
+    )
     must(r, 200, "kanban operational")
     cols = r.json().get("columns", {})
     print(f"     columns: {list(cols.keys())}")
     for code, items in cols.items():
         print(f"       {code}: {len(items)} ticket(s)")
 
-    # 3. Dashboard (no auth required)
-    r = requests.get(f"{BASE}/tickets/dashboard/operational/")
+    # 3. Dashboard
+    r = session.get(
+        f"{BASE}/tickets/dashboard/operational/",
+        headers=OPS_HEADERS,
+        timeout=REQUEST_TIMEOUT,
+    )
     must(r, 200, "dashboard")
     print(f"     {r.text[:200]}")
 
@@ -57,39 +68,64 @@ def main():
         "requester_email": "smoke-transition@example.com",
         "consent": True,
     }
-    r = requests.post(f"{BASE}/tickets/public/intake/", json=payload, timeout=5)
+    r = session.post(
+        f"{BASE}/tickets/public/intake/",
+        json=payload,
+        timeout=REQUEST_TIMEOUT,
+    )
     must(r, 201, "create ticket for transition")
     ticket_number = r.json()["ticket_number"]
     print(f"     ticket={ticket_number}")
 
+    # Fetch the current timestamp before the first optimistic transition.
+    r = session.get(
+        f"{BASE}/tickets/{ticket_number}/",
+        headers=OPS_HEADERS,
+        timeout=REQUEST_TIMEOUT,
+    )
+    must(r, 200, "detail before transition")
+    ticket = r.json()
+
     # 5. Transition: new -> triage
-    r = requests.post(
+    r = session.post(
         f"{BASE}/tickets/{ticket_number}/transition/",
-        headers={"Authorization": "Bearer dev:alice:ops-agents", "Content-Type": "application/json"},
-        json={"to_status": "triage", "reason": "smoke test"},
+        headers=OPS_HEADERS,
+        json={
+            "to_status": "triage",
+            "updated_at": ticket["updated_at"],
+            "reason": "smoke test",
+        },
+        timeout=REQUEST_TIMEOUT,
     )
     must(r, 200, "transition new->triage")
     ticket = r.json()
     print(f"     status={ticket['status_code']} number={ticket['number']}")
 
     # 6. Transition: triage -> in_progress
-    r = requests.post(
+    r = session.post(
         f"{BASE}/tickets/{ticket_number}/transition/",
-        headers={"Authorization": "Bearer dev:alice:ops-agents", "Content-Type": "application/json"},
-        json={"to_status": "in_progress"},
+        headers=OPS_HEADERS,
+        json={"to_status": "in_progress", "updated_at": ticket["updated_at"]},
+        timeout=REQUEST_TIMEOUT,
     )
     must(r, 200, "transition triage->in_progress")
+    ticket = r.json()
 
     # 7. Invalid transition (should 400)
-    r = requests.post(
+    r = session.post(
         f"{BASE}/tickets/{ticket_number}/transition/",
-        headers={"Authorization": "Bearer dev:alice:ops-agents", "Content-Type": "application/json"},
-        json={"to_status": "new"},
+        headers=OPS_HEADERS,
+        json={"to_status": "new", "updated_at": ticket["updated_at"]},
+        timeout=REQUEST_TIMEOUT,
     )
     must(r, 400, "reject invalid transition (in_progress->new)")
 
     # 7. IT scope denial: an IT agent should not see operational tickets
-    r = requests.get(f"{BASE}/tickets/", headers={"Authorization": "Bearer dev:bob:it-agents"})
+    r = session.get(
+        f"{BASE}/tickets/",
+        headers={"Authorization": "Bearer dev:bob:it-agents"},
+        timeout=REQUEST_TIMEOUT,
+    )
     must(r, 200, "list as IT agent (bob/it-agents)")
     data = r.json()
     items = data if isinstance(data, list) else data.get("results", [])
@@ -97,26 +133,32 @@ def main():
     if op_count > 0:
         print(f"FAIL scope: IT agent sees {op_count} operational tickets")
         sys.exit(3)
-    print(f"OK   scope: IT agent sees 0 operational tickets (correct)")
+    print("OK   scope: IT agent sees 0 operational tickets (correct)")
 
     # 8. Add a public reply
-    r = requests.post(
+    r = session.post(
         f"{BASE}/tickets/{ticket_number}/messages/",
-        headers={"Authorization": "Bearer dev:alice:ops-agents", "Content-Type": "application/json"},
+        headers=OPS_HEADERS,
         json={"body_text": "We will get back to you within one business day."},
+        timeout=REQUEST_TIMEOUT,
     )
     must(r, 201, "add reply message")
 
     # 9. Add an internal note
-    r = requests.post(
+    r = session.post(
         f"{BASE}/tickets/{ticket_number}/notes/",
-        headers={"Authorization": "Bearer dev:alice:ops-agents", "Content-Type": "application/json"},
+        headers=OPS_HEADERS,
         json={"body": "Spoke with requester. They're after business hours for the public holiday."},
+        timeout=REQUEST_TIMEOUT,
     )
     must(r, 201, "add internal note")
 
     # 10. Detail
-    r = requests.get(f"{BASE}/tickets/{ticket_number}/", headers={"Authorization": "Bearer dev:alice:ops-agents"})
+    r = session.get(
+        f"{BASE}/tickets/{ticket_number}/",
+        headers=OPS_HEADERS,
+        timeout=REQUEST_TIMEOUT,
+    )
     must(r, 200, "detail")
     detail = r.json()
     print(f"     messages={len(detail.get('messages', []))} notes={len(detail.get('notes', []))}")
