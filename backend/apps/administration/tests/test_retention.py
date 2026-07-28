@@ -1161,18 +1161,83 @@ def test_retention_locks_parent_and_hold_rows_then_revalidates(
 
     monkeypatch.setattr(command, "_lock_hold_graph", apply_hold_after_locks)
     with transaction.atomic(), CaptureQueriesContext(connection) as queries:
-        disposed = command._delete_with_orm(
+        counts = command._delete_with_orm(
             "ticket_message",
             datetime(2026, 7, 1, tzinfo=UTC),
             "tickets.TicketMessage",
         )
 
-    assert disposed == 0
+    assert counts.rows_selected == 0
+    assert counts.rows_disposed == 0
+    assert counts.legal_hold_preserved == 1
     assert TicketMessage.objects.filter(pk=message.pk).exists()
     lock_sql = [query["sql"] for query in queries if "FOR UPDATE" in query["sql"]]
     assert any('FROM "ticket"' in sql for sql in lock_sql)
     assert any('FROM "ticket_message"' in sql for sql in lock_sql)
     assert any('FROM "ticket_note"' in sql for sql in lock_sql)
+
+
+@pytest.mark.django_db(transaction=True)
+def test_late_hold_is_truthful_in_committed_event_and_certificate(
+    basic_world, monkeypatch, tmp_path
+):
+    from apps.administration.models import ConfigItem, DisposalEvent
+    from apps.catalogue.models import RequestType
+    from apps.tickets.models import Ticket, TicketMessage
+    from apps.workflow.models import Status
+
+    now = datetime(2026, 7, 28, 13, 45, tzinfo=UTC)
+    monkeypatch.setattr(retention.djtz, "now", lambda: now)
+    ConfigItem.objects.create(
+        key="retention.policy.v1",
+        value={"ticket_message": {"days": 30}},
+    )
+    ticket = Ticket.objects.create(
+        number="OP-RETENTION-LATE-HOLD-TRUTH",
+        domain="operational",
+        title="Late hold truth",
+        status=Status.objects.get(domain="operational", is_initial=True),
+        priority="P3",
+        channel="web",
+        requester=basic_world["contact"],
+        service=basic_world["gen_info"],
+        request_type=RequestType.objects.get(service=basic_world["gen_info"]),
+        office=basic_world["office"],
+    )
+    message = TicketMessage.objects.create(
+        ticket=ticket,
+        direction="inbound",
+        body_text="Hold arrives after candidate discovery",
+    )
+    TicketMessage.objects.filter(pk=message.pk).update(
+        created_at=datetime(2000, 1, 1, tzinfo=UTC)
+    )
+    original_lock = retention.Command._lock_hold_graph
+
+    def add_hold_after_lock(command, ticket_ids):
+        original_lock(command, ticket_ids)
+        TicketMessage.objects.filter(pk=message.pk).update(legal_hold=True)
+
+    monkeypatch.setattr(retention.Command, "_lock_hold_graph", add_hold_after_lock)
+
+    retention.Command().handle(
+        dry_run=False,
+        table=[],
+        out=str(tmp_path / "late-hold-"),
+    )
+
+    assert TicketMessage.objects.filter(pk=message.pk, legal_hold=True).exists()
+    event = DisposalEvent.objects.get()
+    event_row = event.summary[0]
+    assert event_row["table"] == "ticket_message"
+    assert event_row["rows_selected"] == 0
+    assert event_row["rows_disposed"] == 0
+    assert event_row["legal_hold_preserved"] == 1
+    certificate = json.loads(Path(event.certificate_path).read_text(encoding="utf-8"))
+    certificate_row = certificate["summary"][0]
+    assert certificate_row["rows_selected"] == 0
+    assert certificate_row["rows_disposed"] == 0
+    assert certificate_row["legal_hold_preserved"] == 1
 
 
 @pytest.mark.django_db(transaction=True)

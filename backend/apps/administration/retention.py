@@ -43,6 +43,7 @@ type RetentionPolicy = dict[str, RetentionRule]
 class DisposalCertificatePayload(TypedDict):
     issued_at: str
     table: str
+    rows_selected: int
     rows_disposed: int
     retention_class_days: int
     cutoff: str
@@ -78,6 +79,7 @@ DEFAULT_RETENTION: RetentionPolicy = {
 class DisposalCertificate:
     issued_at: str
     table: str
+    rows_selected: int
     rows_disposed: int
     retention_class_days: int
     cutoff: str
@@ -91,6 +93,7 @@ class DisposalCertificate:
         return {
             "issued_at": self.issued_at,
             "table": self.table,
+            "rows_selected": self.rows_selected,
             "rows_disposed": self.rows_disposed,
             "retention_class_days": self.retention_class_days,
             "cutoff": self.cutoff,
@@ -105,6 +108,13 @@ class RetentionSqlPlan:
     delete_sql: str | None
     legal_hold_count_sql: str | None = None
     orm_model_label: str | None = None
+
+
+@dataclass(frozen=True)
+class OrmDisposalCounts:
+    rows_selected: int
+    rows_disposed: int
+    legal_hold_preserved: int
 
 
 RETENTION_SQL_PLANS: dict[str, RetentionSqlPlan] = {
@@ -774,19 +784,29 @@ class Command(BaseCommand):
 
     def _delete_with_orm(
         self, table: str, cutoff: datetime, model_label: str
-    ) -> int:
+    ) -> OrmDisposalCounts:
         ticket_ids = self._candidate_ticket_ids(table, cutoff)
         self._lock_hold_graph(ticket_ids)
+        rows_preserved_legal_hold = self._orm_held_count(table, cutoff)
         candidate_ids = list(
             self._orm_disposal_queryset(table, cutoff).values_list("pk", flat=True)
         )
+        rows_selected = len(candidate_ids)
         if table == "ticket":
             self._enqueue_attachment_jobs(candidate_ids)
         if not candidate_ids:
-            return 0
+            return OrmDisposalCounts(
+                rows_selected=rows_selected,
+                rows_disposed=0,
+                legal_hold_preserved=rows_preserved_legal_hold,
+            )
         queryset = self._orm_base_queryset(table, cutoff).filter(pk__in=candidate_ids)
         _total_deleted, deleted_by_model = queryset.delete()
-        return deleted_by_model.get(model_label, 0)
+        return OrmDisposalCounts(
+            rows_selected=rows_selected,
+            rows_disposed=deleted_by_model.get(model_label, 0),
+            legal_hold_preserved=rows_preserved_legal_hold,
+        )
 
     def _orm_held_count(self, table: str, cutoff: datetime) -> int:
         held_ticket_ids = self._held_ticket_ids()
@@ -864,12 +884,16 @@ class Command(BaseCommand):
         rows_preserved_legal_hold = 0
         rows_disposed = 0
         if plan.orm_model_label is not None:
-            rows_preserved_legal_hold = self._orm_held_count(table, cutoff)
-            rows_selected = self._orm_disposal_queryset(table, cutoff).count()
-            if not dry:
-                rows_disposed = self._delete_with_orm(
+            if dry:
+                rows_preserved_legal_hold = self._orm_held_count(table, cutoff)
+                rows_selected = self._orm_disposal_queryset(table, cutoff).count()
+            else:
+                counts = self._delete_with_orm(
                     table, cutoff, plan.orm_model_label
                 )
+                rows_selected = counts.rows_selected
+                rows_disposed = counts.rows_disposed
+                rows_preserved_legal_hold = counts.legal_hold_preserved
         else:
             with connection.cursor() as cur:
                 if plan.legal_hold_count_sql is not None:
@@ -904,12 +928,14 @@ class Command(BaseCommand):
         cert = DisposalCertificate(
             issued_at=datetime.now(tz=UTC).isoformat(),
             table=table,
+            rows_selected=rows_selected,
             rows_disposed=rows_disposed,
             retention_class_days=rule_days if isinstance(rule_days, int) else 0,
             cutoff=cutoff.isoformat(),
             legal_hold_preserved=rows_preserved_legal_hold,
             payload_hash=hashlib.sha256(
-                f"{table}:{cutoff}:{rows_disposed}:{rows_preserved_legal_hold}".encode()
+                f"{table}:{cutoff}:{rows_selected}:{rows_disposed}:"
+                f"{rows_preserved_legal_hold}".encode()
             ).hexdigest(),
         )
         self.stdout.write(
