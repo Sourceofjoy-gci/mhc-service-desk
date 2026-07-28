@@ -76,48 +76,32 @@ def test_unknown_policy_table_is_rejected_without_query_or_certificate(
 
 
 @pytest.mark.parametrize(
-    ("table", "held_sql", "count_sql", "delete_sql"),
+    ("table", "held_sql", "count_sql"),
     [
-        (
-            "ticket",
-            "SELECT count(*) FROM ticket "
-            "WHERE created_at < %s AND legal_hold = TRUE",
-            "SELECT count(*) FROM ticket WHERE created_at < %s",
-            "DELETE FROM ticket WHERE created_at < %s "
-            "AND legal_hold IS NOT TRUE",
-        ),
         (
             "ticket_message",
             "SELECT count(*) FROM ticket_message AS candidate "
-            "WHERE candidate.created_at < %s AND EXISTS ("
+            "WHERE candidate.created_at < %s AND ("
+            "candidate.legal_hold = TRUE OR EXISTS ("
             "SELECT 1 FROM ticket AS held_ticket "
             "WHERE held_ticket.id = candidate.ticket_id "
-            "AND held_ticket.legal_hold = TRUE)",
+            "AND held_ticket.legal_hold = TRUE))",
             "SELECT count(*) FROM ticket_message WHERE created_at < %s",
-            "DELETE FROM ticket_message AS candidate "
-            "WHERE candidate.created_at < %s AND NOT EXISTS ("
-            "SELECT 1 FROM ticket AS held_ticket "
-            "WHERE held_ticket.id = candidate.ticket_id "
-            "AND held_ticket.legal_hold = TRUE)",
         ),
         (
             "ticket_note",
             "SELECT count(*) FROM ticket_note AS candidate "
-            "WHERE candidate.created_at < %s AND EXISTS ("
+            "WHERE candidate.created_at < %s AND ("
+            "candidate.legal_hold = TRUE OR EXISTS ("
             "SELECT 1 FROM ticket AS held_ticket "
             "WHERE held_ticket.id = candidate.ticket_id "
-            "AND held_ticket.legal_hold = TRUE)",
+            "AND held_ticket.legal_hold = TRUE))",
             "SELECT count(*) FROM ticket_note WHERE created_at < %s",
-            "DELETE FROM ticket_note AS candidate "
-            "WHERE candidate.created_at < %s AND NOT EXISTS ("
-            "SELECT 1 FROM ticket AS held_ticket "
-            "WHERE held_ticket.id = candidate.ticket_id "
-            "AND held_ticket.legal_hold = TRUE)",
         ),
     ],
 )
-def test_ticket_retention_uses_static_related_legal_hold_queries(
-    monkeypatch, table, held_sql, count_sql, delete_sql
+def test_child_retention_uses_static_own_and_parent_hold_queries(
+    monkeypatch, table, held_sql, count_sql
 ):
     cutoff = datetime(2026, 6, 1, tzinfo=UTC)
     results = {_compact(held_sql): 2, _compact(count_sql): 5}
@@ -125,13 +109,12 @@ def test_ticket_retention_uses_static_related_legal_hold_queries(
     _use_fake_cursor(monkeypatch, cursor)
 
     certificate = _run_without_transaction(
-        retention.Command(), table, cutoff, {"days": 30}, False
+        retention.Command(), table, cutoff, {"days": 30}, True
     )
 
     assert [sql for sql, _ in cursor.executed] == [
         _compact(held_sql),
         _compact(count_sql),
-        _compact(delete_sql),
     ]
     assert all(params == [cutoff] for _, params in cursor.executed)
     assert certificate["rows_disposed"] == 3
@@ -177,17 +160,25 @@ def test_non_hold_table_uses_its_current_schema_timestamp(
 def test_dry_run_reports_disposable_rows_without_delete(monkeypatch):
     cutoff = datetime(2026, 6, 1, tzinfo=UTC)
     held_sql = (
-        "SELECT count(*) FROM ticket WHERE created_at < %s AND legal_hold = TRUE"
+        "SELECT count(*) FROM ticket AS candidate "
+        "WHERE candidate.created_at < %s AND ("
+        "candidate.legal_hold = TRUE OR EXISTS ("
+        "SELECT 1 FROM ticket_message AS held_message "
+        "WHERE held_message.ticket_id = candidate.id "
+        "AND held_message.legal_hold = TRUE) OR EXISTS ("
+        "SELECT 1 FROM ticket_note AS held_note "
+        "WHERE held_note.ticket_id = candidate.id "
+        "AND held_note.legal_hold = TRUE))"
     )
     count_sql = "SELECT count(*) FROM ticket WHERE created_at < %s"
-    cursor = FakeCursor({held_sql: 2, count_sql: 7})
+    cursor = FakeCursor({_compact(held_sql): 2, count_sql: 7})
     _use_fake_cursor(monkeypatch, cursor)
 
     certificate = _run_without_transaction(
         retention.Command(), "ticket", cutoff, {"days": 30}, True
     )
 
-    assert [sql for sql, _ in cursor.executed] == [held_sql, count_sql]
+    assert [sql for sql, _ in cursor.executed] == [_compact(held_sql), count_sql]
     assert certificate["rows_disposed"] == 5
     assert certificate["legal_hold_preserved"] == 2
 
@@ -318,6 +309,388 @@ def test_child_retention_preserves_records_for_held_parent_ticket(
     assert getattr(tickets[1], related_name).count() == 0
     assert certificate["rows_disposed"] == 1
     assert certificate["legal_hold_preserved"] == 1
+
+
+@pytest.mark.django_db
+@pytest.mark.parametrize(
+    ("table", "related_name"),
+    [("ticket_message", "messages"), ("ticket_note", "notes")],
+)
+def test_child_retention_preserves_held_child_under_unheld_parent(
+    basic_world, table, related_name
+):
+    from apps.catalogue.models import RequestType
+    from apps.tickets.models import Ticket, TicketMessage, TicketNote
+    from apps.workflow.models import Status
+
+    ticket = Ticket.objects.create(
+        number=f"OP-CHILD-HOLD-{table}",
+        domain="operational",
+        title="Child legal hold",
+        status=Status.objects.get(domain="operational", is_initial=True),
+        priority="P3",
+        channel="web",
+        requester=basic_world["contact"],
+        service=basic_world["gen_info"],
+        request_type=RequestType.objects.get(service=basic_world["gen_info"]),
+        office=basic_world["office"],
+        legal_hold=False,
+    )
+    if table == "ticket_message":
+        held = TicketMessage.objects.create(
+            ticket=ticket,
+            direction="inbound",
+            body_text="Held message",
+            legal_hold=True,
+        )
+        free = TicketMessage.objects.create(
+            ticket=ticket,
+            direction="inbound",
+            body_text="Disposable message",
+            legal_hold=False,
+        )
+        model = TicketMessage
+    else:
+        held = TicketNote.objects.create(
+            ticket=ticket,
+            author_subject="retention-test",
+            body="Held note",
+            legal_hold=True,
+        )
+        free = TicketNote.objects.create(
+            ticket=ticket,
+            author_subject="retention-test",
+            body="Disposable note",
+            legal_hold=False,
+        )
+        model = TicketNote
+    model.objects.filter(pk__in=[held.pk, free.pk]).update(
+        created_at=datetime(2026, 1, 1, tzinfo=UTC)
+    )
+
+    certificate = retention.Command()._dispose_table(
+        table,
+        datetime(2026, 7, 1, tzinfo=UTC),
+        {"days": 30},
+        False,
+    )
+
+    assert list(getattr(ticket, related_name).values_list("pk", flat=True)) == [
+        held.pk
+    ]
+    assert certificate["rows_disposed"] == 1
+    assert certificate["legal_hold_preserved"] == 1
+
+
+@pytest.mark.django_db(transaction=True)
+def test_message_retention_uses_dependency_aware_delete(basic_world):
+    from apps.catalogue.models import RequestType
+    from apps.email_channel.models import EmailDelivery
+    from apps.files.models import Attachment
+    from apps.tickets.models import Ticket, TicketMessage
+    from apps.workflow.models import Status
+
+    ticket = Ticket.objects.create(
+        number="OP-MESSAGE-DEPENDENCY-RETENTION",
+        domain="operational",
+        title="Message dependency retention",
+        status=Status.objects.get(domain="operational", is_initial=True),
+        priority="P3",
+        channel="web",
+        requester=basic_world["contact"],
+        service=basic_world["gen_info"],
+        request_type=RequestType.objects.get(service=basic_world["gen_info"]),
+        office=basic_world["office"],
+    )
+    message = TicketMessage.objects.create(
+        ticket=ticket,
+        direction="outbound",
+        body_text="Dependency-aware message",
+    )
+    TicketMessage.objects.filter(pk=message.pk).update(
+        created_at=datetime(2000, 1, 1, tzinfo=UTC)
+    )
+    delivery = EmailDelivery.objects.create(
+        ticket_message=message,
+        to_address="requester@example.test",
+        from_address="service@example.test",
+        subject="Retention",
+        body_text="Retention",
+    )
+    attachment = Attachment.objects.create(
+        ticket=ticket,
+        message=message,
+        object_key="retention/message-dependency.txt",
+        filename="message-dependency.txt",
+        content_type="text/plain",
+        size_bytes=10,
+        checksum_sha256="6" * 64,
+        uploaded_by_subject="retention-test",
+    )
+
+    certificate = retention.Command()._dispose_table(
+        "ticket_message",
+        datetime(2026, 7, 1, tzinfo=UTC),
+        {"days": 30},
+        False,
+    )
+
+    assert not TicketMessage.objects.filter(pk=message.pk).exists()
+    assert not EmailDelivery.objects.filter(pk=delivery.pk).exists()
+    attachment.refresh_from_db()
+    assert attachment.message_id is None
+    assert certificate["rows_disposed"] == 1
+
+
+@pytest.mark.django_db(transaction=True)
+def test_ticket_disposal_commits_populated_graph_and_preserves_child_held_graph(
+    basic_world, monkeypatch, tmp_path
+):
+    from apps.administration.models import ConfigItem
+    from apps.catalogue.models import RequestType
+    from apps.csat.models import CsatResponse
+    from apps.email_channel.models import EmailDelivery
+    from apps.files.models import Attachment, AttachmentAccessLog
+    from apps.identity_access.models import User
+    from apps.knowledge.models import KnowledgeArticle, KnowledgeUsageLog
+    from apps.sla.models import SlaInstance, SlaPauseHistory, SlaPolicy
+    from apps.tickets.models import (
+        Ticket,
+        TicketLink,
+        TicketMessage,
+        TicketNote,
+        Watcher,
+    )
+    from apps.whatsapp.models import WhatsappAccount, WhatsappMessage
+    from apps.workflow.models import Status, TransitionHistory
+
+    now = datetime(2026, 7, 28, 12, 30, tzinfo=UTC)
+    monkeypatch.setattr(retention.djtz, "now", lambda: now)
+    ConfigItem.objects.create(
+        key="retention.policy.v1",
+        value={"ticket": {"days": 30, "description": "approved test policy"}},
+    )
+    status = Status.objects.get(domain="operational", is_initial=True)
+    request_type = RequestType.objects.get(service=basic_world["gen_info"])
+
+    def make_ticket(number: str) -> Ticket:
+        ticket = Ticket.objects.create(
+            number=number,
+            domain="operational",
+            title=number,
+            status=status,
+            priority="P3",
+            channel="web",
+            requester=basic_world["contact"],
+            service=basic_world["gen_info"],
+            request_type=request_type,
+            office=basic_world["office"],
+            legal_hold=False,
+        )
+        Ticket.objects.filter(pk=ticket.pk).update(
+            created_at=datetime(2000, 1, 1, tzinfo=UTC)
+        )
+        return ticket
+
+    disposable = make_ticket("OP-RETENTION-GRAPH-DISPOSE")
+    preserved = make_ticket("OP-RETENTION-GRAPH-HELD")
+
+    message = TicketMessage.objects.create(
+        ticket=disposable,
+        direction="inbound",
+        body_text="Populated graph message",
+    )
+    note = TicketNote.objects.create(
+        ticket=disposable,
+        author_subject="retention-test",
+        body="Populated graph note",
+    )
+    held_note = TicketNote.objects.create(
+        ticket=preserved,
+        author_subject="retention-test",
+        body="This child keeps the whole graph",
+        legal_hold=True,
+    )
+    delivery = EmailDelivery.objects.create(
+        ticket_message=message,
+        to_address="requester@example.test",
+        from_address="service@example.test",
+        subject="Retention",
+        body_text="Retention",
+    )
+    attachment = Attachment.objects.create(
+        ticket=disposable,
+        message=message,
+        object_key="retention/populated-graph.txt",
+        filename="populated-graph.txt",
+        content_type="text/plain",
+        size_bytes=10,
+        checksum_sha256="5" * 64,
+        uploaded_by_subject="retention-test",
+    )
+    access_log = AttachmentAccessLog.objects.create(
+        attachment=attachment,
+        actor_subject="retention-test",
+    )
+    csat = CsatResponse.objects.create(ticket=disposable)
+    transition = TransitionHistory.objects.create(
+        ticket=disposable,
+        from_status=None,
+        to_status=status,
+        actor_subject="retention-test",
+    )
+    policy = SlaPolicy.objects.get(domain="operational", priority="P3")
+    sla = SlaInstance.objects.create(
+        ticket=disposable,
+        policy=policy,
+        kind="resolution",
+        due_at=now + timedelta(days=1),
+    )
+    pause = SlaPauseHistory.objects.create(
+        instance=sla,
+        state="paused_requester",
+        reason="awaiting_requester",
+    )
+    held_sla = SlaInstance.objects.create(
+        ticket=preserved,
+        policy=policy,
+        kind="resolution",
+        due_at=now + timedelta(days=1),
+    )
+    watcher_user = User.objects.create_user(
+        username="retention-watcher",
+        keycloak_subject="retention-watcher-subject",
+    )
+    watcher = Watcher.objects.create(ticket=disposable, user=watcher_user)
+    link = TicketLink.objects.create(
+        from_ticket=disposable,
+        to_ticket=preserved,
+        kind=TicketLink.Kind.RELATED,
+    )
+    reverse_link = TicketLink.objects.create(
+        from_ticket=preserved,
+        to_ticket=disposable,
+        kind=TicketLink.Kind.BLOCKED_BY,
+    )
+    whatsapp_account = WhatsappAccount.objects.create(
+        phone_number_id="retention-phone-id",
+        display_name="Retention account",
+        domain="operational",
+    )
+    whatsapp = WhatsappMessage.objects.create(
+        ticket=disposable,
+        account=whatsapp_account,
+        direction="inbound",
+        body="Retention WhatsApp",
+    )
+    article = KnowledgeArticle.objects.create(
+        code="RETENTION-GRAPH",
+        title="Retention graph",
+        body="Test article",
+        audience="internal_op",
+        domain="operational",
+        owner_subject="retention-test",
+    )
+    usage = KnowledgeUsageLog.objects.create(
+        article=article,
+        ticket=disposable,
+        actor_subject="retention-test",
+    )
+
+    retention.Command().handle(
+        dry_run=False,
+        table=[],
+        out=str(tmp_path / "populated-graph-"),
+    )
+
+    assert not Ticket.objects.filter(pk=disposable.pk).exists()
+    for model, pk in (
+        (TicketMessage, message.pk),
+        (TicketNote, note.pk),
+        (EmailDelivery, delivery.pk),
+        (Attachment, attachment.pk),
+        (AttachmentAccessLog, access_log.pk),
+        (CsatResponse, csat.pk),
+        (TransitionHistory, transition.pk),
+        (SlaInstance, sla.pk),
+        (SlaPauseHistory, pause.pk),
+        (Watcher, watcher.pk),
+        (TicketLink, link.pk),
+        (TicketLink, reverse_link.pk),
+    ):
+        assert not model.objects.filter(pk=pk).exists()
+    whatsapp.refresh_from_db()
+    usage.refresh_from_db()
+    assert whatsapp.ticket_id is None
+    assert usage.ticket_id is None
+
+    assert Ticket.objects.filter(pk=preserved.pk).exists()
+    assert TicketNote.objects.filter(pk=held_note.pk).exists()
+    assert SlaInstance.objects.filter(pk=held_sla.pk).exists()
+    certificate = json.loads(
+        (tmp_path / "populated-graph-20260728T123000Z.json").read_text(
+            encoding="utf-8"
+        )
+    )
+    assert certificate[0]["table"] == "ticket"
+    assert certificate[0]["rows_disposed"] == 1
+    assert certificate[0]["legal_hold_preserved"] == 1
+
+
+def test_certificate_fsyncs_parent_directory_after_atomic_link(monkeypatch, tmp_path):
+    events: list[str] = []
+    original_link = retention.os.link
+
+    def record_link(source, destination):
+        original_link(source, destination)
+        events.append("link")
+
+    monkeypatch.setattr(retention.os, "link", record_link)
+    monkeypatch.setattr(
+        retention.Command,
+        "_fsync_parent_directory",
+        staticmethod(lambda _path: events.append("parent-fsync")),
+        raising=False,
+    )
+
+    retention.Command._write_certificate(tmp_path / "certificate.json", [])
+
+    assert events == ["link", "parent-fsync"]
+
+
+def test_parent_directory_fsync_opens_syncs_and_closes_directory(
+    monkeypatch, tmp_path
+):
+    events: list[tuple[object, ...]] = []
+    directory_fd = 321
+
+    def record_open(path, flags):
+        events.append(("open", path, flags))
+        return directory_fd
+
+    monkeypatch.setattr(retention.os, "open", record_open)
+    monkeypatch.setattr(
+        retention.os,
+        "fsync",
+        lambda fd: events.append(("fsync", fd)),
+    )
+    monkeypatch.setattr(
+        retention.os,
+        "close",
+        lambda fd: events.append(("close", fd)),
+    )
+
+    retention.Command._fsync_parent_directory(tmp_path / "certificate.json")
+
+    assert events == [
+        (
+            "open",
+            tmp_path,
+            retention.os.O_RDONLY | getattr(retention.os, "O_DIRECTORY", 0),
+        ),
+        ("fsync", directory_fd),
+        ("close", directory_fd),
+    ]
 
 
 @pytest.mark.django_db

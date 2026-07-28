@@ -129,6 +129,10 @@ mitigations, the key-rotation schedule, and the access-review cadence.
   table or certificate-write failure rolls back every deletion; a database
   commit failure may leave a certificate for a run that did not delete data and
   should be investigated.
+* The certificate output directory must support same-filesystem hard links and
+  `fsync` for both files and directories. The command flushes the certificate
+  file and then its parent-directory entry before the database can commit; an
+  unsupported or failed durability operation aborts and rolls back the run.
 * Schedule monthly via cron only after the policy has been formally approved
   and configured.
 * `manage.py sar_export --email <addr>` — produces a Subject Access

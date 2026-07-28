@@ -5,8 +5,9 @@ management command disposes expired rows and writes a tamper-evident
 disposal certificate per the PRD §23.4 commitment.
 
 A ticket under ``legal_hold`` is never disposed, even if its retention
-window has elapsed. Holds are set by an authorised administrator and
-have an optional expiry.
+window has elapsed. A held message or note also preserves its parent ticket
+and required graph. Holds are set by an authorised administrator and have an
+optional expiry.
 """
 from __future__ import annotations
 
@@ -18,13 +19,16 @@ import tempfile
 from dataclasses import asdict, dataclass
 from datetime import UTC, datetime, timedelta
 from pathlib import Path
-from typing import TypedDict, TypeGuard, Unpack
+from typing import TYPE_CHECKING, TypedDict, TypeGuard, Unpack
 
 from django.core.management.base import BaseCommand, CommandError, CommandParser
 from django.db import transaction
 from django.utils import timezone as djtz
 
 from .models import ConfigItem
+
+if TYPE_CHECKING:
+    from django.db.models import Model, QuerySet
 
 logger = logging.getLogger(__name__)
 
@@ -95,54 +99,58 @@ class DisposalCertificate:
 @dataclass(frozen=True)
 class RetentionSqlPlan:
     count_sql: str
-    delete_sql: str
+    delete_sql: str | None
     legal_hold_count_sql: str | None = None
+    orm_model_label: str | None = None
 
 
 RETENTION_SQL_PLANS: dict[str, RetentionSqlPlan] = {
     "ticket": RetentionSqlPlan(
         count_sql="SELECT count(*) FROM ticket WHERE created_at < %s",
-        delete_sql=(
-            "DELETE FROM ticket WHERE created_at < %s "
-            "AND legal_hold IS NOT TRUE"
-        ),
+        delete_sql=None,
         legal_hold_count_sql=(
-            "SELECT count(*) FROM ticket "
-            "WHERE created_at < %s AND legal_hold = TRUE"
+            "SELECT count(*) FROM ticket AS candidate "
+            "WHERE candidate.created_at < %s AND ("
+            "candidate.legal_hold = TRUE OR EXISTS ("
+            "SELECT 1 FROM ticket_message AS held_message "
+            "WHERE held_message.ticket_id = candidate.id "
+            "AND held_message.legal_hold = TRUE) OR EXISTS ("
+            "SELECT 1 FROM ticket_note AS held_note "
+            "WHERE held_note.ticket_id = candidate.id "
+            "AND held_note.legal_hold = TRUE))"
         ),
+        orm_model_label="tickets.Ticket",
     ),
     "ticket_message": RetentionSqlPlan(
         count_sql="SELECT count(*) FROM ticket_message WHERE created_at < %s",
-        delete_sql=(
-            "DELETE FROM ticket_message AS candidate "
-            "WHERE candidate.created_at < %s AND NOT EXISTS ("
-            "SELECT 1 FROM ticket AS held_ticket "
-            "WHERE held_ticket.id = candidate.ticket_id "
-            "AND held_ticket.legal_hold = TRUE)"
-        ),
+        delete_sql=None,
         legal_hold_count_sql=(
             "SELECT count(*) FROM ticket_message AS candidate "
-            "WHERE candidate.created_at < %s AND EXISTS ("
+            "WHERE candidate.created_at < %s AND ("
+            "candidate.legal_hold = TRUE OR EXISTS ("
             "SELECT 1 FROM ticket AS held_ticket "
             "WHERE held_ticket.id = candidate.ticket_id "
-            "AND held_ticket.legal_hold = TRUE)"
+            "AND held_ticket.legal_hold = TRUE))"
         ),
+        orm_model_label="tickets.TicketMessage",
     ),
     "ticket_note": RetentionSqlPlan(
         count_sql="SELECT count(*) FROM ticket_note WHERE created_at < %s",
         delete_sql=(
             "DELETE FROM ticket_note AS candidate "
-            "WHERE candidate.created_at < %s AND NOT EXISTS ("
+            "WHERE candidate.created_at < %s "
+            "AND candidate.legal_hold IS NOT TRUE AND NOT EXISTS ("
             "SELECT 1 FROM ticket AS held_ticket "
             "WHERE held_ticket.id = candidate.ticket_id "
             "AND held_ticket.legal_hold = TRUE)"
         ),
         legal_hold_count_sql=(
             "SELECT count(*) FROM ticket_note AS candidate "
-            "WHERE candidate.created_at < %s AND EXISTS ("
+            "WHERE candidate.created_at < %s AND ("
+            "candidate.legal_hold = TRUE OR EXISTS ("
             "SELECT 1 FROM ticket AS held_ticket "
             "WHERE held_ticket.id = candidate.ticket_id "
-            "AND held_ticket.legal_hold = TRUE)"
+            "AND held_ticket.legal_hold = TRUE))"
         ),
     ),
     "auditevent": RetentionSqlPlan(
@@ -292,11 +300,43 @@ class Command(BaseCommand):
         with connection.cursor() as cur:
             for table, _rule, cutoff in run_plan:
                 plan = RETENTION_SQL_PLANS[table]
-                statements = [plan.count_sql, plan.delete_sql]
+                statements = [plan.count_sql]
+                if plan.delete_sql is not None:
+                    statements.append(plan.delete_sql)
                 if plan.legal_hold_count_sql is not None:
                     statements.append(plan.legal_hold_count_sql)
                 for sql in statements:
                     cur.execute(f"EXPLAIN {sql}", [cutoff])
+                if plan.orm_model_label is not None:
+                    queryset = self._orm_disposal_queryset(table, cutoff).values("pk")
+                    sql, params = queryset.query.sql_with_params()
+                    cur.execute(f"EXPLAIN {sql}", params)
+
+    @staticmethod
+    def _orm_disposal_queryset(table: str, cutoff: datetime) -> QuerySet[Model]:
+        """Return held-aware rows for Django's dependency-aware collector."""
+        from apps.tickets.models import Ticket, TicketMessage
+
+        if table == "ticket":
+            return (
+                Ticket.objects.filter(created_at__lt=cutoff, legal_hold=False)
+                .exclude(messages__legal_hold=True)
+                .exclude(notes__legal_hold=True)
+            )
+        if table == "ticket_message":
+            return TicketMessage.objects.filter(
+                created_at__lt=cutoff,
+                legal_hold=False,
+                ticket__legal_hold=False,
+            )
+        raise ValueError(f"No ORM retention plan for {table}")
+
+    @staticmethod
+    def _delete_with_orm(table: str, cutoff: datetime, model_label: str) -> int:
+        _total_deleted, deleted_by_model = Command._orm_disposal_queryset(
+            table, cutoff
+        ).delete()
+        return deleted_by_model.get(model_label, 0)
 
     @staticmethod
     def _write_certificate(
@@ -317,11 +357,22 @@ class Command(BaseCommand):
                 fh.flush()
                 os.fsync(fh.fileno())
             os.link(temporary_name, cert_path)
+            Command._fsync_parent_directory(cert_path)
         finally:
             try:
                 os.unlink(temporary_name)
             except FileNotFoundError:
                 pass
+
+    @staticmethod
+    def _fsync_parent_directory(cert_path: Path) -> None:
+        """Make the newly linked certificate directory entry crash-durable."""
+        flags = os.O_RDONLY | getattr(os, "O_DIRECTORY", 0)
+        directory_fd = os.open(cert_path.parent, flags)
+        try:
+            os.fsync(directory_fd)
+        finally:
+            os.close(directory_fd)
 
     @transaction.atomic
     def _dispose_table(
@@ -345,8 +396,13 @@ class Command(BaseCommand):
             cur.execute(plan.count_sql, [cutoff])
             total_old = cur.fetchone()[0]
             if not dry:
-                cur.execute(plan.delete_sql, [cutoff])
-                rows_disposed = cur.rowcount
+                if plan.orm_model_label is not None:
+                    rows_disposed = self._delete_with_orm(
+                        table, cutoff, plan.orm_model_label
+                    )
+                elif plan.delete_sql is not None:
+                    cur.execute(plan.delete_sql, [cutoff])
+                    rows_disposed = cur.rowcount
             else:
                 rows_disposed = total_old - rows_preserved_legal_hold
         rule_days = rule.get("days", 0)
