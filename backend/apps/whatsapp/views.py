@@ -3,10 +3,13 @@ from __future__ import annotations
 
 import logging
 
-from rest_framework.decorators import api_view, permission_classes
-from rest_framework.permissions import AllowAny
+from rest_framework.decorators import api_view, authentication_classes, permission_classes
+from rest_framework.permissions import AllowAny, IsAuthenticated
 from rest_framework.response import Response
 from rest_framework import status
+
+from apps.identity_access.authentication import KeycloakJWTAuthentication
+from apps.identity_access.scope import ScopePermission
 
 from .services import get_provider, process_inbound_whatsapp
 
@@ -40,7 +43,8 @@ def inbound_webhook(request):
 
 
 @api_view(["GET"])
-@permission_classes([AllowAny])
+@authentication_classes([KeycloakJWTAuthentication])
+@permission_classes([IsAuthenticated, ScopePermission])
 def list_templates(request):
     """Return the templates known to the configured provider."""
     provider = get_provider()
@@ -48,7 +52,8 @@ def list_templates(request):
 
 
 @api_view(["POST"])
-@permission_classes([AllowAny])
+@authentication_classes([KeycloakJWTAuthentication])
+@permission_classes([IsAuthenticated, ScopePermission])
 def send_text(request):
     """Outbound text — used by agent replies (subject to template rules)."""
     data = request.data or {}
