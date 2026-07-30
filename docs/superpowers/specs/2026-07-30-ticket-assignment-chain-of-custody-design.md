@@ -3,7 +3,7 @@
 **Date:** 2026-07-30
 **Status:** Approved design; awaiting written-spec review
 **Application:** MHC Service Desk
-**Primary users:** Internal agents, supervisors, leads, service-desk staff, security responders, and auditors
+**Primary users:** Master, Deputy Master, Assistant Master, Assistant Accountant, Accountant, Senior Accountant, Principal Accountant, Financial Controller, Estate Examiner, Records Clerk, Data Clerk, internal supervisors/leads, security responders, and auditors
 
 ## 1. Objective
 
@@ -45,6 +45,7 @@ The current implementation is insufficient because:
 ### 3.1 In Scope
 
 - Role-derived team eligibility for current active internal users.
+- Primary internal staff designations for the full office staff complement.
 - Exact target-user checks for role, domain, office, service, queue, and confidentiality.
 - A searchable eligible-user selector showing name and matching role/team labels.
 - Confirmation before assignment, self-assignment, transfer/reassignment, or unassignment.
@@ -69,7 +70,7 @@ The current implementation is insufficient because:
 
 ## 4. Design Decisions
 
-1. **Teams are role-derived.** A candidate's matching functional role names are the team labels presented in the selector and stored in custody snapshots. No separate team-membership source is introduced.
+1. **Teams and designations are role-derived.** A candidate's matching `Role.name` supplies the staff designation, while its recognised role family supplies the team label presented in the selector and stored in custody snapshots. No separate team-membership source is introduced.
 2. **Persisted role assignments are authoritative.** If a user has persisted `UserRole` assignments, only active, unexpired, valid assignments are considered. Keycloak group fallback applies only when the existing authority model would use that fallback.
 3. **The free-text `Ticket.team` field is not an authorisation source.** It remains ordinary work-state metadata. It cannot grant eligibility or broaden a role scope.
 4. **Assignment becomes a dedicated operation.** New UI code uses an explicit assignment endpoint. Assignment is not submitted with unrelated work-state fields.
@@ -80,7 +81,31 @@ The current implementation is insufficient because:
 
 ## 5. Role-Derived Eligibility
 
-### 5.1 Functional Target Roles
+### 5.1 Primary Office Staff Designations
+
+The following designations are primary internal users who may action tickets when their active persisted role scope covers the ticket:
+
+| Staff designation | Canonical role key | Role-derived team |
+|---|---|---|
+| Master | `master` | Office Leadership |
+| Deputy Master | `deputy-master` | Office Leadership |
+| Assistant Master | `assistant-master` | Office Leadership |
+| Assistant Accountant | `assistant-accountant` | Finance |
+| Accountant | `accountant` | Finance |
+| Senior Accountant | `senior-accountant` | Finance |
+| Principal Accountant | `principal-accountant` | Finance |
+| Financial Controller | `financial-controller` | Finance |
+| Estate Examiner | `estate-examiner` | Estate Administration |
+| Records Clerk | `records-clerk` | Records and Data |
+| Data Clerk | `data-clerk` | Records and Data |
+
+These designation roles are action-capable target roles only through an active persisted `UserRole` with a valid business scope. A designation alone never implies global access, assignment authority, Restricted access, or access to every office. The configured role scope remains authoritative for domain, office, service, queue, and confidentiality.
+
+Designation roles do not receive an unscoped Keycloak-group fallback because a job title alone does not identify a safe domain or office. If no active valid persisted assignment covers the ticket, the user is ineligible.
+
+Finance designations are supported as internal staff roles in the current configured domains. This design does not create the planned Accounts domain; when that domain is introduced, the same roles can receive explicit Accounts scopes without changing the assignment contract.
+
+### 5.2 Existing Functional Target Roles
 
 The eligible target must hold an action-capable functional role for the ticket domain. Currently supported aliases are:
 
@@ -93,7 +118,9 @@ Security-only, auditor-only, manager-only, and technical-administrator-only iden
 
 The current actor-authorisation rules are preserved. This design narrows target selection without silently granting a new actor the ability to assign.
 
-### 5.2 Exact Scope Coverage
+The legacy functional aliases remain supported for existing identities and compatibility. New office designation roles and legacy aliases use the same final scope and confidentiality checks.
+
+### 5.3 Exact Scope Coverage
 
 A target role assignment covers a ticket only when:
 
@@ -109,17 +136,18 @@ A null role dimension is broad for that dimension. A non-null role dimension mus
 
 Restricted tickets require both a matching functional action role and the applicable Restricted visibility authority. Security-responder authority alone is read-only and cannot make the responder an assignee.
 
-### 5.3 Candidate Presentation
+### 5.4 Candidate Presentation
 
 The eligible-assignee response returns each user once with:
 
 - immutable user ID;
 - username;
 - display name with username fallback;
+- sorted matching staff designation labels;
 - sorted matching role-derived team labels; and
 - no unrelated role or scope details.
 
-The selector searches display name, username, and returned team labels. It never fetches or filters the unscoped user directory in the browser.
+The selector searches display name, username, designation, and returned team labels. It never fetches or filters the unscoped user directory in the browser.
 
 The existing assignee may be shown as current ticket context even when a later role change makes that person ineligible. An ineligible current owner is not offered as a new target.
 
@@ -185,11 +213,13 @@ Any failure rolls back the ticket, transition history, audit, outbox, and custod
     "action": "reassigned",
     "previous_assignee": {
       "display_name": "Previous Agent",
-      "team_labels": ["Operational Agent"]
+      "designations": ["Estate Examiner"],
+      "team_labels": ["Estate Administration"]
     },
     "new_assignee": {
       "display_name": "New Agent",
-      "team_labels": ["Operational Supervisor"]
+      "designations": ["Assistant Master"],
+      "team_labels": ["Office Leadership"]
     },
     "occurred_at": "2026-07-30T10:05:00Z",
     "performed_by": {
@@ -227,6 +257,7 @@ Add an append-only `TicketCustodyEvent` with:
 - previous and new owner snapshots;
 - previous and new queue snapshots;
 - previous and new status codes and labels;
+- previous and new staff-designation snapshots;
 - role-derived team-label snapshots;
 - reason;
 - previous-event hash; and
@@ -326,9 +357,9 @@ The timeline is available only when the ticket is visible through the caller's c
 The Operations panel separates assignment from general work-state editing. Assignment-capable staff receive a labelled searchable command-style selector that:
 
 - loads only the server-provided eligible set;
-- searches by name, username, and role/team label;
+- searches by name, username, staff designation, and role/team label;
 - shows name as the primary line;
-- shows matching team/role labels as secondary text;
+- shows matching staff designation and team/role labels as secondary text;
 - shows loading, empty, and failure states; and
 - disables submission while candidates are stale or unavailable.
 
@@ -342,6 +373,7 @@ Selecting Assign, Transfer, Self-assign, or Unassign opens a confirmation dialog
 - action;
 - current owner;
 - proposed owner;
+- proposed staff designation;
 - proposed role-derived team labels; and
 - required reason when transferring/reassigning or unassigning.
 
@@ -381,7 +413,10 @@ Implementation follows test-driven development. Each production behaviour begins
 
 ### 11.1 Eligibility Tests
 
-- Active matching Operational and IT agents are returned.
+- Active matching office-designation roles are returned only through exact persisted scopes.
+- Every primary staff designation can be selected for a ticket it is explicitly scoped to action.
+- Designation-only Keycloak groups without persisted scopes fail closed.
+- Active matching Operational and IT legacy agents are returned.
 - Supervisors/leads are returned when their functional role covers the ticket.
 - Wrong domain, office, service, or queue is excluded.
 - Queue-scoped roles do not cover queue-less tickets.
@@ -423,6 +458,7 @@ Implementation follows test-driven development. Each production behaviour begins
 ### 11.4 Frontend Tests
 
 - Search matches name, username, and role/team label.
+- Each candidate displays the returned office staff designation.
 - Only server-returned candidates are displayed.
 - Assignment, transfer, self-assignment, and unassignment require confirmation.
 - Cancel sends no request.
@@ -435,7 +471,21 @@ Implementation follows test-driven development. Each production behaviour begins
 
 ### 11.5 Supported Role Matrix
 
-The tests cover both canonical and legacy aliases for:
+The tests cover every primary office staff designation:
+
+- Master;
+- Deputy Master;
+- Assistant Master;
+- Assistant Accountant;
+- Accountant;
+- Senior Accountant;
+- Principal Accountant;
+- Financial Controller;
+- Estate Examiner;
+- Records Clerk; and
+- Data Clerk.
+
+They also cover both canonical and legacy aliases for:
 
 - Operational agent;
 - Operational supervisor;
@@ -452,7 +502,7 @@ Actor permissions and target eligibility are asserted separately. A role may be 
 
 | Requirement | Design coverage |
 |---|---|
-| Searchable eligible team-member dropdown | Sections 5.3 and 9.1 |
+| Searchable eligible team-member dropdown | Sections 5.4 and 9.1 |
 | Exclude inactive/unauthorised users | Sections 5 and 11.1 |
 | Confirmation before mutation | Section 9.2 |
 | Complete success confirmation | Sections 6.3 and 9.3 |
