@@ -1,8 +1,11 @@
 """Tests for the immutable internal ticket-custody ledger."""
 
+from datetime import datetime
+
 import pytest
 from django.core.exceptions import ValidationError
-from django.db import IntegrityError
+from django.db import IntegrityError, connection
+from django.utils import timezone
 
 from apps.catalogue.models import RequestType
 from apps.tickets import services
@@ -170,3 +173,75 @@ def test_record_custody_events_appends_to_the_existing_hash_chain(ticket):
     assert next_event.sequence == 2
     assert next_event.previous_hash == first_event.event_hash
     assert verify_custody_chain(ticket) is True
+
+
+def test_naive_custody_timestamp_is_normalized_before_hashing_and_persistence(ticket):
+    """A naive supplied timestamp must hash exactly as its reloaded DB value."""
+    event = record_custody_events(
+        ticket=ticket,
+        actor=CustodyActor.user(subject="agent-1", display_name="Agent One"),
+        events=(
+            CustodyEventInput.created(
+                source_process="ticket.create",
+                occurred_at=datetime(2026, 7, 30, 10, 15, 30, 123456),
+            ),
+        ),
+    )[0]
+
+    event.refresh_from_db()
+
+    assert timezone.is_aware(event.occurred_at)
+    assert verify_custody_chain(ticket) is True
+
+
+def _two_event_chain(ticket) -> list[TicketCustodyEvent]:
+    return record_custody_events(
+        ticket=ticket,
+        actor=CustodyActor.user(subject="agent-1", display_name="Agent One"),
+        events=(
+            CustodyEventInput.created(source_process="ticket.create"),
+            CustodyEventInput(
+                event_type="status_changed",
+                source_process="ticket.transition",
+            ),
+        ),
+    )
+
+
+def test_verify_custody_chain_rejects_an_altered_previous_hash(ticket):
+    """A changed link must not be accepted even when event content is otherwise valid."""
+    _, event = _two_event_chain(ticket)
+
+    with connection.cursor() as cursor:
+        cursor.execute(
+            "UPDATE ticket_custody_event SET previous_hash = %s WHERE id = %s",
+            ["tampered", event.id],
+        )
+
+    assert verify_custody_chain(ticket) is False
+
+
+def test_verify_custody_chain_rejects_a_sequence_gap(ticket):
+    """The verifier must require every sequence number from one onward."""
+    _, event = _two_event_chain(ticket)
+
+    with connection.cursor() as cursor:
+        cursor.execute(
+            "UPDATE ticket_custody_event SET sequence = %s WHERE id = %s",
+            [3, event.id],
+        )
+
+    assert verify_custody_chain(ticket) is False
+
+
+def test_verify_custody_chain_rejects_a_tampered_content_hash(ticket):
+    """An event hash that no longer represents its content must be rejected."""
+    _, event = _two_event_chain(ticket)
+
+    with connection.cursor() as cursor:
+        cursor.execute(
+            "UPDATE ticket_custody_event SET event_hash = %s WHERE id = %s",
+            ["0" * 64, event.id],
+        )
+
+    assert verify_custody_chain(ticket) is False

@@ -16,9 +16,14 @@ from .models import Ticket, TicketCustodyEvent
 
 def _utc_timestamp(value: datetime) -> str:
     """Return the ledger's stable, six-place UTC time representation."""
-    if timezone.is_naive(value):
-        value = timezone.make_aware(value, UTC)
     return value.astimezone(UTC).strftime("%Y-%m-%dT%H:%M:%S.%fZ")
+
+
+def _normalize_occurred_at(value: datetime) -> datetime:
+    """Make a supplied timestamp safe to persist and hash as the same instant."""
+    if timezone.is_naive(value):
+        return timezone.make_aware(value, UTC)
+    return value.astimezone(UTC)
 
 
 @dataclass(frozen=True)
@@ -221,7 +226,7 @@ def record_custody_events(
 
     for event_input in events:
         sequence += 1
-        occurred_at = event_input.occurred_at or timezone.now()
+        occurred_at = _normalize_occurred_at(event_input.occurred_at or timezone.now())
         previous_owner = _party_snapshot(event_input.previous_owner)
         new_owner = _party_snapshot(event_input.new_owner)
         previous_queue = _snapshot(event_input.previous_queue)
