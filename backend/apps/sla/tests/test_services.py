@@ -14,7 +14,9 @@ from apps.sla.services import (
     add_business_seconds,
     complete_sla,
     evaluate_open_slas,
+    pause_sla,
     restart_resolution_sla,
+    resume_sla,
     sync_slas_for_transition,
 )
 from apps.tickets import services as ticket_services
@@ -217,6 +219,41 @@ def test_evaluator_does_not_escalate_paused_sla(basic_world):
     instance.refresh_from_db()
     assert instance.escalation_notified_at is None
     assert ticket.custody_events.filter(event_type="escalated").count() == 0
+
+
+def test_evaluator_excludes_business_time_while_sla_is_paused_then_resumed(
+    basic_world,
+):
+    """Using the original start after resume would escalate during frozen time."""
+    ticket = _ticket(basic_world)
+    instance = _instance(ticket)
+    started_at = datetime(2026, 7, 27, 6, 0, tzinfo=UTC)
+    _set_resolution_escalation_threshold(instance, started_at=started_at)
+    paused_at = started_at + timedelta(minutes=2)
+    resumed_at = datetime(2026, 7, 27, 10, 0, tzinfo=UTC)
+
+    with freeze_time(paused_at):
+        pause_sla(
+            instance=instance,
+            reason=SlaInstance.State.PAUSED_REQUESTER,
+        )
+    with freeze_time(resumed_at):
+        resume_sla(instance=instance, reason="requester_replied")
+    with freeze_time(resumed_at + timedelta(minutes=6, seconds=59)):
+        evaluate_open_slas()
+
+    instance.refresh_from_db()
+    assert instance.escalation_notified_at is None
+    assert ticket.custody_events.filter(event_type="escalated").count() == 0
+
+    threshold_time = resumed_at + timedelta(minutes=7)
+    with freeze_time(threshold_time):
+        evaluate_open_slas()
+        evaluate_open_slas()
+
+    instance.refresh_from_db()
+    assert instance.escalation_notified_at == threshold_time
+    assert ticket.custody_events.filter(event_type="escalated").count() == 1
 
 
 def test_evaluator_rolls_back_escalation_when_custody_recording_fails(basic_world):

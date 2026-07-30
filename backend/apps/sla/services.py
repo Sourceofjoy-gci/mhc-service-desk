@@ -481,11 +481,12 @@ def _crossed_escalation_threshold(instance: SlaInstance, now: datetime) -> bool:
     target = _target_seconds(instance)
     if target <= 0 or instance.state != SlaInstance.State.ACTIVE:
         return False
-    consumed = business_seconds_between(
-        instance.started_at,
+    remaining = business_seconds_between(
         now,
+        instance.due_at,
         instance.policy.calendar,
     )
+    consumed = max(0, target - remaining)
     return consumed * 100 >= target * instance.policy.escalation_percent
 
 
