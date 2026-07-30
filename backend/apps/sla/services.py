@@ -125,12 +125,12 @@ def add_business_seconds(
     return cursor.astimezone(output_timezone)
 
 
-def business_seconds_between(
+def _business_microseconds_between(
     start: datetime,
     end: datetime,
     calendar: BusinessCalendar,
 ) -> int:
-    """Return business seconds in ``[start, end)`` for one calendar."""
+    """Return exact business microseconds in ``[start, end)`` for one calendar."""
     if (
         start.tzinfo is None
         or start.utcoffset() is None
@@ -144,7 +144,7 @@ def business_seconds_between(
     if end_utc <= start_utc:
         return 0
 
-    total = 0
+    total_microseconds = 0
     calendar_timezone = ZoneInfo(calendar.timezone)
     holiday_set = set(calendar.holidays)
     current_date = start.astimezone(calendar_timezone).date()
@@ -167,9 +167,22 @@ def business_seconds_between(
                 overlap_start = max(start_utc, slot_start)
                 overlap_end = min(end_utc, slot_end)
                 if overlap_end > overlap_start:
-                    total += int((overlap_end - overlap_start).total_seconds())
+                    overlap = overlap_end - overlap_start
+                    total_microseconds += (
+                        (overlap.days * 24 * 60 * 60 + overlap.seconds) * 1_000_000
+                        + overlap.microseconds
+                    )
         current_date += timedelta(days=1)
-    return total
+    return total_microseconds
+
+
+def business_seconds_between(
+    start: datetime,
+    end: datetime,
+    calendar: BusinessCalendar,
+) -> int:
+    """Return whole business seconds in ``[start, end)`` for one calendar."""
+    return _business_microseconds_between(start, end, calendar) // 1_000_000
 
 
 # -----------------------------------------------------------------------------
@@ -481,13 +494,14 @@ def _crossed_escalation_threshold(instance: SlaInstance, now: datetime) -> bool:
     target = _target_seconds(instance)
     if target <= 0 or instance.state != SlaInstance.State.ACTIVE:
         return False
-    remaining = business_seconds_between(
+    target_microseconds = target * 1_000_000
+    remaining = _business_microseconds_between(
         now,
         instance.due_at,
         instance.policy.calendar,
     )
-    consumed = max(0, target - remaining)
-    return consumed * 100 >= target * instance.policy.escalation_percent
+    consumed = max(0, target_microseconds - remaining)
+    return consumed * 100 >= target_microseconds * instance.policy.escalation_percent
 
 
 def _record_escalation(*, instance: SlaInstance, now: datetime) -> None:

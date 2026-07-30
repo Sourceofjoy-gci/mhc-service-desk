@@ -203,6 +203,33 @@ def test_evaluator_does_not_escalate_before_business_time_threshold(basic_world)
     ).count() == 0
 
 
+def test_evaluator_respects_microseconds_before_at_and_after_threshold(basic_world):
+    """Flooring remaining seconds would escalate 499 microseconds before 90%."""
+    ticket = _ticket(basic_world)
+    instance = _instance(ticket)
+    started_at = datetime(2026, 7, 27, 6, 0, 0, 500000, tzinfo=UTC)
+    threshold_time = _set_resolution_escalation_threshold(
+        instance,
+        started_at=started_at,
+    )
+
+    with freeze_time(threshold_time - timedelta(microseconds=1)):
+        evaluate_open_slas()
+
+    instance.refresh_from_db()
+    assert instance.escalation_notified_at is None
+    assert ticket.custody_events.filter(event_type="escalated").count() == 0
+
+    with freeze_time(threshold_time):
+        evaluate_open_slas()
+    with freeze_time(threshold_time + timedelta(microseconds=1)):
+        evaluate_open_slas()
+
+    instance.refresh_from_db()
+    assert instance.escalation_notified_at == threshold_time
+    assert ticket.custody_events.filter(event_type="escalated").count() == 1
+
+
 def test_evaluator_does_not_escalate_paused_sla(basic_world):
     """Removing the active-state guard would escalate a clock that is frozen."""
     ticket = _ticket(basic_world)
@@ -249,6 +276,41 @@ def test_evaluator_excludes_business_time_while_sla_is_paused_then_resumed(
     threshold_time = resumed_at + timedelta(minutes=7)
     with freeze_time(threshold_time):
         evaluate_open_slas()
+        evaluate_open_slas()
+
+    instance.refresh_from_db()
+    assert instance.escalation_notified_at == threshold_time
+    assert ticket.custody_events.filter(event_type="escalated").count() == 1
+
+
+def test_evaluator_respects_microseconds_after_pause_and_resume(basic_world):
+    """Flooring resumed remaining time would escalate one microsecond too early."""
+    ticket = _ticket(basic_world)
+    instance = _instance(ticket)
+    started_at = datetime(2026, 7, 27, 6, 0, 0, 500000, tzinfo=UTC)
+    _set_resolution_escalation_threshold(instance, started_at=started_at)
+    paused_at = started_at + timedelta(minutes=2)
+    resumed_at = datetime(2026, 7, 27, 10, 0, 0, 500000, tzinfo=UTC)
+
+    with freeze_time(paused_at):
+        pause_sla(
+            instance=instance,
+            reason=SlaInstance.State.PAUSED_REQUESTER,
+        )
+    with freeze_time(resumed_at):
+        resume_sla(instance=instance, reason="requester_replied")
+
+    threshold_time = resumed_at + timedelta(minutes=7)
+    with freeze_time(threshold_time - timedelta(microseconds=1)):
+        evaluate_open_slas()
+
+    instance.refresh_from_db()
+    assert instance.escalation_notified_at is None
+    assert ticket.custody_events.filter(event_type="escalated").count() == 0
+
+    with freeze_time(threshold_time):
+        evaluate_open_slas()
+    with freeze_time(threshold_time + timedelta(microseconds=1)):
         evaluate_open_slas()
 
     instance.refresh_from_db()
