@@ -42,6 +42,7 @@ class Migration(migrations.Migration):
                 ('ticket', models.ForeignKey(on_delete=django.db.models.deletion.CASCADE, related_name='custody_events', to='tickets.ticket')),
             ],
             options={
+                'base_manager_name': 'objects',
                 'db_table': 'ticket_custody_event',
                 'ordering': ('sequence', 'id'),
                 'constraints': [models.UniqueConstraint(fields=('ticket', 'sequence'), name='uniq_ticket_custody_sequence')],
