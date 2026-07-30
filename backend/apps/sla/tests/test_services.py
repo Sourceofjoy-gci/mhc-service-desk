@@ -472,11 +472,13 @@ def test_resume_recovers_legacy_pause_at_same_instant_as_resume(basic_world):
 
 
 def test_resume_legacy_recovery_prefers_pause_after_last_resume(basic_world):
-    """An older same-instant pause must not over-grant a later current pause."""
+    """The earliest strict-later pause must win legacy recovery."""
     ticket = _ticket(basic_world)
     instance = _instance(ticket, state=SlaInstance.State.PAUSED_REQUESTER)
     resumed_at = datetime(2026, 7, 27, 10, 0, tzinfo=UTC)
-    current_pause_at = resumed_at + timedelta(minutes=15)
+    pre_resume_pause_at = resumed_at - timedelta(minutes=15)
+    first_current_pause_at = resumed_at + timedelta(minutes=15)
+    later_current_pause_at = resumed_at + timedelta(minutes=30)
     legacy_retry_at = datetime(2026, 7, 27, 14, 0, tzinfo=UTC)
     calendar = instance.policy.calendar
     calendar.timezone = "UTC"
@@ -484,6 +486,8 @@ def test_resume_legacy_recovery_prefers_pause_after_last_resume(basic_world):
     calendar.holidays = []
     calendar.save(update_fields=["timezone", "weekday_hours", "holidays"])
     instance.due_at = resumed_at + timedelta(hours=2)
+    instance.remaining_business_microseconds = None
+    instance.remaining_business_seconds = None
     instance.save(
         update_fields=[
             "due_at",
@@ -492,23 +496,35 @@ def test_resume_legacy_recovery_prefers_pause_after_last_resume(basic_world):
         ]
     )
 
-    old_pause = SlaPauseHistory.objects.create(
+    pre_resume_pause = SlaPauseHistory.objects.create(
         instance=instance,
         state=SlaInstance.State.PAUSED_REQUESTER,
-        reason="old_pause",
+        reason="pre_resume_pause",
     )
     resumed = SlaPauseHistory.objects.create(
         instance=instance,
         state=SlaInstance.State.ACTIVE,
         reason="resumed",
     )
-    current_pause = SlaPauseHistory.objects.create(
+    equal_pause = SlaPauseHistory.objects.create(
+        instance=instance,
+        state=SlaInstance.State.PAUSED_REQUESTER,
+        reason="equal_pause",
+    )
+    first_current_pause = SlaPauseHistory.objects.create(
         instance=instance,
         state=SlaInstance.State.PAUSED_INTERNAL,
-        reason="current_pause",
+        reason="first_current_pause",
     )
-    SlaPauseHistory.objects.filter(pk__in=[old_pause.pk, resumed.pk]).update(at=resumed_at)
-    SlaPauseHistory.objects.filter(pk=current_pause.pk).update(at=current_pause_at)
+    later_current_pause = SlaPauseHistory.objects.create(
+        instance=instance,
+        state=SlaInstance.State.PAUSED_IT,
+        reason="later_current_pause",
+    )
+    SlaPauseHistory.objects.filter(pk=pre_resume_pause.pk).update(at=pre_resume_pause_at)
+    SlaPauseHistory.objects.filter(pk__in=[resumed.pk, equal_pause.pk]).update(at=resumed_at)
+    SlaPauseHistory.objects.filter(pk=first_current_pause.pk).update(at=first_current_pause_at)
+    SlaPauseHistory.objects.filter(pk=later_current_pause.pk).update(at=later_current_pause_at)
 
     with freeze_time(legacy_retry_at):
         resume_sla(instance=instance, reason="legacy_retry")
