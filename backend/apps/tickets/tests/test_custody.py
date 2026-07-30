@@ -239,6 +239,7 @@ def test_custody_input_serialization_matches_reloaded_utc_timestamp(
     assert custody_input.as_json()["occurred_at"] == expected_serialized
     assert event.occurred_at == expected_utc
     assert event.occurred_at.strftime("%Y-%m-%dT%H:%M:%S.%fZ") == expected_serialized
+    assert verify_custody_chain(ticket) is True
 
 
 def _two_event_chain(ticket) -> list[TicketCustodyEvent]:
