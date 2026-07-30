@@ -572,6 +572,7 @@ def public_intake(request: Request) -> Response:
         channel=data.get("channel") or "web",
         matter_reference=data.get("matter_reference", ""),
         actor_subject="public-form",
+        actor=request.user if isinstance(request.user, User) else None,
         ip_address=ip,
     )
 

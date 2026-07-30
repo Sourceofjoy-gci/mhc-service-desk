@@ -26,6 +26,14 @@ from apps.identity_access.scope import (
 from apps.organisations.models import Office
 from apps.workflow.models import Status, Transition, TransitionHistory
 
+from .custody import (
+    CustodyActor,
+    CustodyEventInput,
+    custody_event_type_for_transition,
+    queue_snapshot,
+    status_snapshot,
+    user_actor,
+)
 from .events import record_ticket_event
 from .models import Ticket, TicketLink, TicketMessage, TicketNote, Watcher
 from .permissions import (
@@ -102,6 +110,7 @@ def create_ticket(
     custom_fields: dict[str, JSONValue] | None = None,
     tags: list[str] | None = None,
     actor_subject: str = "system",
+    actor: User | None = None,
     ip_address: str | None = None,
 ) -> Ticket:
     """Create a ticket, its initial acknowledgement, an outbox event, and
@@ -128,7 +137,7 @@ def create_ticket(
         tags=initial_tags,
         acknowledged_at=timezone.now(),
     )
-    TransitionHistory.objects.create(
+    history = TransitionHistory.objects.create(
         ticket=ticket,
         from_status=None,
         to_status=status,
@@ -152,6 +161,24 @@ def create_ticket(
         before={},
         after=created_after,
         ip_address=ip_address,
+        custody_actor=(
+            user_actor(actor)
+            if actor is not None
+            else CustodyActor.system(
+                actor_subject,
+                source_account or f"Intake: {channel}",
+            )
+        ),
+        custody_events=(
+            CustodyEventInput.created(
+                source_process="ticket.create",
+                source_record_type="workflow_transition",
+                source_record_id=str(history.id),
+                new_queue=queue_snapshot(ticket.queue),
+                new_status=status_snapshot(status),
+                occurred_at=history.occurred_at,
+            ),
+        ),
     )
     logger.info("ticket_created", extra={"correlation_id": number})
     return ticket
@@ -457,7 +484,7 @@ def transition_ticket(
         actor_subject=actor.keycloak_subject,
     )
 
-    TransitionHistory.objects.create(
+    history = TransitionHistory.objects.create(
         ticket=locked,
         from_status=previous,
         to_status=target,
@@ -471,6 +498,19 @@ def transition_ticket(
         before=before,
         after=after,
         metadata={"reason": reason},
+        custody_actor=user_actor(actor),
+        custody_events=(
+            CustodyEventInput(
+                event_type=custody_event_type_for_transition(target.code),
+                source_process="ticket.transition",
+                source_record_type="workflow_transition",
+                source_record_id=str(history.id),
+                previous_status=status_snapshot(previous),
+                new_status=status_snapshot(target),
+                reason=reason,
+                occurred_at=history.occurred_at,
+            ),
+        ),
     )
     if locked.domain == Ticket.Domain.IT and target.code in {"resolved", "closed"}:
         from .it_child import sync_child_status_to_parent

@@ -24,6 +24,13 @@ from apps.identity_access.scope import (
 from apps.sla.services import sync_slas_for_transition
 from apps.workflow.models import Status, TransitionHistory
 
+from .custody import (
+    CustodyActor,
+    CustodyEventInput,
+    queue_snapshot,
+    status_snapshot,
+    user_actor,
+)
 from .events import record_ticket_event
 from .models import Ticket, TicketLink
 from .permissions import can_add_ticket_content
@@ -144,6 +151,14 @@ def create_it_child_ticket(
             "title": child.title,
         },
         metadata={"source": "it-child", "parent_ticket_number": parent.number},
+        custody_actor=user_actor(actor),
+        custody_events=(
+            CustodyEventInput.created(
+                source_process="ticket.it_child.create",
+                new_queue=queue_snapshot(child.queue),
+                new_status=status_snapshot(initial_status),
+            ),
+        ),
     )
     link_tickets(
         source=child,
@@ -167,7 +182,7 @@ def create_it_child_ticket(
             to_code=waiting_it.code,
             actor_subject=event_actor,
         )
-        TransitionHistory.objects.create(
+        history = TransitionHistory.objects.create(
             ticket=parent,
             from_status=previous,
             to_status=waiting_it,
@@ -190,6 +205,21 @@ def create_it_child_ticket(
                 "source": "it-child",
                 "child_ticket_number": child.number,
             },
+            custody_actor=user_actor(actor),
+            custody_events=(
+                CustodyEventInput(
+                    event_type="status_changed",
+                    source_process="ticket.it_child.create",
+                    source_record_type="workflow_transition",
+                    source_record_id=str(history.id),
+                    previous_queue=queue_snapshot(parent.queue),
+                    new_queue=queue_snapshot(parent.queue),
+                    previous_status=status_snapshot(previous),
+                    new_status=status_snapshot(waiting_it),
+                    reason=f"IT child ticket {child.number} created",
+                    occurred_at=history.occurred_at,
+                ),
+            ),
         )
     return child
 
@@ -238,7 +268,7 @@ def sync_child_status_to_parent(*, child: Ticket, actor_subject: str = "") -> No
         to_code=target.code,
         actor_subject=event_actor,
     )
-    TransitionHistory.objects.create(
+    history = TransitionHistory.objects.create(
         ticket=parent,
         from_status=previous,
         to_status=target,
@@ -259,4 +289,22 @@ def sync_child_status_to_parent(*, child: Ticket, actor_subject: str = "") -> No
             "child_ticket_number": child.number,
             "child_status": child.status.code,
         },
+        custody_actor=CustodyActor.system(
+            "it-child-sync",
+            "IT child status synchronisation",
+        ),
+        custody_events=(
+            CustodyEventInput(
+                event_type="status_changed",
+                source_process="ticket.it_child.sync",
+                source_record_type="workflow_transition",
+                source_record_id=str(history.id),
+                previous_queue=queue_snapshot(parent.queue),
+                new_queue=queue_snapshot(parent.queue),
+                previous_status=status_snapshot(previous),
+                new_status=status_snapshot(target),
+                reason=f"IT child {child.number} returned: {child.status.name}",
+                occurred_at=history.occurred_at,
+            ),
+        ),
     )

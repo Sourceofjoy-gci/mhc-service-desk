@@ -9,7 +9,7 @@ from django.db import IntegrityError, connection
 from django.utils import timezone
 
 from apps.catalogue.models import RequestType
-from apps.tickets import services
+from apps.identity_access.models import User
 from apps.tickets.custody import (
     CustodyActor,
     CustodyEventInput,
@@ -18,7 +18,8 @@ from apps.tickets.custody import (
     record_custody_events,
     verify_custody_chain,
 )
-from apps.tickets.models import TicketCustodyEvent
+from apps.tickets.models import Ticket, TicketCustodyEvent
+from apps.workflow.models import Status
 
 pytestmark = pytest.mark.django_db
 
@@ -26,16 +27,17 @@ pytestmark = pytest.mark.django_db
 @pytest.fixture
 def ticket(basic_world):
     request_type = RequestType.objects.get(service=basic_world["gen_info"], code="HOURS")
-    return services.create_ticket(
+    return Ticket.objects.create(
+        number=f"OP-202607-{Ticket.objects.count() + 1:06d}",
         domain="operational",
         title="Custody test",
         description="",
+        status=Status.objects.get(domain="operational", code="new"),
         requester=basic_world["contact"],
         service=basic_world["gen_info"],
         request_type=request_type,
         office=basic_world["office"],
         channel="web",
-        actor_subject="creator-1",
     )
 
 
@@ -148,6 +150,22 @@ def test_record_custody_events_builds_a_verifiable_hash_chain(ticket):
     assert events[0].previous_hash == ""
     assert events[1].previous_hash == events[0].event_hash
     assert verify_custody_chain(ticket) is True
+
+
+def test_user_actor_uses_the_staff_subject_and_display_name():
+    from apps.tickets.custody import user_actor
+
+    staff = User(
+        username="staff-username",
+        keycloak_subject="staff-subject",
+        display_name="Staff Display",
+    )
+
+    actor = user_actor(staff)
+
+    assert actor.kind == "user"
+    assert actor.subject == "staff-subject"
+    assert actor.display_name == "Staff Display"
 
 
 def test_record_custody_events_appends_to_the_existing_hash_chain(ticket):

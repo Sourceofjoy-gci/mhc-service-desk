@@ -67,6 +67,17 @@ def test_create_it_child_records_link_and_parent_status(world):
     parent.refresh_from_db()
     assert parent.status.code == "waiting_it"
     assert parent.waiting_reason == "Waiting for IT"
+    child_event = child.custody_events.get()
+    parent_event = parent.custody_events.order_by("sequence").last()
+    assert child_event.event_type == "created"
+    assert child_event.actor_kind == "user"
+    assert child_event.actor_subject == world["actor"].keycloak_subject
+    assert child_event.source_process == "ticket.it_child.create"
+    assert child_event.new_status == {"code": "new", "label": "New"}
+    assert parent_event.event_type == "status_changed"
+    assert parent_event.previous_status == {"code": "new", "label": "New"}
+    assert parent_event.new_status == {"code": "waiting_it", "label": "Waiting for IT"}
+    assert parent_event.actor_subject == world["actor"].keycloak_subject
 
 
 def test_child_copies_only_approved_fields(world):
@@ -110,6 +121,13 @@ def test_child_resolution_syncs_parent_to_in_progress(world):
     parent.refresh_from_db()
     assert parent.status.code == "in_progress"
     assert parent.waiting_reason == ""
+    event = parent.custody_events.order_by("sequence").last()
+    assert event.event_type == "status_changed"
+    assert event.actor_kind == "system"
+    assert event.actor_subject == "it-child-sync"
+    assert event.source_process == "ticket.it_child.sync"
+    assert event.previous_status == {"code": "waiting_it", "label": "Waiting for IT"}
+    assert event.new_status == {"code": "in_progress", "label": "In Progress"}
 
 
 def test_it_child_material_mutations_have_canonical_event_pairs(world):

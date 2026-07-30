@@ -11,6 +11,10 @@ from typing import Any
 from django.db import transaction
 from django.utils import timezone
 
+from apps.identity_access.models import User
+from apps.organisations.models import ServiceLocation
+from apps.workflow.models import Status
+
 from .models import Ticket, TicketCustodyEvent
 
 
@@ -90,6 +94,25 @@ class CustodyStatus:
 
     def as_json(self) -> dict[str, str]:
         return {"code": self.code, "label": self.label}
+
+
+def status_snapshot(status: Status | None) -> CustodyStatus | None:
+    if status is None:
+        return None
+    return CustodyStatus(code=status.code, label=status.name)
+
+
+def queue_snapshot(queue: ServiceLocation | None) -> CustodyQueue | None:
+    if queue is None:
+        return None
+    return CustodyQueue(id=str(queue.id), label=queue.name)
+
+
+def user_actor(user: User) -> CustodyActor:
+    return CustodyActor.user(
+        subject=user.keycloak_subject,
+        display_name=user.display_name or user.username,
+    )
 
 
 @dataclass(frozen=True)

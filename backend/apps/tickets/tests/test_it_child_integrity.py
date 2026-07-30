@@ -175,6 +175,8 @@ def test_resolving_child_rolls_back_when_locked_parent_sync_fails(basic_world) -
     before_child_history = TransitionHistory.objects.filter(ticket=child).count()
     before_child_audits = AuditEvent.objects.filter(object_id=str(child.id)).count()
     before_child_outbox = OutboxEvent.objects.filter(aggregate_id=str(child.id)).count()
+    before_child_custody = child.custody_events.count()
+    before_parent_custody = parent.custody_events.count()
 
     with (
         patch(
@@ -202,3 +204,5 @@ def test_resolving_child_rolls_back_when_locked_parent_sync_fails(basic_world) -
     assert TransitionHistory.objects.filter(ticket=child).count() == before_child_history
     assert AuditEvent.objects.filter(object_id=str(child.id)).count() == before_child_audits
     assert OutboxEvent.objects.filter(aggregate_id=str(child.id)).count() == before_child_outbox
+    assert child.custody_events.count() == before_child_custody
+    assert parent.custody_events.count() == before_parent_custody

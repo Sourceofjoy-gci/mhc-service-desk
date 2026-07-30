@@ -6,14 +6,12 @@ Exercises ticket numbering, creation, and the workflow transition rules
 from __future__ import annotations
 
 import pytest
-from django.utils import timezone
 
 from apps.catalogue.models import RequestType, Service
 from apps.contacts.models import Contact
 from apps.identity_access.models import User
 from apps.organisations.models import Office, Region
 from apps.tickets import services
-from apps.tickets.models import Ticket
 from apps.workflow.models import Status, Transition
 from apps.workflow.shortcuts import seed_workflow_for_tests
 
@@ -87,6 +85,26 @@ def test_create_ticket_records_initial_status_history(basic_world):
     assert ticket.transition_history.count() == 1
     assert ticket.transition_history.first().from_status is None
     assert ticket.transition_history.first().to_status.code == "new"
+    event = ticket.custody_events.get()
+    assert event.sequence == 1
+    assert event.event_type == "created"
+    assert event.previous_status is None
+    assert event.new_status == {"code": "new", "label": "New"}
+    assert event.previous_queue is None
+    assert event.new_queue is None
+    assert event.actor_kind == "system"
+    assert event.source_process == "ticket.create"
+
+
+def assert_latest_transition_custody(updated, actor, expected_type):
+    event = updated.custody_events.order_by("sequence").last()
+    assert event is not None
+    assert event.event_type == expected_type
+    assert event.previous_status["code"] != event.new_status["code"]
+    assert event.actor_subject == actor.keycloak_subject
+    assert event.actor_kind == "user"
+    assert event.previous_queue is None
+    assert event.new_queue is None
 
 
 def test_valid_transition_succeeds(basic_world):
@@ -108,6 +126,8 @@ def test_valid_transition_succeeds(basic_world):
         to_status_code="triage",
     )
     assert ticket.status.code == "triage"
+    assert ticket.custody_events.count() == 2
+    assert_latest_transition_custody(ticket, actor, "status_changed")
 
 
 def test_invalid_transition_raises(basic_world):
@@ -220,7 +240,6 @@ def test_stale_transition_changes_nothing_and_records_nothing(basic_world):
 
 def test_role_restricted_transition_is_forbidden_without_mutation(basic_world):
     from apps.tickets.models import OutboxEvent
-    from apps.workflow.models import Transition
 
     actor = _actor("ops-agents")
     ticket = services.create_ticket(
@@ -261,7 +280,7 @@ def test_role_restricted_transition_is_forbidden_without_mutation(basic_world):
 def test_resolve_reopen_and_close_record_lifecycle_and_canonical_events(basic_world):
     from apps.audit.models import AuditEvent
     from apps.tickets.models import OutboxEvent
-    from apps.workflow.models import Status, Transition
+    from apps.workflow.models import Status
 
     actor = _actor("ops-agents")
     ticket = services.create_ticket(
@@ -353,6 +372,7 @@ def test_resolve_reopen_and_close_record_lifecycle_and_canonical_events(basic_wo
     assert reopen_event.payload["metadata"] == {
         "reason": "Requester supplied new information"
     }
+    assert_latest_transition_custody(ticket, actor, "reopened")
 
     Transition.objects.create(
         domain="operational",
@@ -367,6 +387,7 @@ def test_resolve_reopen_and_close_record_lifecycle_and_canonical_events(basic_wo
         to_status_code="closed",
     )
     assert ticket.closed_at is not None
+    assert_latest_transition_custody(ticket, actor, "closed")
 
 
 def test_issue_requester_token_returns_raw_once(basic_world):
@@ -544,7 +565,6 @@ def test_link_tickets_records_one_relationship_event_pair(basic_world):
 def test_problem_incident_relationship_uses_canonical_link_event(basic_world):
     from apps.audit.models import AuditEvent
     from apps.tickets.problem_change import ProblemManager
-    from apps.workflow.models import Status
 
     Status.objects.create(
         domain="it",
