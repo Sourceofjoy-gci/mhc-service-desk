@@ -78,6 +78,10 @@ def test_existing_custody_event_cannot_be_saved_or_deleted(ticket):
         TicketCustodyEvent.objects.filter(pk=event.pk).update(reason="rewritten")
     with pytest.raises(ValidationError, match="immutable"):
         TicketCustodyEvent.objects.filter(pk=event.pk).delete()
+    with pytest.raises(ValidationError, match="immutable"):
+        TicketCustodyEvent._base_manager.filter(pk=event.pk).update(reason="rewritten")
+    with pytest.raises(ValidationError, match="immutable"):
+        TicketCustodyEvent._base_manager.filter(pk=event.pk).delete()
 
 
 def test_ticket_custody_sequence_is_unique(ticket):

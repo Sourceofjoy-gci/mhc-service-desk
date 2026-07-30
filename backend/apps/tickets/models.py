@@ -197,6 +197,7 @@ class TicketCustodyEvent(models.Model):
     objects = ImmutableCustodyQuerySet.as_manager()
 
     class Meta:
+        base_manager_name = "objects"
         db_table = "ticket_custody_event"
         ordering = ("sequence", "id")
         constraints = [
