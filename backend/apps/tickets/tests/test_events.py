@@ -11,8 +11,9 @@ import pytest
 from apps.audit.models import AuditEvent
 from apps.catalogue.models import RequestType
 from apps.tickets import services
+from apps.tickets.custody import CustodyActor, CustodyEventInput
 from apps.tickets.events import record_ticket_event
-from apps.tickets.models import OutboxEvent, Ticket
+from apps.tickets.models import OutboxEvent, Ticket, TicketCustodyEvent
 
 pytestmark = pytest.mark.django_db
 
@@ -103,3 +104,31 @@ def test_record_ticket_event_normalizes_values_and_omits_unchanged_fields(ticket
         "next_action_at": "2026-07-27 10:30:00+00:00",
     }
     assert outbox.payload == audit.payload
+
+
+def test_record_ticket_event_rolls_back_audit_outbox_and_custody_together(ticket):
+    """A custody-write failure must leave none of the transaction's rows persisted."""
+    audit_count = AuditEvent.objects.filter(object_id=str(ticket.id)).count()
+    outbox_count = OutboxEvent.objects.filter(aggregate_id=str(ticket.id)).count()
+    custody_count = TicketCustodyEvent.objects.filter(ticket=ticket).count()
+
+    with patch(
+        "apps.tickets.custody.TicketCustodyEvent.objects.create",
+        side_effect=RuntimeError("custody unavailable"),
+    ):
+        with pytest.raises(RuntimeError, match="custody unavailable"):
+            record_ticket_event(
+                ticket=ticket,
+                actor_subject="agent-1",
+                action="ticket.created",
+                before={},
+                after={"status": "new"},
+                custody_actor=CustodyActor.user("agent-1", "Agent One"),
+                custody_events=(
+                    CustodyEventInput.created(source_process="ticket.create"),
+                ),
+            )
+
+    assert AuditEvent.objects.filter(object_id=str(ticket.id)).count() == audit_count
+    assert OutboxEvent.objects.filter(aggregate_id=str(ticket.id)).count() == outbox_count
+    assert TicketCustodyEvent.objects.filter(ticket=ticket).count() == custody_count

@@ -3,12 +3,15 @@ from __future__ import annotations
 
 import hashlib
 import json
+from collections.abc import Sequence
+from dataclasses import replace
 from typing import Any
 
 from django.db import transaction
 
 from apps.audit.models import AuditEvent
 
+from .custody import CustodyActor, CustodyEventInput, record_custody_events
 from .models import OutboxEvent, Ticket
 
 
@@ -37,8 +40,13 @@ def record_ticket_event(
     after: dict[str, Any],
     metadata: dict[str, Any] | None = None,
     ip_address: str | None = None,
+    custody_actor: CustodyActor | None = None,
+    custody_events: Sequence[CustodyEventInput] = (),
 ) -> tuple[AuditEvent, OutboxEvent]:
     """Write one matching audit/outbox pair for a material ticket mutation."""
+    if custody_events and custody_actor is None:
+        raise ValueError("custody_actor is required when custody_events are provided")
+
     changed_before, changed_after = _changed_values(before, after)
     raw_payload = {
         "ticket_number": ticket.number,
@@ -69,4 +77,21 @@ def record_ticket_event(
         event_type=action,
         payload=payload,
     )
+    if custody_events:
+        assert custody_actor is not None
+        custody_inputs = tuple(
+            replace(
+                custody_event,
+                source_record_type="audit_event",
+                source_record_id=str(audit.id),
+            )
+            if not custody_event.source_record_type and not custody_event.source_record_id
+            else custody_event
+            for custody_event in custody_events
+        )
+        record_custody_events(
+            ticket=ticket,
+            actor=custody_actor,
+            events=custody_inputs,
+        )
     return audit, outbox
