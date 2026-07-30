@@ -363,6 +363,90 @@ def test_resume_preserves_fractional_entitlement_across_slot_boundary_and_remaps
         tzinfo=UTC,
     )
 
+def test_resume_uses_frozen_microseconds_after_calendar_changes(basic_world):
+    """Recomputing a pause under edited calendar rules would lose entitlement."""
+    ticket = _ticket(basic_world)
+    instance = _instance(ticket)
+    started_at = datetime(2026, 7, 27, 6, 0, 0, 500000, tzinfo=UTC)
+    _set_resolution_escalation_threshold(instance, started_at=started_at)
+    paused_at = started_at + timedelta(minutes=2, microseconds=1)
+    resumed_at = datetime(2026, 7, 27, 10, 0, tzinfo=UTC)
+
+    with freeze_time(paused_at):
+        pause_sla(
+            instance=instance,
+            reason=SlaInstance.State.PAUSED_REQUESTER,
+        )
+
+    instance.refresh_from_db()
+    assert instance.remaining_business_microseconds == 479999999
+    calendar = instance.policy.calendar
+    calendar.timezone = "UTC"
+    calendar.holidays = ["2026-07-27"]
+    calendar.save(update_fields=["timezone", "holidays"])
+
+    with freeze_time(resumed_at):
+        resume_sla(instance=instance, reason="requester_replied")
+
+    instance.refresh_from_db()
+    assert instance.due_at == datetime(2026, 7, 28, 8, 7, 59, 999999, tzinfo=UTC)
+    assert instance.remaining_business_microseconds is None
+
+
+def test_resume_uses_frozen_microseconds_when_pause_histories_share_timestamp(
+    basic_world,
+):
+    """The current paused field, not UUID ordering, must determine entitlement."""
+    ticket = _ticket(basic_world)
+    instance = _instance(ticket)
+    started_at = datetime(2026, 7, 27, 6, 0, 0, 500000, tzinfo=UTC)
+    _set_resolution_escalation_threshold(instance, started_at=started_at)
+    paused_at = started_at + timedelta(minutes=2, microseconds=1)
+    remapped_at = paused_at + timedelta(minutes=1)
+    resumed_at = datetime(2026, 7, 27, 10, 0, tzinfo=UTC)
+
+    with freeze_time(paused_at):
+        pause_sla(
+            instance=instance,
+            reason=SlaInstance.State.PAUSED_REQUESTER,
+        )
+    with freeze_time(remapped_at):
+        pause_sla(
+            instance=instance,
+            reason=SlaInstance.State.PAUSED_INTERNAL,
+        )
+    SlaPauseHistory.objects.filter(instance=instance).update(at=remapped_at)
+
+    with freeze_time(resumed_at):
+        resume_sla(instance=instance, reason="internal_dependency_cleared")
+
+    instance.refresh_from_db()
+    assert instance.due_at == datetime(2026, 7, 27, 10, 7, 59, 999999, tzinfo=UTC)
+    assert instance.remaining_business_microseconds is None
+
+
+def test_resume_legacy_integer_entitlement_when_exact_field_is_null(basic_world):
+    """Legacy paused rows retain their persisted whole-second fallback."""
+    ticket = _ticket(basic_world)
+    instance = _instance(ticket, state=SlaInstance.State.PAUSED_REQUESTER)
+    instance.remaining_business_seconds = 120
+    instance.remaining_business_microseconds = None
+    instance.save(
+        update_fields=[
+            "remaining_business_seconds",
+            "remaining_business_microseconds",
+        ]
+    )
+    resumed_at = datetime(2026, 7, 27, 10, 0, tzinfo=UTC)
+
+    with freeze_time(resumed_at):
+        resume_sla(instance=instance, reason="legacy_resume")
+
+    instance.refresh_from_db()
+    assert instance.due_at == resumed_at + timedelta(minutes=2)
+    assert instance.remaining_business_microseconds is None
+
+
 def test_evaluator_rolls_back_escalation_when_custody_recording_fails(basic_world):
     """A custody failure must roll audit, outbox, and notification state back."""
     ticket = _ticket(basic_world)

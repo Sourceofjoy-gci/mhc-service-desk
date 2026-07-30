@@ -272,21 +272,6 @@ def _recover_legacy_remaining_business_seconds(instance: SlaInstance) -> int:
     )
 
 
-def _exact_remaining_business_microseconds(
-    instance: SlaInstance,
-) -> int | None:
-    if instance.remaining_business_seconds is None:
-        return None
-    paused_at = _first_current_pause_at(instance)
-    if paused_at is None:
-        return None
-    return _business_microseconds_between(
-        paused_at,
-        instance.due_at,
-        instance.policy.calendar,
-    )
-
-
 @transaction.atomic
 def pause_sla(
     *,
@@ -300,17 +285,26 @@ def pause_sla(
         .get(pk=instance.pk)
     )
     if instance.state == SlaInstance.State.ACTIVE:
-        instance.remaining_business_seconds = business_seconds_between(
+        remaining_microseconds = _business_microseconds_between(
             timezone.now(),
             instance.due_at,
             instance.policy.calendar,
         )
+        instance.remaining_business_microseconds = remaining_microseconds
+        instance.remaining_business_seconds = remaining_microseconds // 1_000_000
     elif instance.remaining_business_seconds is None:
         instance.remaining_business_seconds = (
             _recover_legacy_remaining_business_seconds(instance)
         )
     instance.state = reason
-    instance.save(update_fields=["state", "remaining_business_seconds", "updated_at"])
+    instance.save(
+        update_fields=[
+            "state",
+            "remaining_business_seconds",
+            "remaining_business_microseconds",
+            "updated_at",
+        ]
+    )
     SlaPauseHistory.objects.create(
         instance=instance,
         state=reason,
@@ -329,7 +323,7 @@ def resume_sla(*, instance: SlaInstance, reason: str, actor_subject: str = "") -
     )
     if instance.state == "active":
         return instance
-    remaining_microseconds = _exact_remaining_business_microseconds(instance)
+    remaining_microseconds = instance.remaining_business_microseconds
     if remaining_microseconds is None:
         remaining_business_seconds = instance.remaining_business_seconds
         if remaining_business_seconds is None:
@@ -347,11 +341,15 @@ def resume_sla(*, instance: SlaInstance, reason: str, actor_subject: str = "") -
     instance.remaining_business_seconds = (
         0 if remaining_microseconds == 0 else None
     )
+    instance.remaining_business_microseconds = (
+        0 if remaining_microseconds == 0 else None
+    )
     instance.save(
         update_fields=[
             "state",
             "due_at",
             "remaining_business_seconds",
+            "remaining_business_microseconds",
             "updated_at",
         ]
     )
