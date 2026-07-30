@@ -1,4 +1,5 @@
 """Backfill authoritative legacy custody history and protect it in PostgreSQL."""
+# ruff: noqa: S608 -- dynamic DDL uses a backend-quoted introspected constraint name.
 
 import hashlib
 import json
@@ -297,7 +298,7 @@ def backfill_ticket_custody(apps, schema_editor):
 
         transitions = context["transitions_by_ticket"].get(ticket.pk, [])
         for transition in transitions:
-            if transition.to_status.is_initial:
+            if transition.from_status_id is None:
                 continue
             event = _empty_event(
                 event_type="reopened" if transition.to_status.code == "reopened" else "closed" if transition.to_status.code == "closed" else "status_changed",

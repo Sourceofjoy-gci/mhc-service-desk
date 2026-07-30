@@ -10,6 +10,7 @@ from django.utils import timezone
 
 from apps.catalogue.models import RequestType
 from apps.identity_access.models import User
+from apps.tickets import custody
 from apps.tickets.custody import (
     CustodyActor,
     CustodyEventInput,
@@ -149,6 +150,52 @@ def test_record_custody_events_builds_a_verifiable_hash_chain(ticket):
     assert [event.sequence for event in events] == [1, 2]
     assert events[0].previous_hash == ""
     assert events[1].previous_hash == events[0].event_hash
+    assert verify_custody_chain(ticket) is True
+
+
+def test_timestamp_less_custody_inputs_share_one_default_timestamp_and_keep_explicit_values(
+    ticket, monkeypatch
+):
+    """A multi-event mutation must use one coherent default custody instant."""
+    default_at = datetime(2026, 7, 30, 10, 15, 30, 123456, tzinfo=UTC)
+    unused_later_at = datetime(2026, 7, 30, 10, 15, 30, 123457, tzinfo=UTC)
+    explicit_at = datetime(2026, 7, 30, 10, 16, tzinfo=UTC)
+    clock_values = iter((default_at, unused_later_at))
+    monkeypatch.setattr(custody.timezone, "now", lambda: next(clock_values))
+
+    events = record_custody_events(
+        ticket=ticket,
+        actor=CustodyActor.user(subject="agent-1", display_name="Agent One"),
+        events=(
+            CustodyEventInput.created(
+                source_process="ticket.create",
+                source_record_type="test",
+                source_record_id="source-1",
+            ),
+            CustodyEventInput(
+                event_type="queue_changed",
+                source_process="ticket.routing",
+                source_record_type="test",
+                source_record_id="source-2",
+                occurred_at=explicit_at,
+            ),
+            CustodyEventInput(
+                event_type="status_changed",
+                source_process="ticket.transition",
+                source_record_type="test",
+                source_record_id="source-3",
+            ),
+        ),
+    )
+
+    assert [event.sequence for event in events] == [1, 2, 3]
+    assert [event.source_record_id for event in events] == ["source-1", "source-2", "source-3"]
+    assert [event.occurred_at for event in events] == [default_at, explicit_at, default_at]
+    assert [event.previous_hash for event in events] == [
+        "",
+        events[0].event_hash,
+        events[1].event_hash,
+    ]
     assert verify_custody_chain(ticket) is True
 
 
@@ -358,6 +405,7 @@ def test_postgresql_rejects_raw_custody_updates_and_deletes_but_allows_insert(ti
     with pytest.raises(DatabaseError, match="immutable"):
         with connection.cursor() as cursor:
             cursor.execute("DELETE FROM ticket_custody_event WHERE id = %s", [event.id])
+
     def delete_with_old_guc() -> None:
         with transaction.atomic(), connection.cursor() as cursor:
             cursor.execute("SET LOCAL mhc.allow_ticket_custody_delete = 'on'")

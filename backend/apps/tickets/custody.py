@@ -1,4 +1,5 @@
 """Canonical append-only custody records for ticket lifecycle changes."""
+
 from __future__ import annotations
 
 import hashlib
@@ -246,10 +247,11 @@ def record_custody_events(
     sequence = last_event.sequence if last_event else 0
     previous_hash = last_event.event_hash if last_event else ""
     recorded: list[TicketCustodyEvent] = []
+    default_occurred_at = _normalize_occurred_at(timezone.now())
 
     for event_input in events:
         sequence += 1
-        occurred_at = _normalize_occurred_at(event_input.occurred_at or timezone.now())
+        occurred_at = _normalize_occurred_at(event_input.occurred_at or default_occurred_at)
         previous_owner = _party_snapshot(event_input.previous_owner)
         new_owner = _party_snapshot(event_input.new_owner)
         previous_queue = _snapshot(event_input.previous_queue)

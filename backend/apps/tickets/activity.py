@@ -112,6 +112,9 @@ def build_ticket_activity(
         for event in custody_events
         if event.source_record_type == "workflow_transition" and event.source_record_id
     }
+    has_created_custody = any(
+        event.event_type == TicketCustodyEvent.EventType.CREATED for event in custody_events
+    )
     custody_audit_fields: dict[str, set[str]] = {}
     for custody_event in custody_events:
         if custody_event.source_record_type != "audit_event" or not custody_event.source_record_id:
@@ -122,7 +125,10 @@ def build_ticket_activity(
         if custody_event.previous_queue is not None or custody_event.new_queue is not None:
             represented_fields.add("queue")
     transitions = [
-        transition for transition in transitions if str(transition.id) not in custody_transition_ids
+        transition
+        for transition in transitions
+        if str(transition.id) not in custody_transition_ids
+        and not (has_created_custody and transition.from_status_id is None)
     ]
     supplied_relationship_ids = (
         {relationship.id for relationship in relationships} if relationships is not None else None
@@ -224,14 +230,36 @@ def build_ticket_activity(
             "display_name": event.actor_display_name,
         }
 
+    def custody_owner_presentation(
+        owner: dict[str, object] | None,
+        designations: list[str],
+        team_labels: list[str],
+    ) -> dict[str, object] | None:
+        """Recombine the immutable owner identity and presentation snapshots."""
+        if owner is None:
+            return None
+        return {
+            **owner,
+            "designations": list(designations),
+            "team_labels": list(team_labels),
+        }
+
     def custody_payload(event: TicketCustodyEvent) -> dict[str, object]:
         """Expose full immutable custody facts without looking up mutable rows."""
         payload: dict[str, object] = {
             "action": event.event_type,
             "from": (event.previous_status.get("code") if event.previous_status else None),
             "to": event.new_status.get("code") if event.new_status else None,
-            "previous_owner": event.previous_owner,
-            "new_owner": event.new_owner,
+            "previous_owner": custody_owner_presentation(
+                event.previous_owner,
+                event.previous_designations,
+                event.previous_team_labels,
+            ),
+            "new_owner": custody_owner_presentation(
+                event.new_owner,
+                event.new_designations,
+                event.new_team_labels,
+            ),
             "previous_queue": event.previous_queue,
             "new_queue": event.new_queue,
             "previous_status": event.previous_status,

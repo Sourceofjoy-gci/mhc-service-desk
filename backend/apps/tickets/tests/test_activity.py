@@ -531,7 +531,74 @@ def test_linked_owner_custody_redacts_only_duplicate_legacy_assignee(basic_world
         "id": "agent-id",
         "subject": "snapshot-agent",
         "display_name": "Snapshot Agent",
+        "designations": [],
+        "team_labels": [],
     }
+
+
+def test_custody_activity_recombines_owner_presentation_snapshots_without_inventing_null_owners(
+    basic_world,
+):
+    """Dedicated custody label arrays must return with their respective owner snapshots."""
+    ticket = _ticket(basic_world)
+    previous_owner = CustodyParty(
+        id="previous-agent",
+        subject="previous-subject",
+        display_name="Previous Agent",
+        designations=("Estate Examiner", "Senior Examiner"),
+        team_labels=("Estates",),
+    )
+    new_owner = CustodyParty(
+        id="new-agent",
+        subject="new-subject",
+        display_name="New Agent",
+        designations=("Assistant Master",),
+        team_labels=("Office Leadership", "Operational"),
+    )
+    assignment, created = record_custody_events(
+        ticket=ticket,
+        actor=CustodyActor.user("supervisor", "Supervisor"),
+        events=(
+            CustodyEventInput(
+                event_type=TicketCustodyEvent.EventType.REASSIGNED,
+                source_process="ticket.assignment",
+                previous_owner=previous_owner,
+                new_owner=new_owner,
+            ),
+            CustodyEventInput.created(
+                source_process="ticket.create",
+            ),
+        ),
+    )
+
+    activity = build_ticket_activity(ticket)
+    assignment_payload = next(
+        item["payload"] for item in activity if item["id"] == f"custody:{assignment.id}"
+    )
+    created_payload = next(
+        item["payload"] for item in activity if item["id"] == f"custody:{created.id}"
+    )
+
+    assert assignment_payload["previous_owner"] == {
+        "id": "previous-agent",
+        "subject": "previous-subject",
+        "display_name": "Previous Agent",
+        "designations": ["Estate Examiner", "Senior Examiner"],
+        "team_labels": ["Estates"],
+    }
+    assert assignment_payload["new_owner"] == {
+        "id": "new-agent",
+        "subject": "new-subject",
+        "display_name": "New Agent",
+        "designations": ["Assistant Master"],
+        "team_labels": ["Office Leadership", "Operational"],
+    }
+    assert created_payload["previous_owner"] is None
+    assert created_payload["new_owner"] is None
+
+    assignment_payload["previous_owner"]["designations"].append("Mutated read result")
+    assignment.refresh_from_db()
+    assert assignment.previous_designations == ["Estate Examiner", "Senior Examiner"]
 
 
 def test_linked_queue_custody_redacts_only_duplicate_legacy_queue(basic_world):

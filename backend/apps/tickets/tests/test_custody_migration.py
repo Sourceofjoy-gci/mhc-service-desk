@@ -12,6 +12,7 @@ from apps.audit.models import AuditEvent
 from apps.catalogue.models import RequestType
 from apps.identity_access.models import User
 from apps.organisations.models import ServiceLocation
+from apps.tickets.activity import build_ticket_activity
 from apps.tickets.custody import verify_custody_chain
 from apps.tickets.models import Ticket
 from apps.workflow.models import Status, TransitionHistory
@@ -144,6 +145,79 @@ def test_backfill_reconstructs_deterministic_verifiable_history(basic_world):
     assert reassigned.previous_owner["id"] == str(first.id)
     assert reassigned.new_owner["id"] == str(second.id)
     assert closed_event.new_status == {"code": "closed", "label": "Closed"}
+    assert verify_custody_chain(ticket) is True
+
+
+def test_backfill_and_activity_keep_later_transition_to_an_initial_status(basic_world):
+    """Only the null-from creation transition may be represented by the created custody event."""
+    backfill_ticket_custody = import_module(
+        "apps.tickets.migrations.0006_backfill_ticket_custody"
+    ).backfill_ticket_custody
+    ticket = _ticket(basic_world, number="OP-LEGACY-CREATION-DEDUPE")
+    created_at = datetime(2025, 1, 2, 8, 0, tzinfo=UTC)
+    Ticket.objects.filter(pk=ticket.pk).update(created_at=created_at)
+    _audit(
+        ticket=ticket,
+        action="ticket.created",
+        actor_subject="intake-worker",
+        before={},
+        after={},
+        occurred_at=created_at,
+    )
+    initial = Status.objects.get(domain="operational", code="new")
+    triage = Status.objects.get(domain="operational", code="triage")
+    closed = Status.objects.get(domain="operational", code="closed")
+    creation = TransitionHistory.objects.create(
+        ticket=ticket,
+        from_status=None,
+        to_status=initial,
+        actor_subject="intake-worker",
+    )
+    later_to_initial = TransitionHistory.objects.create(
+        ticket=ticket,
+        from_status=triage,
+        to_status=initial,
+        actor_subject="agent-one",
+        reason="Returned to intake",
+    )
+    later_closed = TransitionHistory.objects.create(
+        ticket=ticket,
+        from_status=initial,
+        to_status=closed,
+        actor_subject="agent-one",
+        reason="Completed",
+    )
+    TransitionHistory.objects.filter(pk=creation.pk).update(occurred_at=created_at)
+    TransitionHistory.objects.filter(pk=later_to_initial.pk).update(
+        occurred_at=created_at + timedelta(minutes=1)
+    )
+    TransitionHistory.objects.filter(pk=later_closed.pk).update(
+        occurred_at=created_at + timedelta(minutes=2)
+    )
+
+    from django.apps import apps as django_apps
+
+    backfill_ticket_custody(django_apps, None)
+
+    custody_events = list(ticket.custody_events.all())
+    activity = build_ticket_activity(ticket)
+
+    assert [event.event_type for event in custody_events] == ["created", "status_changed", "closed"]
+    assert [event.source_record_id for event in custody_events] == [
+        str(ticket.custody_events.get(event_type="created").source_record_id),
+        str(later_to_initial.id),
+        str(later_closed.id),
+    ]
+    assert [
+        (item["type"], item["payload"]["from"], item["payload"]["to"])
+        for item in activity
+        if item["type"] in {"custody_event", "status_transition"}
+    ] == [
+        ("custody_event", None, "new"),
+        ("status_transition", "triage", "new"),
+        ("status_transition", "new", "closed"),
+    ]
+    assert not [item for item in activity if item["id"] == f"transition:{creation.id}"]
     assert verify_custody_chain(ticket) is True
 
 
