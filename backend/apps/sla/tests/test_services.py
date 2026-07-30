@@ -447,6 +447,88 @@ def test_resume_legacy_integer_entitlement_when_exact_field_is_null(basic_world)
     assert instance.remaining_business_microseconds is None
 
 
+def test_resume_recovers_legacy_pause_at_same_instant_as_resume(basic_world):
+    """A same-instant post-resume pause must not disappear from legacy recovery."""
+    ticket = _ticket(basic_world)
+    instance = _instance(ticket)
+    at = datetime(2026, 7, 27, 10, 0, tzinfo=UTC)
+    instance.due_at = at + timedelta(hours=1)
+    instance.save(update_fields=["due_at"])
+
+    with freeze_time(at):
+        pause_sla(instance=instance, reason=SlaInstance.State.PAUSED_REQUESTER)
+        resume_sla(instance=instance, reason="requester_replied")
+        pause_sla(instance=instance, reason=SlaInstance.State.PAUSED_INTERNAL)
+    SlaInstance.objects.filter(pk=instance.pk).update(
+        remaining_business_microseconds=None,
+        remaining_business_seconds=None,
+    )
+
+    with freeze_time(at):
+        resume_sla(instance=instance, reason="legacy_retry")
+
+    instance.refresh_from_db()
+    assert instance.due_at == at + timedelta(hours=1)
+
+
+def test_resume_recovers_suspicious_legacy_zero_after_current_pause(basic_world):
+    """A historical zero cannot be trusted when the persisted deadline is later."""
+    ticket = _ticket(basic_world)
+    instance = _instance(ticket, state=SlaInstance.State.PAUSED_REQUESTER)
+    at = datetime(2026, 7, 27, 10, 0, tzinfo=UTC)
+    instance.due_at = at + timedelta(hours=1)
+    instance.remaining_business_microseconds = None
+    instance.remaining_business_seconds = 0
+    instance.save(
+        update_fields=[
+            "due_at",
+            "remaining_business_microseconds",
+            "remaining_business_seconds",
+        ]
+    )
+    SlaPauseHistory.objects.create(
+        instance=instance,
+        state=SlaInstance.State.ACTIVE,
+        reason="same_instant_resume",
+    )
+    SlaPauseHistory.objects.create(
+        instance=instance,
+        state=SlaInstance.State.PAUSED_REQUESTER,
+        reason="same_instant_pause",
+    )
+    SlaPauseHistory.objects.filter(instance=instance).update(at=at)
+
+    with freeze_time(at):
+        resume_sla(instance=instance, reason="legacy_retry")
+
+    instance.refresh_from_db()
+    assert instance.due_at == at + timedelta(hours=1)
+
+
+def test_restart_resolution_clears_frozen_pause_entitlement(basic_world):
+    """A reopened resolution SLA must not carry a prior pause's frozen clock."""
+    ticket = _ticket(basic_world, status_code="reopened")
+    reopened_at = datetime(2026, 7, 27, 10, 0, tzinfo=UTC)
+    ticket.reopened_at = reopened_at
+    ticket.save(update_fields=["reopened_at"])
+    instance = _instance(ticket, state=SlaInstance.State.PAUSED_REQUESTER)
+    instance.remaining_business_seconds = 120
+    instance.remaining_business_microseconds = 120000001
+    instance.save(
+        update_fields=[
+            "remaining_business_seconds",
+            "remaining_business_microseconds",
+        ]
+    )
+
+    restarted = restart_resolution_sla(ticket=ticket, at=reopened_at)
+
+    assert restarted is not None
+    restarted.refresh_from_db()
+    assert restarted.remaining_business_seconds is None
+    assert restarted.remaining_business_microseconds is None
+
+
 def test_evaluator_rolls_back_escalation_when_custody_recording_fails(basic_world):
     """A custody failure must roll audit, outbox, and notification state back."""
     ticket = _ticket(basic_world)

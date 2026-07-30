@@ -253,7 +253,7 @@ def _first_current_pause_at(instance: SlaInstance) -> datetime | None:
     )
     current_pauses = histories.filter(state__in=PAUSED_SLA_STATES)
     if last_resumed_at is not None:
-        current_pauses = current_pauses.filter(at__gt=last_resumed_at)
+        current_pauses = current_pauses.filter(at__gte=last_resumed_at)
     return current_pauses.order_by("at", "id").values_list("at", flat=True).first()
 
 
@@ -270,6 +270,18 @@ def _recover_legacy_remaining_business_seconds(instance: SlaInstance) -> int:
             ).total_seconds()
         ),
     )
+
+
+def _legacy_remaining_business_seconds(instance: SlaInstance) -> int:
+    remaining = instance.remaining_business_seconds
+    if remaining is None:
+        return _recover_legacy_remaining_business_seconds(instance)
+    if remaining != 0 or instance.state not in PAUSED_SLA_STATES:
+        return remaining
+    paused_at = _first_current_pause_at(instance)
+    if paused_at is None or instance.due_at.astimezone(UTC) <= paused_at.astimezone(UTC):
+        return remaining
+    return _recover_legacy_remaining_business_seconds(instance)
 
 
 @transaction.atomic
@@ -325,11 +337,7 @@ def resume_sla(*, instance: SlaInstance, reason: str, actor_subject: str = "") -
         return instance
     remaining_microseconds = instance.remaining_business_microseconds
     if remaining_microseconds is None:
-        remaining_business_seconds = instance.remaining_business_seconds
-        if remaining_business_seconds is None:
-            remaining_business_seconds = _recover_legacy_remaining_business_seconds(
-                instance
-            )
+        remaining_business_seconds = _legacy_remaining_business_seconds(instance)
         remaining_microseconds = remaining_business_seconds * 1_000_000
     if remaining_microseconds is not None:
         instance.due_at = _add_business_microseconds(
@@ -410,7 +418,8 @@ def restart_resolution_sla(*, ticket: Ticket, at: datetime) -> SlaInstance | Non
         .order_by("created_at", "id")
         .first()
     )
-    if instance is None:
+    creating = instance is None
+    if creating:
         policy = SlaPolicy.objects.select_related("calendar").filter(
             domain=ticket.domain,
             priority=ticket.priority,
@@ -429,13 +438,33 @@ def restart_resolution_sla(*, ticket: Ticket, at: datetime) -> SlaInstance | Non
     instance.state = SlaInstance.State.ACTIVE
     instance.consumed_business_seconds = 0
     instance.remaining_business_seconds = None
+    instance.remaining_business_microseconds = None
     instance.completed_at = None
     instance.breached_at = None
     instance.breach_reason = ""
     instance.last_evaluated_at = None
     instance.warn_notified_at = None
     instance.escalation_notified_at = None
-    instance.save()
+    if creating:
+        instance.save()
+    else:
+        instance.save(
+            update_fields=[
+                "started_at",
+                "due_at",
+                "state",
+                "consumed_business_seconds",
+                "remaining_business_seconds",
+                "remaining_business_microseconds",
+                "completed_at",
+                "breached_at",
+                "breach_reason",
+                "last_evaluated_at",
+                "warn_notified_at",
+                "escalation_notified_at",
+                "updated_at",
+            ]
+        )
     return instance
 
 
