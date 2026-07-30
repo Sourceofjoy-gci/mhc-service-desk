@@ -1,6 +1,7 @@
 """Tests for the immutable internal ticket-custody ledger."""
 
-from datetime import datetime
+from datetime import UTC, datetime
+from zoneinfo import ZoneInfo
 
 import pytest
 from django.core.exceptions import ValidationError
@@ -192,6 +193,52 @@ def test_naive_custody_timestamp_is_normalized_before_hashing_and_persistence(ti
 
     assert timezone.is_aware(event.occurred_at)
     assert verify_custody_chain(ticket) is True
+
+
+@pytest.mark.parametrize(
+    ("occurred_at", "expected_utc"),
+    [
+        (
+            datetime(2026, 7, 30, 10, 15, 30, 123456),
+            datetime(2026, 7, 30, 10, 15, 30, 123456, tzinfo=UTC),
+        ),
+        (
+            datetime(
+                2026,
+                7,
+                30,
+                12,
+                15,
+                30,
+                123456,
+                tzinfo=ZoneInfo("Africa/Mbabane"),
+            ),
+            datetime(2026, 7, 30, 10, 15, 30, 123456, tzinfo=UTC),
+        ),
+    ],
+)
+def test_custody_input_serialization_matches_reloaded_utc_timestamp(
+    ticket,
+    occurred_at: datetime,
+    expected_utc: datetime,
+):
+    """Canonical input JSON must encode the instant persisted by the custody writer."""
+    custody_input = CustodyEventInput.created(
+        source_process="ticket.create",
+        occurred_at=occurred_at,
+    )
+
+    event = record_custody_events(
+        ticket=ticket,
+        actor=CustodyActor.user(subject="agent-1", display_name="Agent One"),
+        events=(custody_input,),
+    )[0]
+    event.refresh_from_db()
+
+    expected_serialized = "2026-07-30T10:15:30.123456Z"
+    assert custody_input.as_json()["occurred_at"] == expected_serialized
+    assert event.occurred_at == expected_utc
+    assert event.occurred_at.strftime("%Y-%m-%dT%H:%M:%S.%fZ") == expected_serialized
 
 
 def _two_event_chain(ticket) -> list[TicketCustodyEvent]:

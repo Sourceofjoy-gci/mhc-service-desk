@@ -14,16 +14,16 @@ from django.utils import timezone
 from .models import Ticket, TicketCustodyEvent
 
 
-def _utc_timestamp(value: datetime) -> str:
-    """Return the ledger's stable, six-place UTC time representation."""
-    return value.astimezone(UTC).strftime("%Y-%m-%dT%H:%M:%S.%fZ")
-
-
 def _normalize_occurred_at(value: datetime) -> datetime:
     """Make a supplied timestamp safe to persist and hash as the same instant."""
     if timezone.is_naive(value):
         return timezone.make_aware(value, UTC)
     return value.astimezone(UTC)
+
+
+def _utc_timestamp(value: datetime) -> str:
+    """Return the ledger's stable, six-place UTC time representation."""
+    return _normalize_occurred_at(value).strftime("%Y-%m-%dT%H:%M:%S.%fZ")
 
 
 @dataclass(frozen=True)
