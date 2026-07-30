@@ -1,4 +1,5 @@
 """Unified staff activity read-model tests."""
+
 from __future__ import annotations
 
 from datetime import timedelta
@@ -21,6 +22,7 @@ from apps.tickets.api import TicketDetailSerializer
 from apps.tickets.custody import (
     CustodyActor,
     CustodyEventInput,
+    CustodyParty,
     CustodyQueue,
     CustodyStatus,
     record_custody_events,
@@ -32,9 +34,7 @@ pytestmark = pytest.mark.django_db
 
 
 def _ticket(basic_world, *, domain="operational") -> Ticket:
-    service = (
-        basic_world["gen_info"] if domain == "operational" else basic_world["it_inc"]
-    )
+    service = basic_world["gen_info"] if domain == "operational" else basic_world["it_inc"]
     return Ticket.objects.create(
         number=f"{domain[:2].upper()}-202607-{Ticket.objects.count() + 993001:06d}",
         domain=domain,
@@ -81,9 +81,7 @@ def _seed_activity(basic_world):
         author_subject="agent-1",
         body="Internal investigation detail",
     )
-    TicketNote.objects.filter(id=note.id).update(
-        created_at=start + timedelta(minutes=1)
-    )
+    TicketNote.objects.filter(id=note.id).update(created_at=start + timedelta(minutes=1))
     note.refresh_from_db()
 
     transition = TransitionHistory.objects.create(
@@ -109,9 +107,7 @@ def _seed_activity(basic_world):
         },
         payload_hash="a" * 64,
     )
-    AuditEvent.objects.filter(id=audit.id).update(
-        occurred_at=start + timedelta(minutes=3)
-    )
+    AuditEvent.objects.filter(id=audit.id).update(occurred_at=start + timedelta(minutes=3))
     audit.refresh_from_db()
 
     attachment = Attachment.objects.create(
@@ -124,9 +120,7 @@ def _seed_activity(basic_world):
         scan_status="clean",
         uploaded_by_subject="agent-1",
     )
-    Attachment.objects.filter(id=attachment.id).update(
-        uploaded_at=start + timedelta(minutes=4)
-    )
+    Attachment.objects.filter(id=attachment.id).update(uploaded_at=start + timedelta(minutes=4))
     attachment.refresh_from_db()
 
     relationship = TicketLink.objects.create(
@@ -134,17 +128,13 @@ def _seed_activity(basic_world):
         to_ticket=target,
         kind="related",
     )
-    TicketLink.objects.filter(id=relationship.id).update(
-        created_at=start + timedelta(minutes=5)
-    )
+    TicketLink.objects.filter(id=relationship.id).update(created_at=start + timedelta(minutes=5))
     relationship.refresh_from_db()
     return ticket, message, note, transition, audit, attachment, relationship
 
 
 def test_activity_is_stable_typed_chronological_and_deduplicated(basic_world):
-    ticket, message, note, transition, audit, attachment, relationship = _seed_activity(
-        basic_world
-    )
+    ticket, message, note, transition, audit, attachment, relationship = _seed_activity(basic_world)
     viewer = User.objects.get(keycloak_subject="agent-1")
     viewer._groups = ["ops-agents"]
     request = Request(APIRequestFactory().get(f"/tickets/{ticket.number}/activity/"))
@@ -188,10 +178,14 @@ def test_activity_is_stable_typed_chronological_and_deduplicated(basic_world):
         "internal",
         "internal",
     ]
-    assert all(item["actor"] == {
-        "subject": "agent-1",
-        "display_name": "Agent One",
-    } for item in activity[:-1])
+    assert all(
+        item["actor"]
+        == {
+            "subject": "agent-1",
+            "display_name": "Agent One",
+        }
+        for item in activity[:-1]
+    )
     assert activity[-1]["actor"] is None
     assert activity[0]["payload"]["body_text"] == "Requester-visible update"
     assert activity[1]["payload"] == {"body": "Internal investigation detail"}
@@ -286,9 +280,7 @@ def _seed_custody_activity(basic_world):
         },
         payload_hash="c" * 64,
     )
-    AuditEvent.objects.filter(pk=mixed_audit.pk).update(
-        occurred_at=start + timedelta(minutes=5)
-    )
+    AuditEvent.objects.filter(pk=mixed_audit.pk).update(occurred_at=start + timedelta(minutes=5))
     mixed_audit.refresh_from_db()
 
     actor = CustodyActor.user("custody-agent", "Custody Snapshot")
@@ -301,7 +293,11 @@ def _seed_custody_activity(basic_world):
                 source_process="ticket.assignment",
                 source_record_type="audit_event",
                 source_record_id=str(mixed_audit.id),
-                new_owner=None,
+                new_owner=CustodyParty(
+                    id="agent-id",
+                    subject="custody-agent",
+                    display_name="Custody Snapshot",
+                ),
                 occurred_at=start + timedelta(minutes=4),
             ),
             CustodyEventInput(
@@ -368,22 +364,25 @@ def test_activity_merges_custody_into_one_categorised_deduplicated_stream(basic_
         "workflow",
         "custody",
     }
-    assert [
-        item["payload"]["action"]
-        for item in activity
-        if item["type"] == "custody_event"
-    ] == ["created", "assigned", "queue_changed", "escalated"]
-    assert len(
-        [
-            item
-            for item in activity
-            if item["type"] == "status_transition"
-            and item["payload"]["to"] == "closed"
-        ]
-    ) == 1
-    assert not {
-        f"transition:{history.id}" for history in status_histories
-    } & {item["id"] for item in activity}
+    assert [item["payload"]["action"] for item in activity if item["type"] == "custody_event"] == [
+        "created",
+        "assigned",
+        "queue_changed",
+        "escalated",
+    ]
+    assert (
+        len(
+            [
+                item
+                for item in activity
+                if item["type"] == "status_transition" and item["payload"]["to"] == "closed"
+            ]
+        )
+        == 1
+    )
+    assert not {f"transition:{history.id}" for history in status_histories} & {
+        item["id"] for item in activity
+    }
 
     custody_items = [item for item in activity if item["id"].startswith("custody:")]
     required_payload_fields = {
@@ -397,22 +396,142 @@ def test_activity_merges_custody_into_one_categorised_deduplicated_stream(basic_
     }
     assert all(required_payload_fields <= item["payload"].keys() for item in custody_items)
     assert all(
-        item["actor"] == {
+        item["actor"]
+        == {
             "subject": "custody-agent",
             "display_name": "Custody Snapshot",
         }
         for item in custody_items
         if item["payload"]["action"] != "created"
     )
+    custody_by_action = {item["payload"]["action"]: item["payload"] for item in custody_items}
+    assert custody_by_action["created"].get("previous_owner") is None
+    assert custody_by_action["created"].get("new_owner") is None
+    assert custody_by_action["created"].get("previous_queue") is None
+    assert custody_by_action["created"].get("new_queue") is None
+    assert custody_by_action["created"].get("previous_status") is None
+    assert custody_by_action["escalated"].get("previous_owner") is None
+    assert custody_by_action["escalated"].get("new_owner") is None
+    assert custody_by_action["escalated"].get("previous_queue") is None
+    assert custody_by_action["escalated"].get("new_queue") is None
+    assert custody_by_action["escalated"].get("previous_status") is None
+    assert custody_by_action["escalated"].get("new_status") is None
     assert [item["payload"] for item in activity if item["id"] == f"audit:{mixed_audit.id}"] == [
         {"before": {"team": "Intake"}, "after": {"team": "Estates"}}
     ]
-    assert [item["visibility"] for item in activity if item["type"] == "message"] == [
-        "requester"
-    ]
+    assert [item["visibility"] for item in activity if item["type"] == "message"] == ["requester"]
     assert [item["visibility"] for item in activity if item["type"] == "internal_note"] == [
         "internal"
     ]
+
+
+def _activity_with_linked_work_state_custody(
+    basic_world,
+    *,
+    before: dict[str, object],
+    after: dict[str, object],
+    custody_event: CustodyEventInput,
+):
+    ticket = _ticket(basic_world)
+    audit = AuditEvent.objects.create(
+        actor_subject="legacy-agent",
+        action="ticket.work_state.changed",
+        object_type="ticket",
+        object_id=str(ticket.id),
+        payload={"before": before, "after": after},
+        payload_hash="d" * 64,
+    )
+    record_custody_events(
+        ticket=ticket,
+        actor=CustodyActor.user("snapshot-agent", "Snapshot Agent"),
+        events=(
+            CustodyEventInput(
+                event_type=custody_event.event_type,
+                source_process=custody_event.source_process,
+                source_record_type="audit_event",
+                source_record_id=str(audit.id),
+                previous_owner=custody_event.previous_owner,
+                new_owner=custody_event.new_owner,
+                previous_queue=custody_event.previous_queue,
+                new_queue=custody_event.new_queue,
+                previous_status=custody_event.previous_status,
+                new_status=custody_event.new_status,
+                reason=custody_event.reason,
+            ),
+        ),
+    )
+    return build_ticket_activity(ticket)
+
+
+def test_linked_custody_without_owner_snapshot_keeps_legacy_assignee(basic_world):
+    """A null custody owner cannot replace the only recorded assignment fact."""
+    activity = _activity_with_linked_work_state_custody(
+        basic_world,
+        before={"assignee": None, "team": "Intake"},
+        after={"assignee": "agent-id", "team": "Estates"},
+        custody_event=CustodyEventInput(
+            event_type=TicketCustodyEvent.EventType.ASSIGNED,
+            source_process="ticket.assignment",
+        ),
+    )
+
+    work_state = next(item for item in activity if item["type"] == "work_state")
+
+    assert work_state["payload"] == {
+        "before": {"assignee": None, "team": "Intake"},
+        "after": {"assignee": "agent-id", "team": "Estates"},
+    }
+
+
+def test_linked_custody_without_queue_snapshot_keeps_legacy_queue(basic_world):
+    """A null custody queue cannot replace the only recorded routing fact."""
+    activity = _activity_with_linked_work_state_custody(
+        basic_world,
+        before={"queue": None, "team": "Intake"},
+        after={"queue": "queue-id", "team": "Estates"},
+        custody_event=CustodyEventInput(
+            event_type=TicketCustodyEvent.EventType.QUEUE_CHANGED,
+            source_process="ticket.routing",
+        ),
+    )
+
+    work_state = next(item for item in activity if item["type"] == "work_state")
+
+    assert work_state["payload"] == {
+        "before": {"queue": None, "team": "Intake"},
+        "after": {"queue": "queue-id", "team": "Estates"},
+    }
+
+
+def test_linked_owner_custody_redacts_only_duplicate_legacy_assignee(basic_world):
+    """Redacting a queue absent from custody would silently lose routing history."""
+    activity = _activity_with_linked_work_state_custody(
+        basic_world,
+        before={"assignee": None, "queue": None, "team": "Intake"},
+        after={"assignee": "agent-id", "queue": "queue-id", "team": "Estates"},
+        custody_event=CustodyEventInput(
+            event_type=TicketCustodyEvent.EventType.ASSIGNED,
+            source_process="ticket.assignment",
+            new_owner=CustodyParty(
+                id="agent-id",
+                subject="snapshot-agent",
+                display_name="Snapshot Agent",
+            ),
+        ),
+    )
+
+    work_state = next(item for item in activity if item["type"] == "work_state")
+    custody = next(item for item in activity if item["type"] == "custody_event")
+
+    assert work_state["payload"] == {
+        "before": {"queue": None, "team": "Intake"},
+        "after": {"queue": "queue-id", "team": "Estates"},
+    }
+    assert custody["payload"]["new_owner"] == {
+        "id": "agent-id",
+        "subject": "snapshot-agent",
+        "display_name": "Snapshot Agent",
+    }
 
 
 def test_activity_endpoint_allows_auditors_to_read_custody_only_in_scope(basic_world):
@@ -662,9 +781,7 @@ def test_detail_and_activity_omit_out_of_scope_relationship_identifiers(
     assert hidden.number not in str(detail.data["relationships"])
     assert hidden.number not in str(activity.data["results"])
     assert detail.data["relationships"] == []
-    assert not [
-        item for item in activity.data["results"] if item["type"] == "relationship"
-    ]
+    assert not [item for item in activity.data["results"] if item["type"] == "relationship"]
 
 
 @pytest.mark.parametrize(

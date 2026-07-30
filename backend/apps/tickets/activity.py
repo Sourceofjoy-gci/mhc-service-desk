@@ -1,4 +1,5 @@
 """Assemble durable ticket records into one chronological staff timeline."""
+
 from __future__ import annotations
 
 from datetime import datetime
@@ -45,9 +46,9 @@ def scoped_ticket_relationships(
 ) -> list[TicketLink]:
     """Return links whose counterpart is visible in one canonical snapshot."""
     relationships = list(
-        TicketLink.objects.filter(
-            Q(from_ticket=ticket) | Q(to_ticket=ticket)
-        ).select_related("from_ticket", "to_ticket")
+        TicketLink.objects.filter(Q(from_ticket=ticket) | Q(to_ticket=ticket)).select_related(
+            "from_ticket", "to_ticket"
+        )
     )
     counterpart_ids = {
         relationship.to_ticket_id
@@ -111,20 +112,20 @@ def build_ticket_activity(
         for event in custody_events
         if event.source_record_type == "workflow_transition" and event.source_record_id
     }
-    custody_audit_ids = {
-        event.source_record_id
-        for event in custody_events
-        if event.source_record_type == "audit_event" and event.source_record_id
-    }
+    custody_audit_fields: dict[str, set[str]] = {}
+    for custody_event in custody_events:
+        if custody_event.source_record_type != "audit_event" or not custody_event.source_record_id:
+            continue
+        represented_fields = custody_audit_fields.setdefault(custody_event.source_record_id, set())
+        if custody_event.previous_owner is not None or custody_event.new_owner is not None:
+            represented_fields.add("assignee")
+        if custody_event.previous_queue is not None or custody_event.new_queue is not None:
+            represented_fields.add("queue")
     transitions = [
-        transition
-        for transition in transitions
-        if str(transition.id) not in custody_transition_ids
+        transition for transition in transitions if str(transition.id) not in custody_transition_ids
     ]
     supplied_relationship_ids = (
-        {relationship.id for relationship in relationships}
-        if relationships is not None
-        else None
+        {relationship.id for relationship in relationships} if relationships is not None else None
     )
     request_actor = request.user if request is not None else None
     if isinstance(request_actor, User) and request_actor.is_authenticated:
@@ -165,11 +166,7 @@ def build_ticket_activity(
     )
 
     transition_audits = sorted(
-        (
-            event
-            for event in audit_events
-            if event.action == "ticket.transitioned"
-        ),
+        (event for event in audit_events if event.action == "ticket.transitioned"),
         key=lambda event: (event.occurred_at, str(event.id)),
     )
 
@@ -183,8 +180,7 @@ def build_ticket_activity(
             (
                 event
                 for event in transition_audits
-                if event.payload.get("after", {}).get("status")
-                == transition.to_status.code
+                if event.payload.get("after", {}).get("status") == transition.to_status.code
                 and event.occurred_at >= transition.occurred_at
             ),
             None,
@@ -232,9 +228,7 @@ def build_ticket_activity(
         """Expose full immutable custody facts without looking up mutable rows."""
         payload: dict[str, object] = {
             "action": event.event_type,
-            "from": (
-                event.previous_status.get("code") if event.previous_status else None
-            ),
+            "from": (event.previous_status.get("code") if event.previous_status else None),
             "to": event.new_status.get("code") if event.new_status else None,
             "previous_owner": event.previous_owner,
             "new_owner": event.new_owner,
@@ -252,8 +246,7 @@ def build_ticket_activity(
             (
                 audit_event
                 for audit_event in transition_audits
-                if audit_event.payload.get("after", {}).get("status")
-                == payload["to"]
+                if audit_event.payload.get("after", {}).get("status") == payload["to"]
                 and audit_event.occurred_at >= event.occurred_at
             ),
             None,
@@ -285,10 +278,9 @@ def build_ticket_activity(
     def work_state_payload(event: AuditEvent) -> dict[str, object] | None:
         before = dict(event.payload.get("before", {}))
         after = dict(event.payload.get("after", {}))
-        if str(event.id) in custody_audit_ids:
-            for key in ("assignee", "queue"):
-                before.pop(key, None)
-                after.pop(key, None)
+        for key in custody_audit_fields.get(str(event.id), set()):
+            before.pop(key, None)
+            after.pop(key, None)
         if not before and not after:
             return None
         return {"before": before, "after": after}
@@ -365,13 +357,9 @@ def build_ticket_activity(
         {
             "id": f"custody:{event.id}",
             "type": (
-                "status_transition"
-                if event.event_type in custody_status_types
-                else "custody_event"
+                "status_transition" if event.event_type in custody_status_types else "custody_event"
             ),
-            "category": (
-                "workflow" if event.event_type in custody_status_types else "custody"
-            ),
+            "category": ("workflow" if event.event_type in custody_status_types else "custody"),
             "occurred_at": event.occurred_at,
             "actor": custody_actor_details(event),
             "visibility": "internal",
@@ -397,9 +385,7 @@ def build_ticket_activity(
             "type": "relationship",
             "category": "relationship",
             "occurred_at": relationship.created_at,
-            "actor": actor_details(
-                relationship_actors.get(str(relationship.id), "")
-            ),
+            "actor": actor_details(relationship_actors.get(str(relationship.id), "")),
             "visibility": "internal",
             "payload": {
                 "kind": relationship.kind,
@@ -409,9 +395,7 @@ def build_ticket_activity(
                     else relationship.from_ticket.number
                 ),
                 "direction": (
-                    "outgoing"
-                    if relationship.from_ticket_id == ticket.id
-                    else "incoming"
+                    "outgoing" if relationship.from_ticket_id == ticket.id else "incoming"
                 ),
             },
         }
