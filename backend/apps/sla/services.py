@@ -247,14 +247,22 @@ def _first_current_pause_at(instance: SlaInstance) -> datetime | None:
     histories = instance.pause_history.all()
     last_resumed_at = (
         histories.filter(state=SlaInstance.State.ACTIVE)
-        .order_by("-at", "-id")
+        .order_by("-at")
         .values_list("at", flat=True)
         .first()
     )
     current_pauses = histories.filter(state__in=PAUSED_SLA_STATES)
     if last_resumed_at is not None:
-        current_pauses = current_pauses.filter(at__gte=last_resumed_at)
-    return current_pauses.order_by("at", "id").values_list("at", flat=True).first()
+        strictly_later_pause = (
+            current_pauses.filter(at__gt=last_resumed_at)
+            .order_by("at")
+            .values_list("at", flat=True)
+            .first()
+        )
+        if strictly_later_pause is not None:
+            return strictly_later_pause
+        current_pauses = current_pauses.filter(at=last_resumed_at)
+    return current_pauses.order_by("at").values_list("at", flat=True).first()
 
 
 def _recover_legacy_remaining_business_seconds(instance: SlaInstance) -> int:

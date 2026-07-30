@@ -471,6 +471,52 @@ def test_resume_recovers_legacy_pause_at_same_instant_as_resume(basic_world):
     assert instance.due_at == at + timedelta(hours=1)
 
 
+def test_resume_legacy_recovery_prefers_pause_after_last_resume(basic_world):
+    """An older same-instant pause must not over-grant a later current pause."""
+    ticket = _ticket(basic_world)
+    instance = _instance(ticket, state=SlaInstance.State.PAUSED_REQUESTER)
+    resumed_at = datetime(2026, 7, 27, 10, 0, tzinfo=UTC)
+    current_pause_at = resumed_at + timedelta(minutes=15)
+    legacy_retry_at = datetime(2026, 7, 27, 14, 0, tzinfo=UTC)
+    calendar = instance.policy.calendar
+    calendar.timezone = "UTC"
+    calendar.weekday_hours = {"1": [{"start": "09:00", "end": "17:00"}]}
+    calendar.holidays = []
+    calendar.save(update_fields=["timezone", "weekday_hours", "holidays"])
+    instance.due_at = resumed_at + timedelta(hours=2)
+    instance.save(
+        update_fields=[
+            "due_at",
+            "remaining_business_microseconds",
+            "remaining_business_seconds",
+        ]
+    )
+
+    old_pause = SlaPauseHistory.objects.create(
+        instance=instance,
+        state=SlaInstance.State.PAUSED_REQUESTER,
+        reason="old_pause",
+    )
+    resumed = SlaPauseHistory.objects.create(
+        instance=instance,
+        state=SlaInstance.State.ACTIVE,
+        reason="resumed",
+    )
+    current_pause = SlaPauseHistory.objects.create(
+        instance=instance,
+        state=SlaInstance.State.PAUSED_INTERNAL,
+        reason="current_pause",
+    )
+    SlaPauseHistory.objects.filter(pk__in=[old_pause.pk, resumed.pk]).update(at=resumed_at)
+    SlaPauseHistory.objects.filter(pk=current_pause.pk).update(at=current_pause_at)
+
+    with freeze_time(legacy_retry_at):
+        resume_sla(instance=instance, reason="legacy_retry")
+
+    instance.refresh_from_db()
+    assert instance.due_at == legacy_retry_at + timedelta(hours=1, minutes=45)
+
+
 def test_resume_recovers_suspicious_legacy_zero_after_current_pause(basic_world):
     """A historical zero cannot be trusted when the persisted deadline is later."""
     ticket = _ticket(basic_world)
