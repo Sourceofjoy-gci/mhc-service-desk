@@ -7,12 +7,13 @@ from __future__ import annotations
 
 import logging
 from datetime import UTC, datetime, time, timedelta
-from typing import Iterable
 from zoneinfo import ZoneInfo
 
 from django.db import transaction
 from django.utils import timezone
 
+from apps.tickets.custody import CustodyActor, CustodyEventInput, status_snapshot
+from apps.tickets.events import record_ticket_event
 from apps.tickets.models import Ticket
 
 from .models import BusinessCalendar, SlaInstance, SlaPauseHistory, SlaPolicy
@@ -465,12 +466,86 @@ def sync_slas_for_transition(
 # Periodic evaluator
 # -----------------------------------------------------------------------------
 
+
+def _target_seconds(instance: SlaInstance) -> int:
+    minutes = {
+        "acknowledgement": instance.policy.acknowledgement_minutes,
+        "first_response": instance.policy.first_response_minutes,
+        "update": instance.policy.update_interval_minutes,
+        "resolution": instance.policy.resolution_minutes,
+    }.get(instance.kind, 0)
+    return minutes * 60
+
+
+def _crossed_escalation_threshold(instance: SlaInstance, now: datetime) -> bool:
+    target = _target_seconds(instance)
+    if target <= 0 or instance.state != SlaInstance.State.ACTIVE:
+        return False
+    consumed = business_seconds_between(
+        instance.started_at,
+        now,
+        instance.policy.calendar,
+    )
+    return consumed * 100 >= target * instance.policy.escalation_percent
+
+
+def _record_escalation(*, instance: SlaInstance, now: datetime) -> None:
+    """Record the immutable ticket history for one newly crossed SLA threshold."""
+    ticket = instance.ticket
+    reason = (
+        f"{instance.kind.replace('_', ' ')} SLA crossed the "
+        f"{instance.policy.escalation_percent}% escalation threshold"
+    )
+    before = {
+        "sla": {
+            "instance_id": str(instance.id),
+            "kind": instance.kind,
+            "escalation_notified_at": None,
+        }
+    }
+    after = {
+        "sla": {
+            "instance_id": str(instance.id),
+            "kind": instance.kind,
+            "escalation_notified_at": now,
+        }
+    }
+    ticket_status = status_snapshot(ticket.status)
+    record_ticket_event(
+        ticket=ticket,
+        actor_subject="sla:evaluator",
+        action="ticket.escalated",
+        before=before,
+        after=after,
+        metadata={
+            "sla_instance_id": str(instance.id),
+            "sla_kind": instance.kind,
+            "escalation_percent": instance.policy.escalation_percent,
+        },
+        custody_actor=CustodyActor.system("sla:evaluator", "SLA evaluator"),
+        custody_events=(
+            CustodyEventInput(
+                event_type="escalated",
+                source_process="sla.escalation",
+                source_record_type="sla_instance",
+                source_record_id=str(instance.id),
+                previous_status=ticket_status,
+                new_status=ticket_status,
+                reason=reason,
+                occurred_at=now,
+            ),
+        ),
+    )
+
+
 @transaction.atomic
 def evaluate_open_slas() -> int:
     """Walk all open SLA instances, mark breaches, return count evaluated."""
     now = timezone.now()
-    qs = SlaInstance.objects.select_for_update(skip_locked=True).filter(
-        state__in=["active", "paused_requester", "paused_internal", "paused_it"]
+    qs = (
+        SlaInstance.objects.select_for_update(skip_locked=True)
+        .select_related("ticket__status", "policy__calendar")
+        .filter(state__in=["active", "paused_requester", "paused_internal", "paused_it"])
     )
     evaluated = 0
     breached = 0
@@ -479,6 +554,13 @@ def evaluate_open_slas() -> int:
         if inst.state != "active":
             continue
         update_fields = ["last_evaluated_at", "updated_at"]
+        if (
+            inst.escalation_notified_at is None
+            and _crossed_escalation_threshold(inst, now)
+        ):
+            _record_escalation(instance=inst, now=now)
+            inst.escalation_notified_at = now
+            update_fields.append("escalation_notified_at")
         if inst.due_at <= now:
             inst.state = "breached"
             inst.breached_at = now

@@ -1,9 +1,11 @@
 """Tests for SLA business calendar and instance state."""
 from __future__ import annotations
 
-from datetime import datetime, timedelta, timezone
+from datetime import UTC, datetime, timedelta
+from unittest.mock import patch
 
 import pytest
+from freezegun import freeze_time
 
 from apps.audit.models import AuditEvent
 from apps.identity_access.models import User
@@ -11,6 +13,7 @@ from apps.sla.models import BusinessCalendar, SlaInstance, SlaPauseHistory, SlaP
 from apps.sla.services import (
     add_business_seconds,
     complete_sla,
+    evaluate_open_slas,
     restart_resolution_sla,
     sync_slas_for_transition,
 )
@@ -41,13 +44,13 @@ def calendar():
 
 
 def test_zero_seconds_returns_same_instant(calendar):
-    start = datetime(2026, 7, 20, 10, 0, tzinfo=timezone.utc)  # Monday 10:00
+    start = datetime(2026, 7, 20, 10, 0, tzinfo=UTC)  # Monday 10:00
     assert add_business_seconds(start, 0, calendar) == start
 
 
 def test_skips_closed_days(calendar):
     # Wednesday 2026-07-22 is closed
-    start = datetime(2026, 7, 22, 10, 0, tzinfo=timezone.utc)
+    start = datetime(2026, 7, 22, 10, 0, tzinfo=UTC)
     end = add_business_seconds(start, 60, calendar)
     # Should land on Thursday 2026-07-23 at 09:01
     assert end.weekday() == 3
@@ -58,7 +61,7 @@ def test_skips_closed_days(calendar):
 def test_skips_holidays(calendar):
     calendar.holidays = ["2026-07-23"]
     calendar.save()
-    start = datetime(2026, 7, 22, 16, 0, tzinfo=timezone.utc)  # Wed 16:00
+    start = datetime(2026, 7, 22, 16, 0, tzinfo=UTC)  # Wed 16:00
     end = add_business_seconds(start, 60 * 60, calendar)  # +1h
     # Wednesday 16:00 -> 17:00 is closed; Thursday is a holiday.
     # The next business hour runs Friday 09:00 -> Friday 10:00.
@@ -67,14 +70,14 @@ def test_skips_holidays(calendar):
 
 
 def test_within_day_addition(calendar):
-    start = datetime(2026, 7, 20, 9, 0, tzinfo=timezone.utc)  # Monday 09:00
+    start = datetime(2026, 7, 20, 9, 0, tzinfo=UTC)  # Monday 09:00
     end = add_business_seconds(start, 60 * 30, calendar)  # +30 minutes
     assert (end.hour, end.minute) == (9, 30)
 
 
 def test_spans_lunch(calendar):
     # Thursday has 09:00-13:00 (4 hours). Start at 12:00, add 3h.
-    start = datetime(2026, 7, 23, 12, 0, tzinfo=timezone.utc)  # Thursday
+    start = datetime(2026, 7, 23, 12, 0, tzinfo=UTC)  # Thursday
     end = add_business_seconds(start, 60 * 60 * 3, calendar)  # +3h
     # Only 1h remains Thursday, then 2h on Friday morning
     assert end.weekday() == 4
@@ -107,6 +110,141 @@ def _instance(ticket, *, kind="resolution", state="active"):
         state=state,
         due_at=ticket.created_at + policy.resolution_minutes * timedelta(minutes=1),
     )
+
+
+def _set_resolution_escalation_threshold(
+    instance: SlaInstance,
+    *,
+    started_at: datetime,
+    resolution_minutes: int = 10,
+) -> datetime:
+    """Configure a hand-checkable 90% business-time crossing for one SLA."""
+    policy = instance.policy
+    policy.resolution_minutes = resolution_minutes
+    policy.escalation_percent = 90
+    policy.save(update_fields=["resolution_minutes", "escalation_percent"])
+    threshold_time = started_at + timedelta(minutes=9)
+    instance.started_at = started_at
+    instance.due_at = started_at + timedelta(minutes=resolution_minutes)
+    instance.save(update_fields=["started_at", "due_at"])
+    return threshold_time
+
+
+def test_evaluator_records_one_system_custody_escalation_at_exact_business_threshold(
+    basic_world,
+):
+    """Dropping the threshold recorder would lose the ticket's escalation history."""
+    ticket = _ticket(basic_world)
+    instance = _instance(ticket)
+    started_at = datetime(2026, 7, 27, 6, 0, tzinfo=UTC)
+    threshold_time = _set_resolution_escalation_threshold(
+        instance,
+        started_at=started_at,
+    )
+
+    with freeze_time(threshold_time):
+        evaluate_open_slas()
+        evaluate_open_slas()
+
+    instance.refresh_from_db()
+    assert instance.escalation_notified_at == threshold_time
+    events = ticket.custody_events.filter(event_type="escalated")
+    assert events.count() == 1
+    event = events.get()
+    assert event.actor_kind == "system"
+    assert event.actor_subject == "sla:evaluator"
+    assert event.source_process == "sla.escalation"
+    assert event.source_record_type == "sla_instance"
+    assert event.source_record_id == str(instance.id)
+    assert event.reason == "resolution SLA crossed the 90% escalation threshold"
+    assert event.previous_status == {"code": "in_progress", "label": "In Progress"}
+    assert event.new_status == {"code": "in_progress", "label": "In Progress"}
+
+    audit = AuditEvent.objects.get(object_id=str(ticket.id), action="ticket.escalated")
+    assert audit.payload["before"] == {
+        "sla": {
+            "instance_id": str(instance.id),
+            "kind": "resolution",
+            "escalation_notified_at": None,
+        }
+    }
+    assert audit.payload["after"] == {
+        "sla": {
+            "instance_id": str(instance.id),
+            "kind": "resolution",
+            "escalation_notified_at": "2026-07-27 06:09:00+00:00",
+        }
+    }
+    assert AuditEvent.objects.filter(
+        object_id=str(ticket.id), action="ticket.escalated"
+    ).count() == 1
+
+
+def test_evaluator_does_not_escalate_before_business_time_threshold(basic_world):
+    """Changing the >= threshold boundary would create a premature custody record."""
+    ticket = _ticket(basic_world)
+    instance = _instance(ticket)
+    started_at = datetime(2026, 7, 27, 6, 0, tzinfo=UTC)
+    threshold_time = _set_resolution_escalation_threshold(
+        instance,
+        started_at=started_at,
+    )
+
+    with freeze_time(threshold_time - timedelta(seconds=1)):
+        evaluate_open_slas()
+
+    instance.refresh_from_db()
+    assert instance.escalation_notified_at is None
+    assert ticket.custody_events.filter(event_type="escalated").count() == 0
+    assert AuditEvent.objects.filter(
+        object_id=str(ticket.id), action="ticket.escalated"
+    ).count() == 0
+
+
+def test_evaluator_does_not_escalate_paused_sla(basic_world):
+    """Removing the active-state guard would escalate a clock that is frozen."""
+    ticket = _ticket(basic_world)
+    instance = _instance(ticket, state=SlaInstance.State.PAUSED_REQUESTER)
+    started_at = datetime(2026, 7, 27, 6, 0, tzinfo=UTC)
+    threshold_time = _set_resolution_escalation_threshold(
+        instance,
+        started_at=started_at,
+    )
+
+    with freeze_time(threshold_time + timedelta(minutes=1)):
+        evaluate_open_slas()
+
+    instance.refresh_from_db()
+    assert instance.escalation_notified_at is None
+    assert ticket.custody_events.filter(event_type="escalated").count() == 0
+
+
+def test_evaluator_rolls_back_escalation_when_custody_recording_fails(basic_world):
+    """A custody failure must roll audit, outbox, and notification state back."""
+    ticket = _ticket(basic_world)
+    instance = _instance(ticket)
+    started_at = datetime(2026, 7, 27, 6, 0, tzinfo=UTC)
+    threshold_time = _set_resolution_escalation_threshold(
+        instance,
+        started_at=started_at,
+    )
+
+    with freeze_time(threshold_time), patch(
+        "apps.tickets.events.record_custody_events",
+        side_effect=RuntimeError("custody unavailable"),
+    ):
+        with pytest.raises(RuntimeError, match="custody unavailable"):
+            evaluate_open_slas()
+
+    instance.refresh_from_db()
+    assert instance.escalation_notified_at is None
+    assert ticket.custody_events.filter(event_type="escalated").count() == 0
+    assert AuditEvent.objects.filter(
+        object_id=str(ticket.id), action="ticket.escalated"
+    ).count() == 0
+    assert OutboxEvent.objects.filter(
+        aggregate_id=str(ticket.id), event_type="ticket.escalated"
+    ).count() == 0
 
 
 def test_first_outbound_agent_message_completes_first_response_once(basic_world):
@@ -239,7 +377,7 @@ def test_resolution_completes_active_clock_but_preserves_breach(basic_world):
 
 def test_reopen_restarts_existing_resolution_clock_from_reopened_at(basic_world):
     ticket = _ticket(basic_world, status_code="reopened")
-    reopened_at = datetime(2026, 7, 27, 8, 0, tzinfo=timezone.utc)
+    reopened_at = datetime(2026, 7, 27, 8, 0, tzinfo=UTC)
     ticket.reopened_at = reopened_at
     ticket.save(update_fields=["reopened_at"])
     instance = _instance(ticket, state="met")
