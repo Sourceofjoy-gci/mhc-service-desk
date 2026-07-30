@@ -630,7 +630,11 @@ def evaluate_open_slas() -> int:
         # SLA rows.  Preserve that ordering here before re-reading current SLA
         # state; the candidate list is intentionally not decision state.
         try:
-            ticket = Ticket.objects.select_for_update().select_related("status").get(pk=ticket_id)
+            ticket = (
+                Ticket.objects.select_for_update(skip_locked=True)
+                .select_related("status")
+                .get(pk=ticket_id)
+            )
         except Ticket.DoesNotExist:
             continue
         inst = (

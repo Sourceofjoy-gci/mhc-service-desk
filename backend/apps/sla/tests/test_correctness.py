@@ -479,6 +479,9 @@ def test_evaluator_skips_an_instance_locked_by_a_concurrent_sweep(
         close_old_connections()
         try:
             with transaction.atomic():
+                with connection.cursor() as cursor:
+                    cursor.execute("SET LOCAL lock_timeout = '2s'")
+                    cursor.execute("SET LOCAL statement_timeout = '5s'")
                 SlaInstance.objects.select_for_update().get(pk=instance.pk)
                 lock_acquired.set()
                 if not release_lock.wait(timeout=5):
@@ -491,23 +494,33 @@ def test_evaluator_skips_an_instance_locked_by_a_concurrent_sweep(
     def run_evaluator() -> None:
         close_old_connections()
         try:
-            evaluation_results.append(evaluate_open_slas())
+            with transaction.atomic():
+                with connection.cursor() as cursor:
+                    cursor.execute("SET LOCAL lock_timeout = '2s'")
+                    cursor.execute("SET LOCAL statement_timeout = '5s'")
+                evaluation_results.append(evaluate_open_slas())
         except BaseException as exc:
             thread_errors.append(exc)
         finally:
             evaluation_finished.set()
             close_old_connections()
 
-    lock_thread = Thread(target=hold_instance_lock)
-    evaluator_thread = Thread(target=run_evaluator)
-    lock_thread.start()
-    assert lock_acquired.wait(timeout=5)
-    evaluator_thread.start()
-    finished_while_locked = evaluation_finished.wait(timeout=1)
-    release_lock.set()
-    lock_thread.join(timeout=5)
-    evaluator_thread.join(timeout=5)
+    lock_thread = Thread(target=hold_instance_lock, daemon=True)
+    evaluator_thread = Thread(target=run_evaluator, daemon=True)
+    try:
+        lock_thread.start()
+        assert lock_acquired.wait(timeout=5)
+        evaluator_thread.start()
+        finished_while_locked = evaluation_finished.wait(timeout=1)
+    finally:
+        release_lock.set()
+        lock_thread.join(timeout=5)
+        evaluator_thread.join(timeout=5)
 
+    assert not lock_thread.is_alive(), "instance-lock worker did not complete"
+    assert not evaluator_thread.is_alive(), "evaluator worker did not complete"
+    if thread_errors:
+        raise thread_errors[0]
     assert not thread_errors
     assert finished_while_locked
     assert evaluation_results == [0]
@@ -522,6 +535,76 @@ def test_evaluator_skips_an_instance_locked_by_a_concurrent_sweep(
     assert evaluate_open_slas() == 0
     instance.refresh_from_db()
     assert instance.breached_at == breached_at
+
+
+@pytest.mark.django_db(transaction=True)
+def test_evaluator_skips_a_ticket_locked_by_an_independent_transaction(
+    basic_world: BasicWorld,
+) -> None:
+    """A busy ticket must not stall the rest of the evaluator batch."""
+    instance = _instance(basic_world, due_at=timezone.now() - timedelta(seconds=1))
+    ticket_locked = Event()
+    release_ticket = Event()
+    evaluation_finished = Event()
+    evaluation_results: list[int] = []
+    thread_errors: list[BaseException] = []
+
+    def hold_ticket_lock() -> None:
+        close_old_connections()
+        try:
+            with transaction.atomic():
+                with connection.cursor() as cursor:
+                    cursor.execute("SET LOCAL lock_timeout = '2s'")
+                    cursor.execute("SET LOCAL statement_timeout = '5s'")
+                Ticket.objects.select_for_update().get(pk=instance.ticket_id)
+                ticket_locked.set()
+                if not release_ticket.wait(timeout=5):
+                    raise TimeoutError("test did not release the ticket lock")
+        except BaseException as exc:
+            thread_errors.append(exc)
+        finally:
+            close_old_connections()
+
+    def run_evaluator() -> None:
+        close_old_connections()
+        try:
+            with transaction.atomic():
+                with connection.cursor() as cursor:
+                    cursor.execute("SET LOCAL lock_timeout = '2s'")
+                    cursor.execute("SET LOCAL statement_timeout = '5s'")
+                evaluation_results.append(evaluate_open_slas())
+        except BaseException as exc:
+            thread_errors.append(exc)
+        finally:
+            evaluation_finished.set()
+            close_old_connections()
+
+    lock_thread = Thread(target=hold_ticket_lock, daemon=True)
+    evaluator_thread = Thread(target=run_evaluator, daemon=True)
+    try:
+        lock_thread.start()
+        assert ticket_locked.wait(timeout=5)
+        evaluator_thread.start()
+        assert evaluation_finished.wait(timeout=3)
+    finally:
+        release_ticket.set()
+        lock_thread.join(timeout=5)
+        evaluator_thread.join(timeout=5)
+
+    assert not lock_thread.is_alive(), "ticket-lock worker did not complete"
+    assert not evaluator_thread.is_alive(), "evaluator worker did not complete"
+    if thread_errors:
+        raise thread_errors[0]
+    assert thread_errors == []
+    assert evaluation_results == [0]
+    instance.refresh_from_db()
+    assert instance.state == SlaInstance.State.ACTIVE
+    assert instance.last_evaluated_at is None
+    assert instance.ticket.custody_events.count() == 0
+
+    assert evaluate_open_slas() == 1
+    instance.refresh_from_db()
+    assert instance.state == SlaInstance.State.BREACHED
 
 
 class TestSlaTransitionLockOrder(TransactionTestCase):
@@ -598,10 +681,14 @@ class TestSlaTransitionLockOrder(TransactionTestCase):
         def run_evaluator() -> None:
             close_old_connections()
             try:
-                with connection.execute_wrapper(evaluator_wrapper):
-                    if not start.wait(timeout=5):
-                        raise TimeoutError("evaluator start was not released")
-                    results.append(evaluate_open_slas())
+                with transaction.atomic():
+                    with connection.cursor() as cursor:
+                        cursor.execute("SET LOCAL lock_timeout = '2s'")
+                        cursor.execute("SET LOCAL statement_timeout = '5s'")
+                    with connection.execute_wrapper(evaluator_wrapper):
+                        if not start.wait(timeout=5):
+                            raise TimeoutError("evaluator start was not released")
+                        results.append(evaluate_open_slas())
             except BaseException as exc:
                 errors.append(exc)
             finally:
@@ -623,17 +710,21 @@ class TestSlaTransitionLockOrder(TransactionTestCase):
         def run_transition() -> None:
             close_old_connections()
             try:
-                with connection.execute_wrapper(transition_wrapper):
-                    if not start.wait(timeout=5):
-                        raise TimeoutError("transition start was not released")
-                    ticket_services.transition_ticket(
-                        ticket_id=self.ticket.id,
-                        actor=self.actor,
-                        expected_updated_at=self.ticket.updated_at,
-                        to_status_code="resolved",
-                        resolution_code="INFO_PROVIDED",
-                        resolution_summary="Resolved during lock-order regression.",
-                    )
+                with transaction.atomic():
+                    with connection.cursor() as cursor:
+                        cursor.execute("SET LOCAL lock_timeout = '2s'")
+                        cursor.execute("SET LOCAL statement_timeout = '5s'")
+                    with connection.execute_wrapper(transition_wrapper):
+                        if not start.wait(timeout=5):
+                            raise TimeoutError("transition start was not released")
+                        ticket_services.transition_ticket(
+                            ticket_id=self.ticket.id,
+                            actor=self.actor,
+                            expected_updated_at=self.ticket.updated_at,
+                            to_status_code="resolved",
+                            resolution_code="INFO_PROVIDED",
+                            resolution_summary="Resolved during lock-order regression.",
+                        )
             except BaseException as exc:
                 errors.append(exc)
             finally:
@@ -648,16 +739,21 @@ class TestSlaTransitionLockOrder(TransactionTestCase):
                 return result
             return execute(sql, params, many, context)
 
-        evaluator = Thread(target=run_evaluator)
-        transition = Thread(target=run_transition)
-        evaluator.start()
-        transition.start()
-        start.set()
-        evaluator.join(timeout=10)
-        transition.join(timeout=10)
+        evaluator = Thread(target=run_evaluator, daemon=True)
+        transition = Thread(target=run_transition, daemon=True)
+        try:
+            evaluator.start()
+            transition.start()
+            start.set()
+        finally:
+            start.set()
+            evaluator.join(timeout=10)
+            transition.join(timeout=10)
 
         assert not evaluator.is_alive(), "evaluator did not complete"
         assert not transition.is_alive(), "transition did not complete"
+        if errors:
+            raise errors[0]
         assert errors == []
         assert evaluator_first_table == ["ticket"]
         assert results == [1]
