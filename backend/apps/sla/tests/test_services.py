@@ -289,7 +289,7 @@ def test_evaluator_respects_microseconds_after_pause_and_resume(basic_world):
     instance = _instance(ticket)
     started_at = datetime(2026, 7, 27, 6, 0, 0, 500000, tzinfo=UTC)
     _set_resolution_escalation_threshold(instance, started_at=started_at)
-    paused_at = started_at + timedelta(minutes=2)
+    paused_at = started_at + timedelta(minutes=2, microseconds=1)
     resumed_at = datetime(2026, 7, 27, 10, 0, 0, 500000, tzinfo=UTC)
 
     with freeze_time(paused_at):
@@ -300,7 +300,9 @@ def test_evaluator_respects_microseconds_after_pause_and_resume(basic_world):
     with freeze_time(resumed_at):
         resume_sla(instance=instance, reason="requester_replied")
 
-    threshold_time = resumed_at + timedelta(minutes=7)
+    threshold_time = resumed_at + timedelta(seconds=419, microseconds=999999)
+    instance.refresh_from_db()
+    assert instance.due_at == threshold_time + timedelta(seconds=60)
     with freeze_time(threshold_time - timedelta(microseconds=1)):
         evaluate_open_slas()
 
@@ -317,6 +319,49 @@ def test_evaluator_respects_microseconds_after_pause_and_resume(basic_world):
     assert instance.escalation_notified_at == threshold_time
     assert ticket.custody_events.filter(event_type="escalated").count() == 1
 
+
+def test_resume_preserves_fractional_entitlement_across_slot_boundary_and_remaps(
+    basic_world,
+):
+    """Using the later pause or whole seconds would lose the original entitlement."""
+    ticket = _ticket(basic_world)
+    instance = _instance(ticket)
+    started_at = datetime(2026, 7, 27, 14, 59, 0, 500000, tzinfo=UTC)
+    _set_resolution_escalation_threshold(
+        instance,
+        started_at=started_at,
+        resolution_minutes=2,
+    )
+    instance.due_at = datetime(2026, 7, 28, 6, 1, 0, 500000, tzinfo=UTC)
+    instance.save(update_fields=["due_at"])
+    paused_at = datetime(2026, 7, 27, 14, 59, 30, 500001, tzinfo=UTC)
+    remapped_at = datetime(2026, 7, 27, 15, 0, 0, 100000, tzinfo=UTC)
+    resumed_at = datetime(2026, 7, 28, 7, 0, tzinfo=UTC)
+
+    with freeze_time(paused_at):
+        pause_sla(
+            instance=instance,
+            reason=SlaInstance.State.PAUSED_REQUESTER,
+        )
+    with freeze_time(remapped_at):
+        pause_sla(
+            instance=instance,
+            reason=SlaInstance.State.PAUSED_INTERNAL,
+        )
+    with freeze_time(resumed_at):
+        resume_sla(instance=instance, reason="internal_dependency_cleared")
+
+    instance.refresh_from_db()
+    assert instance.due_at == datetime(
+        2026,
+        7,
+        28,
+        7,
+        1,
+        29,
+        999999,
+        tzinfo=UTC,
+    )
 
 def test_evaluator_rolls_back_escalation_when_custody_recording_fails(basic_world):
     """A custody failure must roll audit, outbox, and notification state back."""

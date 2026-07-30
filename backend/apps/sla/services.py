@@ -56,30 +56,28 @@ def _normalized_weekday_intervals(
         merged[-1] = (previous_start, max(previous_end, end))
     return merged
 
-def add_business_seconds(
+def _timedelta_microseconds(value: timedelta) -> int:
+    return (value.days * 24 * 60 * 60 + value.seconds) * 1_000_000 + value.microseconds
+
+
+def _add_business_microseconds(
     start: datetime,
-    seconds: int,
+    microseconds: int,
     calendar: BusinessCalendar,
 ) -> datetime:
-    """Add N business seconds to ``start`` honouring weekday hours and holidays.
-
-    Simple, correct, and easy to test. The PRD calls for a calendar that
-    supports multi-interval business days; this implementation handles that
-    via ``weekday_hours``.
-    """
-    if seconds <= 0:
+    """Add exact business microseconds to ``start`` honouring calendar slots."""
+    if microseconds <= 0:
         return start
     if start.tzinfo is None or start.utcoffset() is None:
         raise ValueError("SLA business-time calculations require an aware start")
 
     output_timezone = start.tzinfo
     calendar_timezone = ZoneInfo(calendar.timezone)
-    remaining = seconds
+    remaining = microseconds
     cursor = start.astimezone(calendar_timezone)
     holiday_set = set(calendar.holidays)
 
-    # Cap iterations to avoid infinite loops; each loop consumes at least
-    # one business second across at most ~365 days.
+    # Cap iterations to avoid infinite loops; each loop advances at least a day.
     safety = 365 * 24 * 60 * 60
     while remaining > 0 and safety > 0:
         safety -= 1
@@ -106,11 +104,11 @@ def add_business_seconds(
             if cursor_utc < slot_start_utc:
                 cursor = slot_start
                 cursor_utc = slot_start_utc
-            available = int((slot_end_utc - cursor_utc).total_seconds())
+            available = _timedelta_microseconds(slot_end_utc - cursor_utc)
             if available <= 0:
                 continue
             consume = min(available, remaining)
-            cursor = (cursor_utc + timedelta(seconds=consume)).astimezone(
+            cursor = (cursor_utc + timedelta(microseconds=consume)).astimezone(
                 calendar_timezone
             )
             remaining -= consume
@@ -123,6 +121,15 @@ def add_business_seconds(
             tzinfo=calendar_timezone,
         )
     return cursor.astimezone(output_timezone)
+
+
+def add_business_seconds(
+    start: datetime,
+    seconds: int,
+    calendar: BusinessCalendar,
+) -> datetime:
+    """Add N business seconds to ``start`` honouring weekday hours and holidays."""
+    return _add_business_microseconds(start, seconds * 1_000_000, calendar)
 
 
 def _business_microseconds_between(
@@ -168,10 +175,7 @@ def _business_microseconds_between(
                 overlap_end = min(end_utc, slot_end)
                 if overlap_end > overlap_start:
                     overlap = overlap_end - overlap_start
-                    total_microseconds += (
-                        (overlap.days * 24 * 60 * 60 + overlap.seconds) * 1_000_000
-                        + overlap.microseconds
-                    )
+                    total_microseconds += _timedelta_microseconds(overlap)
         current_date += timedelta(days=1)
     return total_microseconds
 
@@ -239,19 +243,23 @@ PAUSED_SLA_STATES = {
 }
 
 
-def _recover_legacy_remaining_business_seconds(instance: SlaInstance) -> int:
-    """Recover persisted wall time without assuming a calendar's history."""
+def _first_current_pause_at(instance: SlaInstance) -> datetime | None:
     histories = instance.pause_history.all()
     last_resumed_at = (
         histories.filter(state=SlaInstance.State.ACTIVE)
-        .order_by("-at")
+        .order_by("-at", "-id")
         .values_list("at", flat=True)
         .first()
     )
     current_pauses = histories.filter(state__in=PAUSED_SLA_STATES)
     if last_resumed_at is not None:
         current_pauses = current_pauses.filter(at__gt=last_resumed_at)
-    paused_at = current_pauses.order_by("at").values_list("at", flat=True).first()
+    return current_pauses.order_by("at", "id").values_list("at", flat=True).first()
+
+
+def _recover_legacy_remaining_business_seconds(instance: SlaInstance) -> int:
+    """Recover persisted wall time without assuming a calendar's history."""
+    paused_at = _first_current_pause_at(instance)
     if paused_at is None:
         return 0
     return max(
@@ -261,6 +269,21 @@ def _recover_legacy_remaining_business_seconds(instance: SlaInstance) -> int:
                 instance.due_at.astimezone(UTC) - paused_at.astimezone(UTC)
             ).total_seconds()
         ),
+    )
+
+
+def _exact_remaining_business_microseconds(
+    instance: SlaInstance,
+) -> int | None:
+    if instance.remaining_business_seconds is None:
+        return None
+    paused_at = _first_current_pause_at(instance)
+    if paused_at is None:
+        return None
+    return _business_microseconds_between(
+        paused_at,
+        instance.due_at,
+        instance.policy.calendar,
     )
 
 
@@ -306,20 +329,23 @@ def resume_sla(*, instance: SlaInstance, reason: str, actor_subject: str = "") -
     )
     if instance.state == "active":
         return instance
-    remaining_business_seconds = instance.remaining_business_seconds
-    if remaining_business_seconds is None:
-        remaining_business_seconds = _recover_legacy_remaining_business_seconds(
-            instance
-        )
-    if remaining_business_seconds is not None:
-        instance.due_at = add_business_seconds(
+    remaining_microseconds = _exact_remaining_business_microseconds(instance)
+    if remaining_microseconds is None:
+        remaining_business_seconds = instance.remaining_business_seconds
+        if remaining_business_seconds is None:
+            remaining_business_seconds = _recover_legacy_remaining_business_seconds(
+                instance
+            )
+        remaining_microseconds = remaining_business_seconds * 1_000_000
+    if remaining_microseconds is not None:
+        instance.due_at = _add_business_microseconds(
             timezone.now(),
-            remaining_business_seconds,
+            remaining_microseconds,
             instance.policy.calendar,
         )
     instance.state = "active"
     instance.remaining_business_seconds = (
-        0 if remaining_business_seconds == 0 else None
+        0 if remaining_microseconds == 0 else None
     )
     instance.save(
         update_fields=[
