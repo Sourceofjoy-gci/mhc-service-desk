@@ -274,6 +274,14 @@ def test_backfill_keeps_raw_assignment_direction_and_uses_explicit_tie_order(bas
     )
     _audit(
         ticket=ticket,
+        action="ticket.work_state.changed",
+        actor_subject="legacy",
+        before={"queue": "missing-queue"},
+        after={"queue": None},
+        occurred_at=created_at,
+    )
+    _audit(
+        ticket=ticket,
         action="ticket.assignment.changed",
         actor_subject="legacy",
         before={"assignee": "missing-user"},
@@ -295,8 +303,15 @@ def test_backfill_keeps_raw_assignment_direction_and_uses_explicit_tie_order(bas
 
     events = list(ticket.custody_events.all())
     assert events[0].event_type == "created"
-    assert {event.event_type for event in events[1:]} == {"assigned", "unassigned"}
+    assert {event.event_type for event in events[1:]} == {
+        "assigned",
+        "unassigned",
+        "queue_changed",
+    }
     assert events[0].new_status == {"code": "legacy-first", "label": "Legacy first"}
     assert all(event.new_owner is None for event in events[1:])
     assert all(event.previous_owner is None for event in events[1:])
+    queue_event = next(event for event in events if event.event_type == "queue_changed")
+    assert queue_event.previous_queue is None
+    assert queue_event.new_queue is None
     assert verify_custody_chain(ticket) is True

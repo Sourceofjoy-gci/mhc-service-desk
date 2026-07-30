@@ -4,6 +4,7 @@ import hashlib
 import json
 from collections import defaultdict
 from datetime import UTC
+from uuid import UUID
 
 from django.db import migrations
 from django.db.models import Q
@@ -85,6 +86,15 @@ def backfill_ticket_custody(apps, schema_editor):
 
     context = {}
 
+    def valid_uuid_values(values):
+        valid = []
+        for value in values:
+            try:
+                valid.append(UUID(str(value)))
+            except (TypeError, ValueError, AttributeError):
+                continue
+        return valid
+
     def ticket_chunks():
         last_pk = None
         while True:
@@ -129,7 +139,8 @@ def backfill_ticket_custody(apps, schema_editor):
             }
             domains = {ticket.domain for ticket in tickets}
             users = User.objects.filter(
-                Q(pk__in=reference_ids) | Q(keycloak_subject__in=actor_subjects)
+                Q(pk__in=valid_uuid_values(reference_ids))
+                | Q(keycloak_subject__in=actor_subjects)
             )
             statuses = Status.objects.filter(
                 Q(pk__in=status_ids) | Q(domain__in=domains, is_initial=True)
@@ -153,7 +164,9 @@ def backfill_ticket_custody(apps, schema_editor):
                 users_by_subject={user.keycloak_subject: user for user in users},
                 queues_by_id={
                     str(queue.pk): queue
-                    for queue in ServiceLocation.objects.filter(pk__in=queue_ids)
+                    for queue in ServiceLocation.objects.filter(
+                        pk__in=valid_uuid_values(queue_ids)
+                    )
                 },
                 statuses_by_id=statuses_by_id,
                 initial_statuses=initial_statuses,
