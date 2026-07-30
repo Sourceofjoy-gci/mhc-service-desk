@@ -5,7 +5,7 @@ from importlib import import_module
 from uuid import UUID
 
 import pytest
-from django.db import connection
+from django.db import DatabaseError, connection, transaction
 
 from apps.audit.models import AuditEvent
 from apps.catalogue.models import RequestType
@@ -149,12 +149,32 @@ def test_backfill_reconstructs_deterministic_verifiable_history(basic_world):
 
 
 @pytest.mark.django_db(transaction=True)
-def test_0006_rollback_removes_postgresql_trigger_and_restores_leaf():
+def test_0006_rollback_restores_trigger_fk_index_and_legacy_data(basic_world):
     """Rollback intentionally keeps backfill rows but must remove DB protection."""
     if connection.vendor != "postgresql":
         pytest.skip("PostgreSQL migration coverage")
     from django.db.migrations.executor import MigrationExecutor
 
+    ticket = _ticket(basic_world, number="OP-EXECUTOR-LEGACY")
+    cascade_ticket = _ticket(basic_world, number="OP-EXECUTOR-CASCADE")
+    occurred_at = datetime(2025, 2, 1, tzinfo=UTC)
+    Ticket.objects.filter(pk__in=[ticket.pk, cascade_ticket.pk]).update(created_at=occurred_at)
+    _audit(
+        ticket=ticket,
+        action="ticket.created",
+        actor_subject="legacy-executor",
+        before={},
+        after={},
+        occurred_at=occurred_at,
+    )
+    _audit(
+        ticket=cascade_ticket,
+        action="ticket.created",
+        actor_subject="legacy-executor",
+        before={},
+        after={},
+        occurred_at=occurred_at,
+    )
     executor = MigrationExecutor(connection)
     try:
         executor.migrate([("tickets", "0005_ticketcustodyevent")])
@@ -166,6 +186,18 @@ def test_0006_rollback_removes_postgresql_trigger_and_restores_leaf():
                 ["ticket_custody_immutable"],
             )
             assert cursor.fetchone()[0] is True
+            cursor.execute("SELECT to_regclass(%s)", ["auditevent_ticket_object_lookup_idx"])
+            assert cursor.fetchone()[0] is not None
+            cursor.execute(
+                "SELECT count(*) FROM ticket_custody_event WHERE ticket_id = %s", [ticket.pk]
+            )
+            assert cursor.fetchone()[0] == 1
+            cursor.execute("DELETE FROM ticket WHERE id = %s", [cascade_ticket.pk])
+            cursor.execute(
+                "SELECT count(*) FROM ticket_custody_event WHERE ticket_id = %s",
+                [cascade_ticket.pk],
+            )
+            assert cursor.fetchone()[0] == 0
         executor = MigrationExecutor(connection)
         executor.migrate([("tickets", "0005_ticketcustodyevent")])
         with connection.cursor() as cursor:
@@ -174,6 +206,11 @@ def test_0006_rollback_removes_postgresql_trigger_and_restores_leaf():
                 ["ticket_custody_immutable"],
             )
             assert cursor.fetchone()[0] is False
+            cursor.execute("SELECT to_regclass(%s)", ["auditevent_ticket_object_lookup_idx"])
+            assert cursor.fetchone()[0] is None
+        with pytest.raises(DatabaseError):
+            with transaction.atomic(), connection.cursor() as cursor:
+                cursor.execute("DELETE FROM ticket WHERE id = %s", [ticket.pk])
     finally:
         MigrationExecutor(connection).migrate([("tickets", "0006_backfill_ticket_custody")])
 

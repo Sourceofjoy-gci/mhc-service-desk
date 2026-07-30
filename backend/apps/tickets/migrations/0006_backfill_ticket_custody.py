@@ -6,6 +6,7 @@ from collections import defaultdict
 from datetime import UTC
 
 from django.db import migrations
+from django.db.models import Q
 from django.utils import timezone
 
 
@@ -82,25 +83,85 @@ def backfill_ticket_custody(apps, schema_editor):
     User = apps.get_model("identity_access", "User")
     ServiceLocation = apps.get_model("organisations", "ServiceLocation")
 
-    users_by_id = {str(user.pk): user for user in User.objects.all()}
-    users_by_subject = {user.keycloak_subject: user for user in User.objects.all()}
-    queues_by_id = {str(queue.pk): queue for queue in ServiceLocation.objects.all()}
-    statuses_by_id = {str(status.pk): status for status in Status.objects.all()}
-    initial_statuses = {}
-    for initial_status in Status.objects.filter(is_initial=True).order_by("domain", "order", "id"):
-        initial_statuses.setdefault(initial_status.domain, initial_status)
-    existing_ticket_ids = set(TicketCustodyEvent.objects.values_list("ticket_id", flat=True))
-    audits_by_ticket = defaultdict(list)
-    for audit in AuditEvent.objects.filter(object_type="ticket").order_by("occurred_at", "id"):
-        audits_by_ticket[audit.object_id].append(audit)
-    transitions_by_ticket = defaultdict(list)
-    for transition in TransitionHistory.objects.select_related("from_status", "to_status").order_by(
-        "occurred_at", "id"
-    ):
-        transitions_by_ticket[transition.ticket_id].append(transition)
+    context = {}
+
+    def ticket_chunks():
+        last_pk = None
+        while True:
+            queryset = Ticket.objects.order_by("pk")
+            if last_pk is not None:
+                queryset = queryset.filter(pk__gt=last_pk)
+            tickets = list(queryset[:200])
+            if not tickets:
+                return
+            last_pk = tickets[-1].pk
+            ticket_ids = [ticket.pk for ticket in tickets]
+            ticket_id_strings = [str(ticket_id) for ticket_id in ticket_ids]
+            audits_by_ticket = defaultdict(list)
+            audits = AuditEvent.objects.filter(
+                object_type="ticket", object_id__in=ticket_id_strings
+            ).order_by("occurred_at", "id")
+            for audit in audits:
+                audits_by_ticket[audit.object_id].append(audit)
+            transitions_by_ticket = defaultdict(list)
+            transitions = TransitionHistory.objects.filter(ticket_id__in=ticket_ids).select_related(
+                "from_status", "to_status"
+            ).order_by("occurred_at", "id")
+            for transition in transitions:
+                transitions_by_ticket[transition.ticket_id].append(transition)
+            actor_subjects = {audit.actor_subject for audit in audits}
+            actor_subjects.update(transition.actor_subject for transition in transitions)
+            reference_ids = set()
+            queue_ids = set()
+            for audit in audits:
+                payload = audit.payload if isinstance(audit.payload, dict) else {}
+                for state in (payload.get("before", {}), payload.get("after", {})):
+                    if isinstance(state, dict):
+                        if state.get("assignee") not in (None, ""):
+                            reference_ids.add(str(state["assignee"]))
+                        if state.get("queue") not in (None, ""):
+                            queue_ids.add(str(state["queue"]))
+            status_ids = {
+                str(status_id)
+                for transition in transitions
+                for status_id in (transition.from_status_id, transition.to_status_id)
+                if status_id is not None
+            }
+            domains = {ticket.domain for ticket in tickets}
+            users = User.objects.filter(
+                Q(pk__in=reference_ids) | Q(keycloak_subject__in=actor_subjects)
+            )
+            statuses = Status.objects.filter(
+                Q(pk__in=status_ids) | Q(domain__in=domains, is_initial=True)
+            ).order_by("domain", "order", "id")
+            initial_statuses = {}
+            statuses_by_id = {}
+            for status_row in statuses:
+                statuses_by_id[str(status_row.pk)] = status_row
+                if status_row.is_initial:
+                    initial_statuses.setdefault(status_row.domain, status_row)
+            context.clear()
+            context.update(
+                audits_by_ticket=audits_by_ticket,
+                transitions_by_ticket=transitions_by_ticket,
+                existing_ticket_ids=set(
+                    TicketCustodyEvent.objects.filter(ticket_id__in=ticket_ids).values_list(
+                        "ticket_id", flat=True
+                    )
+                ),
+                users_by_id={str(user.pk): user for user in users},
+                users_by_subject={user.keycloak_subject: user for user in users},
+                queues_by_id={
+                    str(queue.pk): queue
+                    for queue in ServiceLocation.objects.filter(pk__in=queue_ids)
+                },
+                statuses_by_id=statuses_by_id,
+                initial_statuses=initial_statuses,
+            )
+            yield from tickets
 
     def actor(subject):
-        user = users_by_subject.get(subject)
+        user = context["users_by_subject"].get(subject)
         if user is not None:
             return {
                 "kind": "user",
@@ -112,7 +173,7 @@ def backfill_ticket_custody(apps, schema_editor):
     def owner(value):
         if value in (None, ""):
             return None
-        user = users_by_id.get(str(value))
+        user = context["users_by_id"].get(str(value))
         if user is None:
             return None
         return {
@@ -124,7 +185,7 @@ def backfill_ticket_custody(apps, schema_editor):
     def queue(value):
         if value in (None, ""):
             return None
-        location = queues_by_id.get(str(value))
+        location = context["queues_by_id"].get(str(value))
         if location is None:
             return None
         return {"id": str(location.pk), "label": location.name}
@@ -132,20 +193,20 @@ def backfill_ticket_custody(apps, schema_editor):
     def status(value):
         if value in (None, ""):
             return None
-        workflow_status = statuses_by_id.get(str(value))
+        workflow_status = context["statuses_by_id"].get(str(value))
         if workflow_status is None:
             return None
         return {"code": workflow_status.code, "label": workflow_status.name}
 
-    for ticket in Ticket.objects.all().iterator():
-        if ticket.pk in existing_ticket_ids:
+    for ticket in ticket_chunks():
+        if ticket.pk in context["existing_ticket_ids"]:
             continue
 
         sources = []
-        audits = audits_by_ticket.get(str(ticket.pk), [])
+        audits = context["audits_by_ticket"].get(str(ticket.pk), [])
         created_audit = next((audit for audit in audits if audit.action == "ticket.created"), None)
         if created_audit is None:
-            initial_status = initial_statuses.get(ticket.domain)
+            initial_status = context["initial_statuses"].get(ticket.domain)
             created = _empty_event(
                 event_type="created",
                 occurred_at=ticket.created_at,
@@ -165,7 +226,7 @@ def backfill_ticket_custody(apps, schema_editor):
                 source_record_type="audit_event",
                 source_record_id=str(created_audit.pk),
             )
-            initial_status = initial_statuses.get(ticket.domain)
+            initial_status = context["initial_statuses"].get(ticket.domain)
             created["new_status"] = status(initial_status.pk) if initial_status else None
             sources.append((created_audit.occurred_at, 0, str(created_audit.pk), created))
 
@@ -214,7 +275,7 @@ def backfill_ticket_custody(apps, schema_editor):
                 event["new_queue"] = queue(after.get("queue"))
                 sources.append((audit.occurred_at, 2, str(audit.pk), event))
 
-        transitions = transitions_by_ticket.get(ticket.pk, [])
+        transitions = context["transitions_by_ticket"].get(ticket.pk, [])
         for transition in transitions:
             if transition.to_status.is_initial:
                 continue
@@ -277,6 +338,7 @@ def create_ticket_custody_protection(apps, schema_editor):
         and details["foreign_key"] == ("ticket", "id")
     )
     quoted_constraint = schema_editor.quote_name(constraint_name)
+    schema_editor.execute("SET CONSTRAINTS ALL IMMEDIATE")
     schema_editor.execute(
         f"""
         ALTER TABLE ticket_custody_event DROP CONSTRAINT {quoted_constraint};
@@ -342,6 +404,11 @@ class Migration(migrations.Migration):
     ]
 
     operations = [
+        migrations.RunSQL(
+            "CREATE INDEX IF NOT EXISTS auditevent_ticket_object_lookup_idx "
+            "ON auditevent (object_type, object_id) WHERE object_type = 'ticket'",
+            "DROP INDEX IF EXISTS auditevent_ticket_object_lookup_idx",
+        ),
         migrations.RunPython(backfill_ticket_custody, migrations.RunPython.noop),
         migrations.RunPython(create_ticket_custody_protection, drop_ticket_custody_protection),
     ]
