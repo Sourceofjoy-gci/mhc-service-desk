@@ -211,7 +211,7 @@ def test_0006_rollback_restores_trigger_fk_index_and_legacy_data(basic_world):
             with transaction.atomic(), connection.cursor() as cursor:
                 cursor.execute("DELETE FROM ticket WHERE id = %s", [ticket.pk])
     finally:
-        MigrationExecutor(connection).migrate([("tickets", "0006_backfill_ticket_custody")])
+        MigrationExecutor(connection).migrate([("tickets", "0007_ticket_custody_collector_state")])
 
 
 def test_0007_keeps_database_cascade_while_collector_skips_custody():
