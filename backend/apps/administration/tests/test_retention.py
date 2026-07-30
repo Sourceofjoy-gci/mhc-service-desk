@@ -12,6 +12,7 @@ from django.core.management.base import CommandError
 from django.db import connection
 
 from apps.administration import retention
+from apps.tickets.models import Ticket
 
 
 def _old_ticket_with_custody(basic_world, *, number: str):
@@ -37,9 +38,7 @@ def _old_ticket_with_custody(basic_world, *, number: str):
         actor=CustodyActor.system("retention-test", "Retention test"),
         events=(CustodyEventInput.created(source_process="test.retention"),),
     )
-    Ticket.objects.filter(pk=ticket.pk).update(
-        created_at=datetime(2000, 1, 1, tzinfo=UTC)
-    )
+    Ticket.objects.filter(pk=ticket.pk).update(created_at=datetime(2000, 1, 1, tzinfo=UTC))
     return ticket
 
 
@@ -48,12 +47,32 @@ def test_direct_ticket_deletion_cannot_bypass_custody_protection(basic_world):
     """A caller outside the approved disposal path must not delete custody rows."""
     if connection.vendor != "postgresql":
         pytest.skip("PostgreSQL trigger coverage")
-    from apps.tickets.models import Ticket
-
     ticket = _old_ticket_with_custody(basic_world, number="OP-RETENTION-DIRECT-GUARD")
 
     with pytest.raises(ValidationError, match="approved retention"):
         Ticket.objects.filter(pk=ticket.pk).delete()
+
+
+@pytest.mark.django_db(transaction=True)
+@pytest.mark.parametrize(
+    "delete_route",
+    [
+        lambda ticket: Ticket.objects.filter(pk=ticket.pk).delete(),
+        lambda ticket: Ticket._base_manager.filter(pk=ticket.pk).delete(),
+        lambda ticket: Ticket.objects.filter(pk=ticket.pk)._raw_delete(connection.alias),
+        lambda ticket: Ticket._base_manager.filter(pk=ticket.pk)._raw_delete(connection.alias),
+    ],
+)
+def test_ticket_manager_deletion_routes_fail_closed(basic_world, delete_route):
+    """Neither manager nor its private fast-delete API may bypass retention."""
+    from apps.tickets.models import Ticket
+
+    ticket = _old_ticket_with_custody(basic_world, number="OP-RETENTION-MANAGER-GUARD")
+
+    with pytest.raises(ValidationError, match="approved retention"):
+        delete_route(ticket)
+
+    assert Ticket.objects.filter(pk=ticket.pk).exists()
 
 
 @pytest.mark.django_db(transaction=True)
@@ -64,17 +83,13 @@ def test_approved_ticket_retention_deletes_custody_rows(basic_world, monkeypatch
     from apps.administration.models import ConfigItem
     from apps.tickets.models import Ticket, TicketCustodyEvent
 
-    monkeypatch.setattr(
-        retention.djtz, "now", lambda: datetime(2026, 7, 28, 14, 0, tzinfo=UTC)
-    )
+    monkeypatch.setattr(retention.djtz, "now", lambda: datetime(2026, 7, 28, 14, 0, tzinfo=UTC))
     monkeypatch.setattr(
         retention.Command,
         "_fsync_parent_directory",
         staticmethod(lambda _path: None),
     )
-    ConfigItem.objects.create(
-        key="retention.policy.v1", value={"ticket": {"days": 30}}
-    )
+    ConfigItem.objects.create(key="retention.policy.v1", value={"ticket": {"days": 30}})
     ticket = _old_ticket_with_custody(basic_world, number="OP-RETENTION-CUSTODY")
 
     retention.Command().handle(
@@ -142,9 +157,7 @@ def _use_fake_cursor(monkeypatch, cursor: FakeCursor):
     monkeypatch.setattr(connection, "cursor", lambda: cursor)
 
 
-def test_unknown_policy_table_is_rejected_without_query_or_certificate(
-    monkeypatch, tmp_path
-):
+def test_unknown_policy_table_is_rejected_without_query_or_certificate(monkeypatch, tmp_path):
     malicious_table = "ticket; DROP TABLE ticket; --"
     cursor = FakeCursor()
     _use_fake_cursor(monkeypatch, cursor)
@@ -156,9 +169,7 @@ def test_unknown_policy_table_is_rejected_without_query_or_certificate(
     now = datetime(2026, 7, 28, 8, 0, tzinfo=UTC)
     monkeypatch.setattr(retention.djtz, "now", lambda: now)
     command = retention.Command()
-    command._dispose_table = MethodType(
-        retention.Command._dispose_table.__wrapped__, command
-    )
+    command._dispose_table = MethodType(retention.Command._dispose_table.__wrapped__, command)
 
     with pytest.raises(CommandError, match="unsupported retention table"):
         command.handle(dry_run=True, table=[], out=str(tmp_path / "disposal-"))
@@ -247,9 +258,7 @@ def test_dry_run_reports_selected_rows_without_delete(monkeypatch):
     assert "rows_disposed" not in certificate
 
 
-def test_handle_writes_structured_certificate_for_every_supported_table(
-    monkeypatch, tmp_path
-):
+def test_handle_writes_structured_certificate_for_every_supported_table(monkeypatch, tmp_path):
     supported_tables = {
         "ticket",
         "ticket_message",
@@ -282,9 +291,7 @@ def test_handle_writes_structured_certificate_for_every_supported_table(
     command.handle(dry_run=True, table=[], out=str(tmp_path / "disposal-"))
 
     certificate = json.loads(
-        (tmp_path / "disposal-preview-20260728T093000Z.json").read_text(
-            encoding="utf-8"
-        )
+        (tmp_path / "disposal-preview-20260728T093000Z.json").read_text(encoding="utf-8")
     )
     assert {entry["table"] for entry in certificate["rows"]} == supported_tables
     assert all(entry["rows_selected"] == 0 for entry in certificate["rows"])
@@ -303,9 +310,7 @@ def test_cutoff_uses_policy_days(monkeypatch, tmp_path):
     now = datetime(2026, 7, 28, 10, 0, tzinfo=UTC)
     monkeypatch.setattr(retention.djtz, "now", lambda: now)
     command = retention.Command()
-    command._dispose_table = MethodType(
-        retention.Command._dispose_table.__wrapped__, command
-    )
+    command._dispose_table = MethodType(retention.Command._dispose_table.__wrapped__, command)
 
     command.handle(dry_run=True, table=[], out=str(tmp_path / "disposal-"))
 
@@ -317,9 +322,7 @@ def test_cutoff_uses_policy_days(monkeypatch, tmp_path):
     ("table", "related_name"),
     [("ticket_message", "messages"), ("ticket_note", "notes")],
 )
-def test_child_retention_preserves_records_for_held_parent_ticket(
-    basic_world, table, related_name
-):
+def test_child_retention_preserves_records_for_held_parent_ticket(basic_world, table, related_name):
     from apps.catalogue.models import RequestType
     from apps.tickets.models import Ticket, TicketMessage, TicketNote
     from apps.workflow.models import Status
@@ -364,9 +367,7 @@ def test_child_retention_preserves_records_for_held_parent_ticket(
         ]
         model = TicketNote
     old_created_at = datetime(2026, 1, 1, tzinfo=UTC)
-    model.objects.filter(pk__in=[record.pk for record in records]).update(
-        created_at=old_created_at
-    )
+    model.objects.filter(pk__in=[record.pk for record in records]).update(created_at=old_created_at)
 
     certificate = retention.Command()._dispose_table(
         table,
@@ -387,9 +388,7 @@ def test_child_retention_preserves_records_for_held_parent_ticket(
     ("table", "related_name"),
     [("ticket_message", "messages"), ("ticket_note", "notes")],
 )
-def test_child_retention_preserves_held_child_under_unheld_parent(
-    basic_world, table, related_name
-):
+def test_child_retention_preserves_held_child_under_unheld_parent(basic_world, table, related_name):
     from apps.catalogue.models import RequestType
     from apps.tickets.models import Ticket, TicketMessage, TicketNote
     from apps.workflow.models import Status
@@ -479,9 +478,7 @@ def test_message_retention_preserves_fresh_dependent_records(basic_world):
         direction="outbound",
         body_text="Dependency-aware message",
     )
-    TicketMessage.objects.filter(pk=message.pk).update(
-        created_at=datetime(2000, 1, 1, tzinfo=UTC)
-    )
+    TicketMessage.objects.filter(pk=message.pk).update(created_at=datetime(2000, 1, 1, tzinfo=UTC))
     delivery = EmailDelivery.objects.create(
         ticket_message=message,
         to_address="requester@example.test",
@@ -501,9 +498,7 @@ def test_message_retention_preserves_fresh_dependent_records(basic_world):
     )
 
     command = retention.Command()
-    command._active_cutoffs = {
-        "email_delivery": datetime(2026, 7, 1, tzinfo=UTC)
-    }
+    command._active_cutoffs = {"email_delivery": datetime(2026, 7, 1, tzinfo=UTC)}
     certificate = command._dispose_table(
         "ticket_message",
         datetime(2026, 7, 1, tzinfo=UTC),
@@ -593,6 +588,7 @@ def test_ticket_disposal_commits_populated_graph_and_preserves_child_held_graph(
     from apps.sla.models import SlaInstance, SlaPauseHistory, SlaPolicy
     from apps.tickets.models import (
         Ticket,
+        TicketCustodyEvent,
         TicketLink,
         TicketMessage,
         TicketNote,
@@ -631,13 +627,21 @@ def test_ticket_disposal_commits_populated_graph_and_preserves_child_held_graph(
             office=basic_world["office"],
             legal_hold=False,
         )
-        Ticket.objects.filter(pk=ticket.pk).update(
-            created_at=datetime(2000, 1, 1, tzinfo=UTC)
-        )
+        Ticket.objects.filter(pk=ticket.pk).update(created_at=datetime(2000, 1, 1, tzinfo=UTC))
         return ticket
 
     disposable = make_ticket("OP-RETENTION-GRAPH-DISPOSE")
     preserved = make_ticket("OP-RETENTION-GRAPH-HELD")
+    custody = TicketCustodyEvent.objects.create(
+        ticket=disposable,
+        sequence=1,
+        event_type=TicketCustodyEvent.EventType.CREATED,
+        actor_kind=TicketCustodyEvent.ActorKind.SYSTEM,
+        actor_subject="retention-test",
+        actor_display_name="Retention test",
+        source_process="test.retention",
+        event_hash="a" * 64,
+    )
 
     message = TicketMessage.objects.create(
         ticket=disposable,
@@ -765,6 +769,7 @@ def test_ticket_disposal_commits_populated_graph_and_preserves_child_held_graph(
     )
 
     assert not Ticket.objects.filter(pk=disposable.pk).exists()
+    assert not TicketCustodyEvent._base_manager.filter(pk=custody.pk).exists()
     for model, pk in (
         (TicketMessage, message.pk),
         (TicketNote, note.pk),
@@ -775,12 +780,12 @@ def test_ticket_disposal_commits_populated_graph_and_preserves_child_held_graph(
         (TransitionHistory, transition.pk),
         (SlaInstance, sla.pk),
         (SlaPauseHistory, pause.pk),
-            (Watcher, watcher.pk),
-            (TicketLink, link.pk),
-            (TicketLink, reverse_link.pk),
-            (WhatsappMessage, whatsapp.pk),
-        ):
-            assert not model.objects.filter(pk=pk).exists()
+        (Watcher, watcher.pk),
+        (TicketLink, link.pk),
+        (TicketLink, reverse_link.pk),
+        (WhatsappMessage, whatsapp.pk),
+    ):
+        assert not model.objects.filter(pk=pk).exists()
     usage.refresh_from_db()
     assert usage.ticket_id is None
 
@@ -816,9 +821,7 @@ def test_certificate_fsyncs_parent_directory_after_atomic_link(monkeypatch, tmp_
     assert events == ["link", "parent-fsync"]
 
 
-def test_parent_directory_fsync_opens_syncs_and_closes_directory(
-    monkeypatch, tmp_path
-):
+def test_parent_directory_fsync_opens_syncs_and_closes_directory(monkeypatch, tmp_path):
     events: list[tuple[object, ...]] = []
     directory_fd = 321
 
@@ -852,9 +855,7 @@ def test_parent_directory_fsync_opens_syncs_and_closes_directory(
 
 
 @pytest.mark.django_db
-def test_default_retention_plans_execute_against_current_postgresql_schema(
-    capsys, tmp_path
-):
+def test_default_retention_plans_execute_against_current_postgresql_schema(capsys, tmp_path):
     from django.db import connection
 
     assert connection.vendor == "postgresql"
@@ -870,13 +871,9 @@ def test_default_retention_plans_execute_against_current_postgresql_schema(
         )
 
     certificate = json.loads(
-        (tmp_path / "default-plans-preview-20260728T120000Z.json").read_text(
-            encoding="utf-8"
-        )
+        (tmp_path / "default-plans-preview-20260728T120000Z.json").read_text(encoding="utf-8")
     )
-    assert {entry["table"] for entry in certificate["rows"]} == set(
-        retention.DEFAULT_RETENTION
-    )
+    assert {entry["table"] for entry in certificate["rows"]} == set(retention.DEFAULT_RETENTION)
     assert certificate["status"] == "not_executed"
     assert "unapproved preview schedule only" in capsys.readouterr().err
 
@@ -893,9 +890,7 @@ def test_destructive_run_requires_an_operator_configured_policy(tmp_path):
         payload={},
         payload_hash="0" * 64,
     )
-    AuditEvent.objects.filter(pk=old_event.pk).update(
-        occurred_at=datetime(2000, 1, 1, tzinfo=UTC)
-    )
+    AuditEvent.objects.filter(pk=old_event.pk).update(occurred_at=datetime(2000, 1, 1, tzinfo=UTC))
 
     with pytest.raises(CommandError, match="configured retention policy"):
         retention.Command().handle(
@@ -928,9 +923,7 @@ def test_invalid_later_policy_rule_is_rejected_before_any_deletion(tmp_path):
         payload={},
         payload_hash="1" * 64,
     )
-    AuditEvent.objects.filter(pk=old_event.pk).update(
-        occurred_at=datetime(2000, 1, 1, tzinfo=UTC)
-    )
+    AuditEvent.objects.filter(pk=old_event.pk).update(occurred_at=datetime(2000, 1, 1, tzinfo=UTC))
 
     with pytest.raises(CommandError, match="unsupported retention table"):
         retention.Command().handle(
@@ -944,9 +937,7 @@ def test_invalid_later_policy_rule_is_rejected_before_any_deletion(tmp_path):
 
 
 @pytest.mark.django_db
-def test_later_table_failure_rolls_back_entire_run_without_certificate(
-    monkeypatch, tmp_path
-):
+def test_later_table_failure_rolls_back_entire_run_without_certificate(monkeypatch, tmp_path):
     from apps.administration.models import ConfigItem
     from apps.audit.models import AuditEvent
 
@@ -965,9 +956,7 @@ def test_later_table_failure_rolls_back_entire_run_without_certificate(
         payload={},
         payload_hash="2" * 64,
     )
-    AuditEvent.objects.filter(pk=old_event.pk).update(
-        occurred_at=datetime(2000, 1, 1, tzinfo=UTC)
-    )
+    AuditEvent.objects.filter(pk=old_event.pk).update(occurred_at=datetime(2000, 1, 1, tzinfo=UTC))
     original_dispose = retention.Command._dispose_table
 
     def fail_on_second_table(command, table, cutoff, rule, dry):
@@ -1005,9 +994,7 @@ def test_certificate_write_failure_keeps_committed_database_truth(tmp_path):
         payload={},
         payload_hash="3" * 64,
     )
-    AuditEvent.objects.filter(pk=old_event.pk).update(
-        occurred_at=datetime(2000, 1, 1, tzinfo=UTC)
-    )
+    AuditEvent.objects.filter(pk=old_event.pk).update(occurred_at=datetime(2000, 1, 1, tzinfo=UTC))
     missing_directory = tmp_path / "missing"
 
     with pytest.raises(CommandError, match="retry-event"):
@@ -1046,18 +1033,14 @@ def test_all_sql_plans_are_validated_before_the_first_delete(monkeypatch, tmp_pa
         payload={},
         payload_hash="4" * 64,
     )
-    AuditEvent.objects.filter(pk=old_event.pk).update(
-        occurred_at=datetime(2000, 1, 1, tzinfo=UTC)
-    )
+    AuditEvent.objects.filter(pk=old_event.pk).update(occurred_at=datetime(2000, 1, 1, tzinfo=UTC))
     valid_plan = retention.RETENTION_SQL_PLANS["integrationevent"]
     monkeypatch.setitem(
         retention.RETENTION_SQL_PLANS,
         "integrationevent",
         replace(
             valid_plan,
-            delete_sql=(
-                "DELETE FROM integrationevent WHERE nonexistent_timestamp < %s"
-            ),
+            delete_sql=("DELETE FROM integrationevent WHERE nonexistent_timestamp < %s"),
         ),
     )
 
@@ -1172,9 +1155,7 @@ def test_full_policy_preserves_every_record_in_a_held_ticket_graph(
 
 
 @pytest.mark.django_db(transaction=True)
-def test_ticket_retention_does_not_cascade_a_fresh_message(
-    basic_world, monkeypatch, tmp_path
-):
+def test_ticket_retention_does_not_cascade_a_fresh_message(basic_world, monkeypatch, tmp_path):
     from apps.administration.models import ConfigItem
     from apps.catalogue.models import RequestType
     from apps.tickets.models import Ticket, TicketMessage
@@ -1198,9 +1179,7 @@ def test_ticket_retention_does_not_cascade_a_fresh_message(
         request_type=RequestType.objects.get(service=basic_world["gen_info"]),
         office=basic_world["office"],
     )
-    Ticket.objects.filter(pk=ticket.pk).update(
-        created_at=datetime(2000, 1, 1, tzinfo=UTC)
-    )
+    Ticket.objects.filter(pk=ticket.pk).update(created_at=datetime(2000, 1, 1, tzinfo=UTC))
     message = TicketMessage.objects.create(
         ticket=ticket, direction="inbound", body_text="Fresh child"
     )
@@ -1216,9 +1195,7 @@ def test_ticket_retention_does_not_cascade_a_fresh_message(
 
 
 @pytest.mark.django_db(transaction=True)
-def test_retention_locks_parent_and_hold_rows_then_revalidates(
-    basic_world, monkeypatch
-):
+def test_retention_locks_parent_and_hold_rows_then_revalidates(basic_world, monkeypatch):
     from django.db import connection, transaction
     from django.test.utils import CaptureQueriesContext
 
@@ -1300,9 +1277,7 @@ def test_late_hold_is_truthful_in_committed_event_and_certificate(
         direction="inbound",
         body_text="Hold arrives after candidate discovery",
     )
-    TicketMessage.objects.filter(pk=message.pk).update(
-        created_at=datetime(2000, 1, 1, tzinfo=UTC)
-    )
+    TicketMessage.objects.filter(pk=message.pk).update(created_at=datetime(2000, 1, 1, tzinfo=UTC))
     original_lock = retention.Command._lock_hold_graph
 
     def add_hold_after_lock(command, ticket_ids):
@@ -1343,9 +1318,7 @@ def test_retention_enqueues_exact_object_delete_before_metadata_disposal(
 
     now = datetime(2026, 7, 28, 14, 0, tzinfo=UTC)
     monkeypatch.setattr(retention.djtz, "now", lambda: now)
-    ConfigItem.objects.create(
-        key="retention.policy.v1", value={"ticket": {"days": 30}}
-    )
+    ConfigItem.objects.create(key="retention.policy.v1", value={"ticket": {"days": 30}})
     ticket = Ticket.objects.create(
         number="OP-RETENTION-OBJECT-JOB",
         domain="operational",
@@ -1395,21 +1368,15 @@ def test_retention_enqueues_exact_object_delete_before_metadata_disposal(
 
 
 @pytest.mark.django_db(transaction=True)
-def test_legacy_attachment_without_version_fails_closed(
-    basic_world, monkeypatch, tmp_path
-):
+def test_legacy_attachment_without_version_fails_closed(basic_world, monkeypatch, tmp_path):
     from apps.administration.models import ConfigItem, DisposalEvent
     from apps.catalogue.models import RequestType
     from apps.files.models import Attachment, ObjectDeleteJob
     from apps.tickets.models import Ticket
     from apps.workflow.models import Status
 
-    monkeypatch.setattr(
-        retention.djtz, "now", lambda: datetime(2026, 7, 28, 14, 30, tzinfo=UTC)
-    )
-    ConfigItem.objects.create(
-        key="retention.policy.v1", value={"ticket": {"days": 30}}
-    )
+    monkeypatch.setattr(retention.djtz, "now", lambda: datetime(2026, 7, 28, 14, 30, tzinfo=UTC))
+    ConfigItem.objects.create(key="retention.policy.v1", value={"ticket": {"days": 30}})
     ticket = Ticket.objects.create(
         number="OP-RETENTION-LEGACY-OBJECT",
         domain="operational",
@@ -1449,9 +1416,7 @@ def test_legacy_attachment_without_version_fails_closed(
     assert list(tmp_path.iterdir()) == []
 
 
-def test_preview_artifact_is_explicit_and_cannot_be_mistaken_for_disposal(
-    monkeypatch, tmp_path
-):
+def test_preview_artifact_is_explicit_and_cannot_be_mistaken_for_disposal(monkeypatch, tmp_path):
     cursor = FakeCursor()
     _use_fake_cursor(monkeypatch, cursor)
     monkeypatch.setattr(
@@ -1459,20 +1424,14 @@ def test_preview_artifact_is_explicit_and_cannot_be_mistaken_for_disposal(
         "get_retention_policy",
         lambda: {"auditevent": {"days": 14, "description": "approved"}},
     )
-    monkeypatch.setattr(
-        retention.djtz, "now", lambda: datetime(2026, 7, 28, 15, 0, tzinfo=UTC)
-    )
+    monkeypatch.setattr(retention.djtz, "now", lambda: datetime(2026, 7, 28, 15, 0, tzinfo=UTC))
     command = retention.Command()
-    command._dispose_table = MethodType(
-        retention.Command._dispose_table.__wrapped__, command
-    )
+    command._dispose_table = MethodType(retention.Command._dispose_table.__wrapped__, command)
 
     command.handle(dry_run=True, table=[], out=str(tmp_path / "retention-"))
 
     preview = json.loads(
-        (tmp_path / "retention-preview-20260728T150000Z.json").read_text(
-            encoding="utf-8"
-        )
+        (tmp_path / "retention-preview-20260728T150000Z.json").read_text(encoding="utf-8")
     )
     assert preview["schema"] == "mhc.retention.preview.v1"
     assert preview["mode"] == "preview"
@@ -1482,15 +1441,11 @@ def test_preview_artifact_is_explicit_and_cannot_be_mistaken_for_disposal(
 
 
 @pytest.mark.django_db(transaction=True)
-def test_certificate_export_failure_leaves_committed_retriable_event(
-    monkeypatch, tmp_path
-):
+def test_certificate_export_failure_leaves_committed_retriable_event(monkeypatch, tmp_path):
     from apps.administration.models import ConfigItem, DisposalEvent
     from apps.audit.models import AuditEvent
 
-    ConfigItem.objects.create(
-        key="retention.policy.v1", value={"auditevent": {"days": 1}}
-    )
+    ConfigItem.objects.create(key="retention.policy.v1", value={"auditevent": {"days": 1}})
     old_event = AuditEvent.objects.create(
         actor_subject="retention-test",
         action="retention.export.failure",
@@ -1499,9 +1454,7 @@ def test_certificate_export_failure_leaves_committed_retriable_event(
         payload={},
         payload_hash="d" * 64,
     )
-    AuditEvent.objects.filter(pk=old_event.pk).update(
-        occurred_at=datetime(2000, 1, 1, tzinfo=UTC)
-    )
+    AuditEvent.objects.filter(pk=old_event.pk).update(occurred_at=datetime(2000, 1, 1, tzinfo=UTC))
     monkeypatch.setattr(
         retention.Command,
         "_write_certificate",
@@ -1526,9 +1479,7 @@ def test_retry_event_exports_committed_truth_without_repeating_deletion(tmp_path
     from apps.administration.models import ConfigItem, DisposalEvent
     from apps.audit.models import AuditEvent
 
-    ConfigItem.objects.create(
-        key="retention.policy.v1", value={"auditevent": {"days": 1}}
-    )
+    ConfigItem.objects.create(key="retention.policy.v1", value={"auditevent": {"days": 1}})
     old_event = AuditEvent.objects.create(
         actor_subject="retention-test",
         action="retention.retry.export",
@@ -1537,9 +1488,7 @@ def test_retry_event_exports_committed_truth_without_repeating_deletion(tmp_path
         payload={},
         payload_hash="e" * 64,
     )
-    AuditEvent.objects.filter(pk=old_event.pk).update(
-        occurred_at=datetime(2000, 1, 1, tzinfo=UTC)
-    )
+    AuditEvent.objects.filter(pk=old_event.pk).update(occurred_at=datetime(2000, 1, 1, tzinfo=UTC))
     missing_directory = tmp_path / "later-created"
     with pytest.raises(CommandError, match="retry-event"):
         retention.Command().handle(
@@ -1589,9 +1538,7 @@ def test_commit_failure_never_attempts_certificate_export(monkeypatch, tmp_path)
         "get_retention_policy",
         lambda: {"auditevent": {"days": 1}},
     )
-    monkeypatch.setattr(
-        retention.djtz, "now", lambda: datetime(2026, 7, 28, 15, 30, tzinfo=UTC)
-    )
+    monkeypatch.setattr(retention.djtz, "now", lambda: datetime(2026, 7, 28, 15, 30, tzinfo=UTC))
     monkeypatch.setattr(retention.transaction, "atomic", lambda: FailingCommit())
     monkeypatch.setattr(retention.Command, "_validate_sql_plans", lambda *_args: None)
     monkeypatch.setattr(retention.Command, "_apply_run_plan", lambda *_args, **_kw: [])

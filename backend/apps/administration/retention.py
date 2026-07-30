@@ -9,6 +9,7 @@ window has elapsed. A held message or note also preserves its parent ticket
 and required graph. Holds are set by an authorised administrator and have an
 optional expiry.
 """
+
 from __future__ import annotations
 
 import hashlib
@@ -25,6 +26,7 @@ from uuid import UUID, uuid4
 from django.core.management.base import BaseCommand, CommandError, CommandParser
 from django.db import connection, transaction
 from django.db.models import Exists, OuterRef, Q
+from django.db.models.deletion import Collector
 from django.utils import timezone as djtz
 
 from .models import ConfigItem, DisposalEvent
@@ -64,14 +66,14 @@ class RetentionCommandOptions(TypedDict):
 # --- Preview retention classes (never used for destructive runs) --------
 
 DEFAULT_RETENTION: RetentionPolicy = {
-    "ticket":              {"days": 2555, "description": "7 years (operational record)"},
-    "ticket_message":      {"days": 2555, "description": "tied to ticket lifecycle"},
-    "ticket_note":         {"days": 2555, "description": "tied to ticket lifecycle"},
-    "auditevent":          {"days": 2555, "description": "audit trail, 7 years"},
-    "whatsapp_message":    {"days": 1095, "description": "3 years (channel record)"},
-    "integrationevent":    {"days": 1095, "description": "3 years (integration log)"},
-    "email_delivery":      {"days": 1095, "description": "3 years (delivery record)"},
-    "csat_response":       {"days": 2555, "description": "7 years"},
+    "ticket": {"days": 2555, "description": "7 years (operational record)"},
+    "ticket_message": {"days": 2555, "description": "tied to ticket lifecycle"},
+    "ticket_note": {"days": 2555, "description": "tied to ticket lifecycle"},
+    "auditevent": {"days": 2555, "description": "audit trail, 7 years"},
+    "whatsapp_message": {"days": 1095, "description": "3 years (channel record)"},
+    "integrationevent": {"days": 1095, "description": "3 years (integration log)"},
+    "email_delivery": {"days": 1095, "description": "3 years (delivery record)"},
+    "csat_response": {"days": 2555, "description": "7 years"},
 }
 
 
@@ -187,16 +189,18 @@ RETENTION_SQL_PLANS: dict[str, RetentionSqlPlan] = {
 
 
 def _is_retention_policy(value: object) -> TypeGuard[RetentionPolicy]:
-    return bool(value) and isinstance(value, dict) and all(
-        isinstance(table, str)
-        and isinstance(rule, dict)
-        and type(rule.get("days")) is int
-        and rule["days"] > 0
-        and set(rule).issubset({"days", "description"})
-        and (
-            "description" not in rule or isinstance(rule["description"], str)
+    return (
+        bool(value)
+        and isinstance(value, dict)
+        and all(
+            isinstance(table, str)
+            and isinstance(rule, dict)
+            and type(rule.get("days")) is int
+            and rule["days"] > 0
+            and set(rule).issubset({"days", "description"})
+            and ("description" not in rule or isinstance(rule["description"], str))
+            for table, rule in value.items()
         )
-        for table, rule in value.items()
     )
 
 
@@ -288,9 +292,7 @@ class Command(BaseCommand):
 
         if dry:
             summary = self._apply_run_plan(run_plan, dry=True)
-            preview_path = Path(
-                f"{out_prefix}preview-{now.strftime('%Y%m%dT%H%M%SZ')}.json"
-            )
+            preview_path = Path(f"{out_prefix}preview-{now.strftime('%Y%m%dT%H%M%SZ')}.json")
             preview: dict[str, JSONValue] = {
                 "schema": "mhc.retention.preview.v1",
                 "mode": "preview",
@@ -302,15 +304,11 @@ class Command(BaseCommand):
                 "rows": cast(JSONValue, summary),
             }
             self._write_certificate(preview_path, preview)
-            self.stdout.write(
-                self.style.SUCCESS(f"Would dispose - preview: {preview_path}")
-            )
+            self.stdout.write(self.style.SUCCESS(f"Would dispose - preview: {preview_path}"))
             return
 
         event_id = uuid4()
-        cert_path = Path(
-            f"{out_prefix}{now.strftime('%Y%m%dT%H%M%SZ')}-{event_id}.json"
-        )
+        cert_path = Path(f"{out_prefix}{now.strftime('%Y%m%dT%H%M%SZ')}-{event_id}.json")
         with transaction.atomic():
             self._validate_sql_plans(run_plan)
             event = self._create_disposal_event(
@@ -353,15 +351,11 @@ class Command(BaseCommand):
             certificate_path=str(cert_path),
         )
 
-    def _finalize_disposal_event(
-        self, event: DisposalEvent, summary: list[DisposalResult]
-    ) -> None:
+    def _finalize_disposal_event(self, event: DisposalEvent, summary: list[DisposalResult]) -> None:
         from apps.files.models import ObjectDeleteJob
 
         event.summary = summary
-        event.summary_hash = hashlib.sha256(
-            self._canonical_json(summary).encode()
-        ).hexdigest()
+        event.summary_hash = hashlib.sha256(self._canonical_json(summary).encode()).hexdigest()
         if not ObjectDeleteJob.objects.filter(
             disposal_event=event, completed_at__isnull=True
         ).exists():
@@ -393,13 +387,9 @@ class Command(BaseCommand):
         if event.object_cleanup_completed_at is None:
             raise CommandError("Object cleanup is still pending for this disposal event.")
         try:
-            self._write_certificate(
-                Path(event.certificate_path), self._certificate_payload(event)
-            )
+            self._write_certificate(Path(event.certificate_path), self._certificate_payload(event))
         except Exception as exc:
-            DisposalEvent.objects.filter(pk=event.pk).update(
-                export_error=type(exc).__name__
-            )
+            DisposalEvent.objects.filter(pk=event.pk).update(export_error=type(exc).__name__)
             raise CommandError(
                 f"Certificate export failed for committed event {event.pk}; "
                 f"retry with --retry-event {event.pk}."
@@ -409,8 +399,7 @@ class Command(BaseCommand):
         )
         self.stdout.write(
             self.style.SUCCESS(
-                f"Disposed - committed event {event.pk}; certificate: "
-                f"{event.certificate_path}"
+                f"Disposed - committed event {event.pk}; certificate: " f"{event.certificate_path}"
             )
         )
 
@@ -427,10 +416,7 @@ class Command(BaseCommand):
         *,
         dry: bool,
     ) -> list[DisposalResult]:
-        return [
-            self._dispose_table(table, cutoff, rule, dry)
-            for table, rule, cutoff in run_plan
-        ]
+        return [self._dispose_table(table, cutoff, rule, dry) for table, rule, cutoff in run_plan]
 
     def _validate_sql_plans(
         self,
@@ -467,7 +453,7 @@ class Command(BaseCommand):
                 ("tickets.TicketLink", "from_ticket", "CASCADE"),
                 ("tickets.TicketLink", "to_ticket", "CASCADE"),
                 ("tickets.Watcher", "ticket", "CASCADE"),
-                ("tickets.TicketCustodyEvent", "ticket", "CASCADE"),
+                ("tickets.TicketCustodyEvent", "ticket", "DO_NOTHING"),
                 ("workflow.TransitionHistory", "ticket", "CASCADE"),
                 ("sla.SlaInstance", "ticket", "CASCADE"),
                 ("files.Attachment", "ticket", "CASCADE"),
@@ -503,9 +489,7 @@ class Command(BaseCommand):
         return cast(
             "QuerySet[Model]",
             Ticket.objects.filter(
-                Q(legal_hold=True)
-                | Q(messages__legal_hold=True)
-                | Q(notes__legal_hold=True)
+                Q(legal_hold=True) | Q(messages__legal_hold=True) | Q(notes__legal_hold=True)
             ).values("pk"),
         )
 
@@ -526,14 +510,10 @@ class Command(BaseCommand):
         if cutoff is None:
             blocking = related_queryset
         else:
-            blocking = related_queryset.filter(
-                **{f"{timestamp_field}__gte": cutoff}
-            )
+            blocking = related_queryset.filter(**{f"{timestamp_field}__gte": cutoff})
         return queryset.exclude(Exists(blocking))
 
-    def _orm_disposal_queryset(
-        self, table: str, cutoff: datetime
-    ) -> QuerySet[Model]:
+    def _orm_disposal_queryset(self, table: str, cutoff: datetime) -> QuerySet[Model]:
         """Return graph-held and dependency-age-aware disposal candidates."""
         from apps.csat.models import CsatResponse
         from apps.email_channel.models import EmailDelivery
@@ -552,12 +532,10 @@ class Command(BaseCommand):
 
         held_ticket_ids = self._held_ticket_ids()
         if table == "ticket":
-            queryset: QuerySet[Model] = Ticket.objects.filter(
-                created_at__lt=cutoff
-            ).exclude(pk__in=held_ticket_ids)
-            relations: tuple[
-                tuple[QuerySet[Model], str | None, str], ...
-            ] = (
+            queryset: QuerySet[Model] = Ticket.objects.filter(created_at__lt=cutoff).exclude(
+                pk__in=held_ticket_ids
+            )
+            relations: tuple[tuple[QuerySet[Model], str | None, str], ...] = (
                 (
                     TicketMessage.objects.filter(ticket_id=OuterRef("pk")),
                     "ticket_message",
@@ -569,9 +547,7 @@ class Command(BaseCommand):
                     "created_at",
                 ),
                 (
-                    EmailDelivery.objects.filter(
-                        ticket_message__ticket_id=OuterRef("pk")
-                    ),
+                    EmailDelivery.objects.filter(ticket_message__ticket_id=OuterRef("pk")),
                     "email_delivery",
                     "created_at",
                 ),
@@ -591,9 +567,7 @@ class Command(BaseCommand):
                     "uploaded_at",
                 ),
                 (
-                    AttachmentAccessLog.objects.filter(
-                        attachment__ticket_id=OuterRef("pk")
-                    ),
+                    AttachmentAccessLog.objects.filter(attachment__ticket_id=OuterRef("pk")),
                     None,
                     "at",
                 ),
@@ -608,9 +582,7 @@ class Command(BaseCommand):
                     "updated_at",
                 ),
                 (
-                    SlaPauseHistory.objects.filter(
-                        instance__ticket_id=OuterRef("pk")
-                    ),
+                    SlaPauseHistory.objects.filter(instance__ticket_id=OuterRef("pk")),
                     None,
                     "at",
                 ),
@@ -645,9 +617,9 @@ class Command(BaseCommand):
                 )
             return queryset
         if table == "ticket_message":
-            queryset = TicketMessage.objects.filter(
-                created_at__lt=cutoff
-            ).exclude(ticket_id__in=held_ticket_ids)
+            queryset = TicketMessage.objects.filter(created_at__lt=cutoff).exclude(
+                ticket_id__in=held_ticket_ids
+            )
             for related, cutoff_name, timestamp_field in (
                 (
                     EmailDelivery.objects.filter(ticket_message_id=OuterRef("pk")),
@@ -686,9 +658,7 @@ class Command(BaseCommand):
             )
         raise ValueError(f"No ORM retention plan for {table}")
 
-    def _orm_base_queryset(
-        self, table: str, cutoff: datetime
-    ) -> QuerySet[Model]:
+    def _orm_base_queryset(self, table: str, cutoff: datetime) -> QuerySet[Model]:
         from apps.csat.models import CsatResponse
         from apps.email_channel.models import EmailDelivery
         from apps.tickets.models import Ticket, TicketMessage, TicketNote
@@ -713,13 +683,9 @@ class Command(BaseCommand):
         if table == "ticket":
             return list(queryset.values_list("pk", flat=True))
         if table in {"ticket_message", "ticket_note", "whatsapp_message", "csat_response"}:
-            return list(
-                queryset.exclude(ticket_id=None).values_list("ticket_id", flat=True)
-            )
+            return list(queryset.exclude(ticket_id=None).values_list("ticket_id", flat=True))
         if table == "email_delivery":
-            return list(
-                queryset.values_list("ticket_message__ticket_id", flat=True)
-            )
+            return list(queryset.values_list("ticket_message__ticket_id", flat=True))
         return []
 
     def _lock_hold_graph(self, ticket_ids: list[object]) -> None:
@@ -752,9 +718,7 @@ class Command(BaseCommand):
         if not ticket_ids:
             return
         attachments = list(
-            Attachment.objects.select_for_update()
-            .filter(ticket_id__in=ticket_ids)
-            .order_by("pk")
+            Attachment.objects.select_for_update().filter(ticket_id__in=ticket_ids).order_by("pk")
         )
         missing = [
             attachment
@@ -783,17 +747,13 @@ class Command(BaseCommand):
             ]
         )
 
-    def _delete_with_orm(
-        self, table: str, cutoff: datetime, model_label: str
-    ) -> OrmDisposalCounts:
+    def _delete_with_orm(self, table: str, cutoff: datetime, model_label: str) -> OrmDisposalCounts:
         if (
             table == "ticket"
             and connection.vendor == "postgresql"
             and not connection.in_atomic_block
         ):
-            raise CommandError(
-                "Ticket custody disposal requires an active database transaction."
-            )
+            raise CommandError("Ticket custody disposal requires an active database transaction.")
         ticket_ids = self._candidate_ticket_ids(table, cutoff)
         self._lock_hold_graph(ticket_ids)
         rows_preserved_legal_hold = self._orm_held_count(table, cutoff)
@@ -814,7 +774,10 @@ class Command(BaseCommand):
             from apps.tickets.models import Ticket
 
             queryset = Ticket._base_manager.filter(pk__in=candidate_ids)
-            disposed = queryset._raw_delete(connection.alias)
+            collector = Collector(using=connection.alias)
+            collector.collect(list(queryset))
+            _total_deleted, deleted_by_model = collector.delete()
+            disposed = deleted_by_model.get("tickets.Ticket", 0)
             return OrmDisposalCounts(
                 rows_selected=rows_selected,
                 rows_disposed=disposed,
@@ -840,9 +803,7 @@ class Command(BaseCommand):
         }:
             return queryset.filter(ticket_id__in=held_ticket_ids).count()
         if table == "email_delivery":
-            return queryset.filter(
-                ticket_message__ticket_id__in=held_ticket_ids
-            ).count()
+            return queryset.filter(ticket_message__ticket_id__in=held_ticket_ids).count()
         return 0
 
     @staticmethod
@@ -896,6 +857,7 @@ class Command(BaseCommand):
         dry: bool,
     ) -> DisposalResult:
         from django.db import connection
+
         plan = RETENTION_SQL_PLANS.get(table)
         if plan is None:
             self.stdout.write(f"[skip] {table}: unsupported retention table")
@@ -907,9 +869,7 @@ class Command(BaseCommand):
                 rows_preserved_legal_hold = self._orm_held_count(table, cutoff)
                 rows_selected = self._orm_disposal_queryset(table, cutoff).count()
             else:
-                counts = self._delete_with_orm(
-                    table, cutoff, plan.orm_model_label
-                )
+                counts = self._delete_with_orm(table, cutoff, plan.orm_model_label)
                 rows_selected = counts.rows_selected
                 rows_disposed = counts.rows_disposed
                 rows_preserved_legal_hold = counts.legal_hold_preserved
@@ -927,8 +887,7 @@ class Command(BaseCommand):
         rule_days = rule.get("days", 0)
         if dry:
             preview_hash = hashlib.sha256(
-                f"preview:{table}:{cutoff}:{rows_selected}:"
-                f"{rows_preserved_legal_hold}".encode()
+                f"preview:{table}:{cutoff}:{rows_selected}:" f"{rows_preserved_legal_hold}".encode()
             ).hexdigest()
             self.stdout.write(
                 f"  {table:<32} cutoff={cutoff.date()} selected={rows_selected} "
@@ -937,9 +896,7 @@ class Command(BaseCommand):
             return {
                 "table": table,
                 "rows_selected": rows_selected,
-                "retention_class_days": (
-                    rule_days if isinstance(rule_days, int) else 0
-                ),
+                "retention_class_days": (rule_days if isinstance(rule_days, int) else 0),
                 "cutoff": cutoff.isoformat(),
                 "legal_hold_preserved": rows_preserved_legal_hold,
                 "selection_hash": preview_hash,

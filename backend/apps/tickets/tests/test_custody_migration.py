@@ -6,6 +6,7 @@ from uuid import UUID
 
 import pytest
 from django.db import DatabaseError, connection, transaction
+from django.db.models.deletion import CASCADE, DO_NOTHING
 
 from apps.audit.models import AuditEvent
 from apps.catalogue.models import RequestType
@@ -72,9 +73,7 @@ def test_backfill_reconstructs_deterministic_verifiable_history(basic_world):
     ticket = _ticket(basic_world, number="OP-LEGACY-BACKFILL-1")
     first = _user(username="first", subject="agent-first")
     second = _user(username="second", subject="agent-second")
-    first_queue = ServiceLocation.objects.create(
-        office=basic_world["office"], name="Legacy intake"
-    )
+    first_queue = ServiceLocation.objects.create(office=basic_world["office"], name="Legacy intake")
     created_at = datetime(2025, 1, 2, 8, 0, tzinfo=UTC)
     Ticket.objects.filter(pk=ticket.pk).update(created_at=created_at)
     _audit(
@@ -213,6 +212,71 @@ def test_0006_rollback_restores_trigger_fk_index_and_legacy_data(basic_world):
                 cursor.execute("DELETE FROM ticket WHERE id = %s", [ticket.pk])
     finally:
         MigrationExecutor(connection).migrate([("tickets", "0006_backfill_ticket_custody")])
+
+
+def test_0007_keeps_database_cascade_while_collector_skips_custody():
+    """The ORM state omits custody, but the database cascade remains authoritative."""
+    if connection.vendor != "postgresql":
+        pytest.skip("PostgreSQL migration coverage")
+    from django.db.migrations.executor import MigrationExecutor
+
+    migration = "0007_ticket_custody_collector_state"
+    try:
+        executor = MigrationExecutor(connection)
+        executor.migrate([("tickets", "0006_backfill_ticket_custody")])
+        before_apps = (
+            MigrationExecutor(connection)
+            .loader.project_state([("tickets", "0006_backfill_ticket_custody")])
+            .apps
+        )
+        assert (
+            before_apps.get_model("tickets", "TicketCustodyEvent")
+            ._meta.get_field("ticket")
+            .remote_field.on_delete
+            is CASCADE
+        )
+
+        executor = MigrationExecutor(connection)
+        executor.migrate([("tickets", migration)])
+        after_apps = (
+            MigrationExecutor(connection).loader.project_state([("tickets", migration)]).apps
+        )
+        assert (
+            after_apps.get_model("tickets", "TicketCustodyEvent")
+            ._meta.get_field("ticket")
+            .remote_field.on_delete
+            is DO_NOTHING
+        )
+        with connection.cursor() as cursor:
+            cursor.execute(
+                "SELECT confdeltype FROM pg_constraint "
+                "WHERE conrelid = 'ticket_custody_event'::regclass "
+                "AND confrelid = 'ticket'::regclass AND contype = 'f'"
+            )
+            assert cursor.fetchone() == ("c",)
+
+        executor = MigrationExecutor(connection)
+        executor.migrate([("tickets", "0006_backfill_ticket_custody")])
+        rollback_apps = (
+            MigrationExecutor(connection)
+            .loader.project_state([("tickets", "0006_backfill_ticket_custody")])
+            .apps
+        )
+        assert (
+            rollback_apps.get_model("tickets", "TicketCustodyEvent")
+            ._meta.get_field("ticket")
+            .remote_field.on_delete
+            is CASCADE
+        )
+        with connection.cursor() as cursor:
+            cursor.execute(
+                "SELECT confdeltype FROM pg_constraint "
+                "WHERE conrelid = 'ticket_custody_event'::regclass "
+                "AND confrelid = 'ticket'::regclass AND contype = 'f'"
+            )
+            assert cursor.fetchone() == ("c",)
+    finally:
+        MigrationExecutor(connection).migrate([("tickets", migration)])
 
 
 def test_backfill_synthesizes_only_a_minimal_legacy_created_event(basic_world):

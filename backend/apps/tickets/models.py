@@ -4,12 +4,15 @@ This is the source of truth for the ticket lifecycle. Cross-module writes
 to this table go through `services.TicketService` so invariants are enforced
 inside a single DB transaction.
 """
+
 from __future__ import annotations
 
 import uuid
+from collections.abc import Iterable
 
 from django.core.exceptions import ValidationError
 from django.db import models
+from django.db.models.base import ModelBase
 from django.utils import timezone
 
 
@@ -17,6 +20,9 @@ class ProtectedTicketQuerySet(models.QuerySet["Ticket"]):
     """Prevent ordinary application code from deleting ticket aggregates."""
 
     def delete(self) -> tuple[int, dict[str, int]]:
+        raise ValidationError("Tickets may only be deleted by approved retention.")
+
+    def _raw_delete(self, using: str) -> int:
         raise ValidationError("Tickets may only be deleted by approved retention.")
 
 
@@ -52,9 +58,7 @@ class Ticket(models.Model):
     domain = models.CharField(max_length=16, choices=Domain.choices)
     title = models.CharField(max_length=255)
     description = models.TextField(blank=True)
-    status = models.ForeignKey(
-        "workflow.Status", on_delete=models.PROTECT, related_name="tickets"
-    )
+    status = models.ForeignKey("workflow.Status", on_delete=models.PROTECT, related_name="tickets")
     priority = models.CharField(max_length=8, choices=Priority.choices, default=Priority.P3)
     channel = models.CharField(max_length=16, choices=Channel.choices)
     source_account = models.CharField(max_length=255, blank=True)
@@ -133,6 +137,7 @@ class Ticket(models.Model):
     objects = ProtectedTicketQuerySet.as_manager()
 
     class Meta:
+        base_manager_name = "objects"
         db_table = "ticket"
         indexes = [
             models.Index(fields=["domain", "status"]),
@@ -180,7 +185,7 @@ class TicketCustodyEvent(models.Model):
     id = models.UUIDField(primary_key=True, default=uuid.uuid4, editable=False)
     ticket = models.ForeignKey(
         Ticket,
-        on_delete=models.CASCADE,
+        on_delete=models.DO_NOTHING,
         related_name="custody_events",
     )
     sequence = models.PositiveBigIntegerField()
@@ -222,10 +227,16 @@ class TicketCustodyEvent(models.Model):
     def __str__(self) -> str:  # pragma: no cover
         return f"custody:{self.ticket_id} sequence:{self.sequence}"
 
-    def save(self, *args: object, **kwargs: object) -> None:
+    def save(
+        self,
+        force_insert: bool | tuple[ModelBase, ...] = False,
+        force_update: bool = False,
+        using: str | None = None,
+        update_fields: Iterable[str] | None = None,
+    ) -> None:
         if not self._state.adding:
             raise ValidationError("Ticket custody events are immutable.")
-        super().save(*args, **kwargs)
+        super().save(force_insert, force_update, using, update_fields)
 
     def delete(self, *args: object, **kwargs: object) -> tuple[int, dict[str, int]]:
         raise ValidationError("Ticket custody events are immutable.")
@@ -293,12 +304,8 @@ class TicketLink(models.Model):
         IT_CHILD = "it_child", "IT child of operational"
 
     id = models.UUIDField(primary_key=True, default=uuid.uuid4, editable=False)
-    from_ticket = models.ForeignKey(
-        Ticket, on_delete=models.CASCADE, related_name="links_from"
-    )
-    to_ticket = models.ForeignKey(
-        Ticket, on_delete=models.CASCADE, related_name="links_to"
-    )
+    from_ticket = models.ForeignKey(Ticket, on_delete=models.CASCADE, related_name="links_from")
+    to_ticket = models.ForeignKey(Ticket, on_delete=models.CASCADE, related_name="links_to")
     kind = models.CharField(max_length=16, choices=Kind.choices)
     created_at = models.DateTimeField(auto_now_add=True)
 
