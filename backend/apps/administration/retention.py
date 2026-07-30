@@ -810,9 +810,16 @@ class Command(BaseCommand):
                 legal_hold_preserved=rows_preserved_legal_hold,
             )
         queryset = self._orm_base_queryset(table, cutoff).filter(pk__in=candidate_ids)
-        if table == "ticket" and connection.vendor == "postgresql":
-            with connection.cursor() as cursor:
-                cursor.execute("SET LOCAL mhc.allow_ticket_custody_delete = 'on'")
+        if table == "ticket":
+            from apps.tickets.models import Ticket
+
+            queryset = Ticket._base_manager.filter(pk__in=candidate_ids)
+            disposed = queryset._raw_delete(connection.alias)
+            return OrmDisposalCounts(
+                rows_selected=rows_selected,
+                rows_disposed=disposed,
+                legal_hold_preserved=rows_preserved_legal_hold,
+            )
         _total_deleted, deleted_by_model = queryset.delete()
         return OrmDisposalCounts(
             rows_selected=rows_selected,

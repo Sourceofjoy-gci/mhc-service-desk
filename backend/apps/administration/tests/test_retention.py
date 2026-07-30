@@ -7,8 +7,9 @@ from pathlib import Path
 from types import MethodType
 
 import pytest
+from django.core.exceptions import ValidationError
 from django.core.management.base import CommandError
-from django.db import DatabaseError, connection
+from django.db import connection
 
 from apps.administration import retention
 
@@ -51,7 +52,7 @@ def test_direct_ticket_deletion_cannot_bypass_custody_protection(basic_world):
 
     ticket = _old_ticket_with_custody(basic_world, number="OP-RETENTION-DIRECT-GUARD")
 
-    with pytest.raises(DatabaseError, match="immutable"):
+    with pytest.raises(ValidationError, match="approved retention"):
         Ticket.objects.filter(pk=ticket.pk).delete()
 
 

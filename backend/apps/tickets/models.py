@@ -13,6 +13,13 @@ from django.db import models
 from django.utils import timezone
 
 
+class ProtectedTicketQuerySet(models.QuerySet["Ticket"]):
+    """Prevent ordinary application code from deleting ticket aggregates."""
+
+    def delete(self) -> tuple[int, dict[str, int]]:
+        raise ValidationError("Tickets may only be deleted by approved retention.")
+
+
 class Ticket(models.Model):
     """A unit of work tracked from intake to closure."""
 
@@ -123,6 +130,8 @@ class Ticket(models.Model):
     created_at = models.DateTimeField(auto_now_add=True)
     updated_at = models.DateTimeField(auto_now=True)
 
+    objects = ProtectedTicketQuerySet.as_manager()
+
     class Meta:
         db_table = "ticket"
         indexes = [
@@ -137,6 +146,9 @@ class Ticket(models.Model):
 
     def __str__(self) -> str:  # pragma: no cover
         return self.number
+
+    def delete(self, *args: object, **kwargs: object) -> tuple[int, dict[str, int]]:
+        raise ValidationError("Tickets may only be deleted by approved retention.")
 
 
 class ImmutableCustodyQuerySet(models.QuerySet["TicketCustodyEvent"]):

@@ -2,8 +2,10 @@
 
 from datetime import UTC, datetime, timedelta
 from importlib import import_module
+from uuid import UUID
 
 import pytest
+from django.db import connection
 
 from apps.audit.models import AuditEvent
 from apps.catalogue.models import RequestType
@@ -146,6 +148,36 @@ def test_backfill_reconstructs_deterministic_verifiable_history(basic_world):
     assert verify_custody_chain(ticket) is True
 
 
+@pytest.mark.django_db(transaction=True)
+def test_0006_rollback_removes_postgresql_trigger_and_restores_leaf():
+    """Rollback intentionally keeps backfill rows but must remove DB protection."""
+    if connection.vendor != "postgresql":
+        pytest.skip("PostgreSQL migration coverage")
+    from django.db.migrations.executor import MigrationExecutor
+
+    executor = MigrationExecutor(connection)
+    try:
+        executor.migrate([("tickets", "0005_ticketcustodyevent")])
+        executor = MigrationExecutor(connection)
+        executor.migrate([("tickets", "0006_backfill_ticket_custody")])
+        with connection.cursor() as cursor:
+            cursor.execute(
+                "SELECT EXISTS (SELECT 1 FROM pg_trigger WHERE tgname = %s)",
+                ["ticket_custody_immutable"],
+            )
+            assert cursor.fetchone()[0] is True
+        executor = MigrationExecutor(connection)
+        executor.migrate([("tickets", "0005_ticketcustodyevent")])
+        with connection.cursor() as cursor:
+            cursor.execute(
+                "SELECT EXISTS (SELECT 1 FROM pg_trigger WHERE tgname = %s)",
+                ["ticket_custody_immutable"],
+            )
+            assert cursor.fetchone()[0] is False
+    finally:
+        MigrationExecutor(connection).migrate([("tickets", "0006_backfill_ticket_custody")])
+
+
 def test_backfill_synthesizes_only_a_minimal_legacy_created_event(basic_world):
     """A missing creation audit must not fabricate ownership or routing facts."""
     backfill_ticket_custody = import_module(
@@ -167,4 +199,67 @@ def test_backfill_synthesizes_only_a_minimal_legacy_created_event(basic_world):
     assert event.new_owner is None
     assert event.previous_queue is None
     assert event.new_queue is None
+    assert verify_custody_chain(ticket) is True
+
+
+def test_backfill_keeps_raw_assignment_direction_and_uses_explicit_tie_order(basic_world):
+    """Deleted users and equal timestamps must not alter historical event order."""
+    backfill_ticket_custody = import_module(
+        "apps.tickets.migrations.0006_backfill_ticket_custody"
+    ).backfill_ticket_custody
+    ticket = _ticket(basic_world, number="OP-LEGACY-BACKFILL-TIES")
+    created_at = datetime(2025, 1, 4, 8, 0, tzinfo=UTC)
+    Ticket.objects.filter(pk=ticket.pk).update(created_at=created_at)
+    Status.objects.filter(domain="operational", is_initial=True).update(is_initial=False)
+    Status.objects.create(
+        id=UUID("00000000-0000-0000-0000-000000000001"),
+        domain="operational",
+        code="legacy-first",
+        name="Legacy first",
+        is_initial=True,
+        order=0,
+    )
+    Status.objects.create(
+        id=UUID("ffffffff-ffff-ffff-ffff-ffffffffffff"),
+        domain="operational",
+        code="legacy-second",
+        name="Legacy second",
+        is_initial=True,
+        order=0,
+    )
+    _audit(
+        ticket=ticket,
+        action="ticket.assignment.changed",
+        actor_subject="legacy",
+        before={"assignee": None},
+        after={"assignee": "missing-user"},
+        occurred_at=created_at,
+    )
+    _audit(
+        ticket=ticket,
+        action="ticket.assignment.changed",
+        actor_subject="legacy",
+        before={"assignee": "missing-user"},
+        after={"assignee": None},
+        occurred_at=created_at,
+    )
+    _audit(
+        ticket=ticket,
+        action="ticket.created",
+        actor_subject="legacy",
+        before={},
+        after={},
+        occurred_at=created_at,
+    )
+
+    from django.apps import apps as django_apps
+
+    backfill_ticket_custody(django_apps, None)
+
+    events = list(ticket.custody_events.all())
+    assert events[0].event_type == "created"
+    assert {event.event_type for event in events[1:]} == {"assigned", "unassigned"}
+    assert events[0].new_status == {"code": "legacy-first", "label": "Legacy first"}
+    assert all(event.new_owner is None for event in events[1:])
+    assert all(event.previous_owner is None for event in events[1:])
     assert verify_custody_chain(ticket) is True

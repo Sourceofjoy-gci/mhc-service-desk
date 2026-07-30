@@ -5,7 +5,7 @@ from zoneinfo import ZoneInfo
 
 import pytest
 from django.core.exceptions import ValidationError
-from django.db import DatabaseError, IntegrityError, connection
+from django.db import DatabaseError, IntegrityError, connection, transaction
 from django.utils import timezone
 
 from apps.catalogue.models import RequestType
@@ -358,3 +358,10 @@ def test_postgresql_rejects_raw_custody_updates_and_deletes_but_allows_insert(ti
     with pytest.raises(DatabaseError, match="immutable"):
         with connection.cursor() as cursor:
             cursor.execute("DELETE FROM ticket_custody_event WHERE id = %s", [event.id])
+    def delete_with_old_guc() -> None:
+        with transaction.atomic(), connection.cursor() as cursor:
+            cursor.execute("SET LOCAL mhc.allow_ticket_custody_delete = 'on'")
+            cursor.execute("DELETE FROM ticket_custody_event WHERE id = %s", [event.id])
+
+    with pytest.raises(DatabaseError, match="immutable"):
+        delete_with_old_guc()

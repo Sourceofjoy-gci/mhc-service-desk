@@ -2,6 +2,7 @@
 
 import hashlib
 import json
+from collections import defaultdict
 from datetime import UTC
 
 from django.db import migrations
@@ -85,6 +86,18 @@ def backfill_ticket_custody(apps, schema_editor):
     users_by_subject = {user.keycloak_subject: user for user in User.objects.all()}
     queues_by_id = {str(queue.pk): queue for queue in ServiceLocation.objects.all()}
     statuses_by_id = {str(status.pk): status for status in Status.objects.all()}
+    initial_statuses = {}
+    for initial_status in Status.objects.filter(is_initial=True).order_by("domain", "order", "id"):
+        initial_statuses.setdefault(initial_status.domain, initial_status)
+    existing_ticket_ids = set(TicketCustodyEvent.objects.values_list("ticket_id", flat=True))
+    audits_by_ticket = defaultdict(list)
+    for audit in AuditEvent.objects.filter(object_type="ticket").order_by("occurred_at", "id"):
+        audits_by_ticket[audit.object_id].append(audit)
+    transitions_by_ticket = defaultdict(list)
+    for transition in TransitionHistory.objects.select_related("from_status", "to_status").order_by(
+        "occurred_at", "id"
+    ):
+        transitions_by_ticket[transition.ticket_id].append(transition)
 
     def actor(subject):
         user = users_by_subject.get(subject)
@@ -125,14 +138,14 @@ def backfill_ticket_custody(apps, schema_editor):
         return {"code": workflow_status.code, "label": workflow_status.name}
 
     for ticket in Ticket.objects.all().iterator():
-        if TicketCustodyEvent.objects.filter(ticket_id=ticket.pk).exists():
+        if ticket.pk in existing_ticket_ids:
             continue
 
         sources = []
-        audits = AuditEvent.objects.filter(object_type="ticket", object_id=str(ticket.pk))
-        created_audit = audits.filter(action="ticket.created").order_by("occurred_at", "id").first()
+        audits = audits_by_ticket.get(str(ticket.pk), [])
+        created_audit = next((audit for audit in audits if audit.action == "ticket.created"), None)
         if created_audit is None:
-            initial_status = Status.objects.filter(domain=ticket.domain, is_initial=True).first()
+            initial_status = initial_statuses.get(ticket.domain)
             created = _empty_event(
                 event_type="created",
                 occurred_at=ticket.created_at,
@@ -142,7 +155,7 @@ def backfill_ticket_custody(apps, schema_editor):
                 source_record_id="",
             )
             created["new_status"] = status(initial_status.pk) if initial_status else None
-            sources.append((ticket.created_at, "created", "", created))
+            sources.append((ticket.created_at, 0, "", created))
         else:
             created = _empty_event(
                 event_type="created",
@@ -152,11 +165,13 @@ def backfill_ticket_custody(apps, schema_editor):
                 source_record_type="audit_event",
                 source_record_id=str(created_audit.pk),
             )
-            initial_status = Status.objects.filter(domain=ticket.domain, is_initial=True).first()
+            initial_status = initial_statuses.get(ticket.domain)
             created["new_status"] = status(initial_status.pk) if initial_status else None
-            sources.append((created_audit.occurred_at, "created", str(created_audit.pk), created))
+            sources.append((created_audit.occurred_at, 0, str(created_audit.pk), created))
 
-        for audit in audits.exclude(pk=created_audit.pk if created_audit else None):
+        for audit in audits:
+            if created_audit is not None and audit.pk == created_audit.pk:
+                continue
             payload = audit.payload if isinstance(audit.payload, dict) else {}
             before = payload.get("before", {}) if isinstance(payload.get("before", {}), dict) else {}
             after = payload.get("after", {}) if isinstance(payload.get("after", {}), dict) else {}
@@ -164,9 +179,17 @@ def backfill_ticket_custody(apps, schema_editor):
                 "ticket.work_state.changed",
                 "ticket.assignment.changed",
             } and ("assignee" in before or "assignee" in after):
-                previous_owner = owner(before.get("assignee"))
-                new_owner = owner(after.get("assignee"))
-                event_type = "assigned" if previous_owner is None and new_owner is not None else "unassigned" if previous_owner is not None and new_owner is None else "reassigned"
+                previous_assignee = before.get("assignee")
+                new_assignee = after.get("assignee")
+                previous_owner = owner(previous_assignee)
+                new_owner = owner(new_assignee)
+                event_type = (
+                    "assigned"
+                    if previous_assignee in (None, "") and new_assignee not in (None, "")
+                    else "unassigned"
+                    if previous_assignee not in (None, "") and new_assignee in (None, "")
+                    else "reassigned"
+                )
                 event = _empty_event(
                     event_type=event_type,
                     occurred_at=audit.occurred_at,
@@ -177,7 +200,7 @@ def backfill_ticket_custody(apps, schema_editor):
                 )
                 event["previous_owner"] = previous_owner
                 event["new_owner"] = new_owner
-                sources.append((audit.occurred_at, "assignment", str(audit.pk), event))
+                sources.append((audit.occurred_at, 1, str(audit.pk), event))
             if "queue" in before or "queue" in after:
                 event = _empty_event(
                     event_type="queue_changed",
@@ -189,9 +212,9 @@ def backfill_ticket_custody(apps, schema_editor):
                 )
                 event["previous_queue"] = queue(before.get("queue"))
                 event["new_queue"] = queue(after.get("queue"))
-                sources.append((audit.occurred_at, "queue", str(audit.pk), event))
+                sources.append((audit.occurred_at, 2, str(audit.pk), event))
 
-        transitions = TransitionHistory.objects.filter(ticket_id=ticket.pk).select_related("from_status", "to_status")
+        transitions = transitions_by_ticket.get(ticket.pk, [])
         for transition in transitions:
             if transition.to_status.is_initial:
                 continue
@@ -206,7 +229,7 @@ def backfill_ticket_custody(apps, schema_editor):
             event["previous_status"] = status(transition.from_status_id)
             event["new_status"] = status(transition.to_status_id)
             event["reason"] = transition.reason
-            sources.append((transition.occurred_at, "transition", str(transition.pk), event))
+            sources.append((transition.occurred_at, 3, str(transition.pk), event))
 
         previous_hash = ""
         for sequence, (_occurred_at, _source_type, _source_id, event) in enumerate(sorted(sources, key=lambda source: source[:3]), start=1):
@@ -243,13 +266,32 @@ def backfill_ticket_custody(apps, schema_editor):
 def create_ticket_custody_protection(apps, schema_editor):
     if schema_editor.connection.vendor != "postgresql":
         return
+    with schema_editor.connection.cursor() as cursor:
+        constraints = schema_editor.connection.introspection.get_constraints(
+            cursor, "ticket_custody_event"
+        )
+    constraint_name = next(
+        name
+        for name, details in constraints.items()
+        if details["columns"] == ["ticket_id"]
+        and details["foreign_key"] == ("ticket", "id")
+    )
+    quoted_constraint = schema_editor.quote_name(constraint_name)
     schema_editor.execute(
-        """
+        f"""
+        ALTER TABLE ticket_custody_event DROP CONSTRAINT {quoted_constraint};
+        ALTER TABLE ticket_custody_event
+        ADD CONSTRAINT {quoted_constraint}
+        FOREIGN KEY (ticket_id) REFERENCES ticket(id)
+        ON DELETE CASCADE DEFERRABLE INITIALLY DEFERRED;
+
         CREATE OR REPLACE FUNCTION reject_ticket_custody_mutation()
         RETURNS trigger AS $$
         BEGIN
           IF TG_OP = 'DELETE'
-             AND current_setting('mhc.allow_ticket_custody_delete', true) = 'on' THEN
+             AND NOT EXISTS (
+               SELECT 1 FROM ticket WHERE id = OLD.ticket_id
+             ) THEN
             RETURN OLD;
           END IF;
           RAISE EXCEPTION 'ticket custody events are immutable';
@@ -266,10 +308,26 @@ def create_ticket_custody_protection(apps, schema_editor):
 def drop_ticket_custody_protection(apps, schema_editor):
     if schema_editor.connection.vendor != "postgresql":
         return
+    with schema_editor.connection.cursor() as cursor:
+        constraints = schema_editor.connection.introspection.get_constraints(
+            cursor, "ticket_custody_event"
+        )
+    constraint_name = next(
+        name
+        for name, details in constraints.items()
+        if details["columns"] == ["ticket_id"]
+        and details["foreign_key"] == ("ticket", "id")
+    )
+    quoted_constraint = schema_editor.quote_name(constraint_name)
     schema_editor.execute(
-        """
+        f"""
         DROP TRIGGER IF EXISTS ticket_custody_immutable ON ticket_custody_event;
         DROP FUNCTION IF EXISTS reject_ticket_custody_mutation();
+        ALTER TABLE ticket_custody_event DROP CONSTRAINT {quoted_constraint};
+        ALTER TABLE ticket_custody_event
+        ADD CONSTRAINT {quoted_constraint}
+        FOREIGN KEY (ticket_id) REFERENCES ticket(id)
+        DEFERRABLE INITIALLY DEFERRED;
         """
     )
 
