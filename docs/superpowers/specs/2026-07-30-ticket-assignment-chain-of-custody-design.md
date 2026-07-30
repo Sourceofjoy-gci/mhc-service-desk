@@ -1,7 +1,7 @@
 # Internal Ticket Assignment and Chain-of-Custody Design
 
 **Date:** 2026-07-30
-**Status:** Approved design; awaiting written-spec review
+**Status:** Approved; implementation plans ready
 **Application:** MHC Service Desk
 **Primary users:** Master, Deputy Master, Assistant Master, Assistant Accountant, Accountant, Senior Accountant, Principal Accountant, Financial Controller, Estate Examiner, Records Clerk, Data Clerk, internal supervisors/leads, security responders, and auditors
 
