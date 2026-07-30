@@ -12,7 +12,8 @@ from zoneinfo import ZoneInfo
 import pytest
 from django.apps import apps as django_apps
 from django.core.exceptions import ValidationError
-from django.db import close_old_connections, transaction
+from django.db import close_old_connections, connection, transaction
+from django.test import TransactionTestCase
 from django.utils import timezone
 from freezegun import freeze_time
 
@@ -20,6 +21,7 @@ from apps.catalogue.models import Service
 from apps.contacts.models import Contact
 from apps.organisations.models import Office
 from apps.sla.models import BusinessCalendar, SlaInstance, SlaPauseHistory, SlaPolicy
+from apps.sla.seed_sla import seed_sla
 from apps.sla.serializers import serialize_sla_clock
 from apps.sla.services import (
     add_business_seconds,
@@ -29,7 +31,10 @@ from apps.sla.services import (
     pause_sla,
     resume_sla,
 )
+from apps.tickets import services as ticket_services
+from apps.tickets.custody import verify_custody_chain
 from apps.tickets.models import Ticket
+from apps.tickets.seed_workflow import seed_workflow
 from apps.workflow.models import Status
 
 pytestmark = pytest.mark.django_db
@@ -517,3 +522,154 @@ def test_evaluator_skips_an_instance_locked_by_a_concurrent_sweep(
     assert evaluate_open_slas() == 0
     instance.refresh_from_db()
     assert instance.breached_at == breached_at
+
+
+class TestSlaTransitionLockOrder(TransactionTestCase):
+    """Exercise evaluator and workflow locks on independent PostgreSQL connections."""
+
+    def setUp(self) -> None:
+        if connection.vendor != "postgresql":
+            self.skipTest("This lock-order regression requires PostgreSQL.")
+
+        seed_workflow()
+        seed_sla()
+        region = django_apps.get_model("organisations", "Region").objects.create(
+            code="LCK", name="Lock order"
+        )
+        office = Office.objects.create(region=region, code="LCK-1", name="Lock office")
+        service = Service.objects.create(code="LCK-SVC", name="Lock service", domain="operational")
+        request_type = service.request_types.create(
+            code="LCK-RT", name="Lock request", default_priority="P3"
+        )
+        contact = Contact.objects.create(full_name="Lock Tester", email="lock@example.test")
+        self.actor = django_apps.get_model("identity_access", "User").objects.create(
+            username="lock-agent",
+            keycloak_subject="lock-agent-subject",
+            keycloak_groups=["ops-agents"],
+        )
+        self.actor._groups = ["ops-agents"]
+        ticket = ticket_services.create_ticket(
+            domain="operational",
+            title="Lock order regression",
+            description="",
+            requester=contact,
+            service=service,
+            request_type=request_type,
+            office=office,
+            channel="web",
+        )
+        ticket = ticket_services.transition_ticket(
+            ticket_id=ticket.id,
+            actor=self.actor,
+            expected_updated_at=ticket.updated_at,
+            to_status_code="triage",
+        )
+        self.ticket = ticket_services.transition_ticket(
+            ticket_id=ticket.id,
+            actor=self.actor,
+            expected_updated_at=ticket.updated_at,
+            to_status_code="in_progress",
+        )
+        policy = SlaPolicy.objects.get(domain="operational", priority="P3")
+        policy.resolution_minutes = 10
+        policy.escalation_percent = 50
+        policy.save(update_fields=["resolution_minutes", "escalation_percent"])
+        self.instance = SlaInstance.objects.create(
+            ticket=self.ticket,
+            policy=policy,
+            kind="resolution",
+            state=SlaInstance.State.ACTIVE,
+            started_at=timezone.now() - timedelta(minutes=11),
+            due_at=timezone.now() - timedelta(minutes=1),
+        )
+
+    def test_transition_and_evaluator_complete_without_opposite_row_locks(self) -> None:
+        """A transition cannot deadlock with an escalation custody write."""
+        evaluator_first_lock = Event()
+        transition_ticket_locked = Event()
+        start = Event()
+        errors: list[BaseException] = []
+        results: list[int] = []
+        evaluator_first_table: list[str] = []
+
+        def is_lock_query(sql: str, table: str) -> bool:
+            return "FOR UPDATE" in sql.upper() and f'FROM "{table}"' in sql
+
+        def run_evaluator() -> None:
+            close_old_connections()
+            try:
+                with connection.execute_wrapper(evaluator_wrapper):
+                    if not start.wait(timeout=5):
+                        raise TimeoutError("evaluator start was not released")
+                    results.append(evaluate_open_slas())
+            except BaseException as exc:
+                errors.append(exc)
+            finally:
+                close_old_connections()
+
+        def evaluator_wrapper(execute, sql, params, many, context):
+            if not evaluator_first_table and (
+                is_lock_query(sql, "sla_instance") or is_lock_query(sql, "ticket")
+            ):
+                table = "sla_instance" if is_lock_query(sql, "sla_instance") else "ticket"
+                result = execute(sql, params, many, context)
+                evaluator_first_table.append(table)
+                evaluator_first_lock.set()
+                if table == "sla_instance" and not transition_ticket_locked.wait(timeout=5):
+                    raise TimeoutError("transition did not acquire its ticket lock")
+                return result
+            return execute(sql, params, many, context)
+
+        def run_transition() -> None:
+            close_old_connections()
+            try:
+                with connection.execute_wrapper(transition_wrapper):
+                    if not start.wait(timeout=5):
+                        raise TimeoutError("transition start was not released")
+                    ticket_services.transition_ticket(
+                        ticket_id=self.ticket.id,
+                        actor=self.actor,
+                        expected_updated_at=self.ticket.updated_at,
+                        to_status_code="resolved",
+                        resolution_code="INFO_PROVIDED",
+                        resolution_summary="Resolved during lock-order regression.",
+                    )
+            except BaseException as exc:
+                errors.append(exc)
+            finally:
+                close_old_connections()
+
+        def transition_wrapper(execute, sql, params, many, context):
+            if is_lock_query(sql, "ticket") and not transition_ticket_locked.is_set():
+                if not evaluator_first_lock.wait(timeout=5):
+                    raise TimeoutError("evaluator did not attempt its first row lock")
+                result = execute(sql, params, many, context)
+                transition_ticket_locked.set()
+                return result
+            return execute(sql, params, many, context)
+
+        evaluator = Thread(target=run_evaluator)
+        transition = Thread(target=run_transition)
+        evaluator.start()
+        transition.start()
+        start.set()
+        evaluator.join(timeout=10)
+        transition.join(timeout=10)
+
+        assert not evaluator.is_alive(), "evaluator did not complete"
+        assert not transition.is_alive(), "transition did not complete"
+        assert errors == []
+        assert evaluator_first_table == ["ticket"]
+        assert results == [1]
+
+        self.ticket.refresh_from_db()
+        self.instance.refresh_from_db()
+        assert self.ticket.status.code == "resolved"
+        assert self.instance.state == SlaInstance.State.BREACHED
+        assert (
+            self.ticket.custody_events.filter(
+                source_process="sla.escalation", source_record_id=str(self.instance.id)
+            ).count()
+            == 1
+        )
+        assert verify_custody_chain(self.ticket)

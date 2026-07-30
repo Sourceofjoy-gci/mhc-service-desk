@@ -565,9 +565,8 @@ def _crossed_escalation_threshold(instance: SlaInstance, now: datetime) -> bool:
     return consumed * 100 >= target_microseconds * instance.policy.escalation_percent
 
 
-def _record_escalation(*, instance: SlaInstance, now: datetime) -> None:
+def _record_escalation(*, ticket: Ticket, instance: SlaInstance, now: datetime) -> None:
     """Record the immutable ticket history for one newly crossed SLA threshold."""
-    ticket = instance.ticket
     reason = (
         f"{instance.kind.replace('_', ' ')} SLA crossed the "
         f"{instance.policy.escalation_percent}% escalation threshold"
@@ -618,23 +617,36 @@ def _record_escalation(*, instance: SlaInstance, now: datetime) -> None:
 def evaluate_open_slas() -> int:
     """Walk all open SLA instances, mark breaches, return count evaluated."""
     now = timezone.now()
-    qs = (
-        SlaInstance.objects.select_for_update(skip_locked=True)
-        .select_related("ticket__status", "policy__calendar")
-        .filter(state__in=["active", "paused_requester", "paused_internal", "paused_it"])
+    open_states = ["active", "paused_requester", "paused_internal", "paused_it"]
+    candidates = (
+        SlaInstance.objects.filter(state__in=open_states)
+        .order_by("ticket_id", "id")
+        .values_list("id", "ticket_id")
     )
     evaluated = 0
     breached = 0
-    for inst in qs.iterator(chunk_size=500):
+    for instance_id, ticket_id in candidates.iterator(chunk_size=500):
+        # Every workflow transition takes this aggregate lock before touching its
+        # SLA rows.  Preserve that ordering here before re-reading current SLA
+        # state; the candidate list is intentionally not decision state.
+        try:
+            ticket = Ticket.objects.select_for_update().select_related("status").get(pk=ticket_id)
+        except Ticket.DoesNotExist:
+            continue
+        inst = (
+            SlaInstance.objects.select_for_update(skip_locked=True)
+            .select_related("policy__calendar")
+            .filter(pk=instance_id, ticket_id=ticket.id, state__in=open_states)
+            .first()
+        )
+        if inst is None:
+            continue
         evaluated += 1
         if inst.state != "active":
             continue
         update_fields = ["last_evaluated_at", "updated_at"]
-        if (
-            inst.escalation_notified_at is None
-            and _crossed_escalation_threshold(inst, now)
-        ):
-            _record_escalation(instance=inst, now=now)
+        if inst.escalation_notified_at is None and _crossed_escalation_threshold(inst, now):
+            _record_escalation(ticket=ticket, instance=inst, now=now)
             inst.escalation_notified_at = now
             update_fields.append("escalation_notified_at")
         if inst.due_at <= now:
