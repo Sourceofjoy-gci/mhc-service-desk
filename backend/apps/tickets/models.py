@@ -8,7 +8,9 @@ from __future__ import annotations
 
 import uuid
 
+from django.core.exceptions import ValidationError
 from django.db import models
+from django.utils import timezone
 
 
 class Ticket(models.Model):
@@ -135,6 +137,85 @@ class Ticket(models.Model):
 
     def __str__(self) -> str:  # pragma: no cover
         return self.number
+
+
+class ImmutableCustodyQuerySet(models.QuerySet["TicketCustodyEvent"]):
+    def update(self, **kwargs: object) -> int:
+        raise ValidationError("Ticket custody events are immutable.")
+
+    def delete(self) -> tuple[int, dict[str, int]]:
+        raise ValidationError("Ticket custody events are immutable.")
+
+
+class TicketCustodyEvent(models.Model):
+    """An append-only internal record of ticket custody changes."""
+
+    class EventType(models.TextChoices):
+        CREATED = "created", "Created"
+        ASSIGNED = "assigned", "Assigned"
+        REASSIGNED = "reassigned", "Transferred / reassigned"
+        UNASSIGNED = "unassigned", "Unassigned"
+        QUEUE_CHANGED = "queue_changed", "Queue changed"
+        ESCALATED = "escalated", "Escalated"
+        STATUS_CHANGED = "status_changed", "Status changed"
+        REOPENED = "reopened", "Reopened"
+        CLOSED = "closed", "Closed"
+
+    class ActorKind(models.TextChoices):
+        USER = "user", "User"
+        SYSTEM = "system", "System"
+
+    id = models.UUIDField(primary_key=True, default=uuid.uuid4, editable=False)
+    ticket = models.ForeignKey(
+        Ticket,
+        on_delete=models.CASCADE,
+        related_name="custody_events",
+    )
+    sequence = models.PositiveBigIntegerField()
+    event_type = models.CharField(max_length=32, choices=EventType.choices)
+    occurred_at = models.DateTimeField(default=timezone.now, db_index=True)
+    actor_kind = models.CharField(max_length=16, choices=ActorKind.choices)
+    actor_subject = models.CharField(max_length=255)
+    actor_display_name = models.CharField(max_length=255)
+    source_process = models.CharField(max_length=128)
+    source_record_type = models.CharField(max_length=64, blank=True)
+    source_record_id = models.CharField(max_length=64, blank=True)
+    previous_owner = models.JSONField(null=True, blank=True)
+    new_owner = models.JSONField(null=True, blank=True)
+    previous_queue = models.JSONField(null=True, blank=True)
+    new_queue = models.JSONField(null=True, blank=True)
+    previous_status = models.JSONField(null=True, blank=True)
+    new_status = models.JSONField(null=True, blank=True)
+    previous_designations = models.JSONField(default=list, blank=True)
+    new_designations = models.JSONField(default=list, blank=True)
+    previous_team_labels = models.JSONField(default=list, blank=True)
+    new_team_labels = models.JSONField(default=list, blank=True)
+    reason = models.TextField(blank=True)
+    previous_hash = models.CharField(max_length=64, blank=True)
+    event_hash = models.CharField(max_length=64)
+
+    objects = ImmutableCustodyQuerySet.as_manager()
+
+    class Meta:
+        db_table = "ticket_custody_event"
+        ordering = ("sequence", "id")
+        constraints = [
+            models.UniqueConstraint(
+                fields=("ticket", "sequence"),
+                name="uniq_ticket_custody_sequence",
+            ),
+        ]
+
+    def __str__(self) -> str:  # pragma: no cover
+        return f"custody:{self.ticket_id} sequence:{self.sequence}"
+
+    def save(self, *args: object, **kwargs: object) -> None:
+        if not self._state.adding:
+            raise ValidationError("Ticket custody events are immutable.")
+        super().save(*args, **kwargs)
+
+    def delete(self, *args: object, **kwargs: object) -> tuple[int, dict[str, int]]:
+        raise ValidationError("Ticket custody events are immutable.")
 
 
 class TicketMessage(models.Model):
