@@ -18,7 +18,7 @@ from apps.identity_access.scope import (
 )
 from apps.workflow.models import TransitionHistory
 
-from .models import Ticket, TicketLink, TicketMessage, TicketNote
+from .models import Ticket, TicketCustodyEvent, TicketLink, TicketMessage, TicketNote
 
 
 class ActivityActor(TypedDict):
@@ -29,6 +29,7 @@ class ActivityActor(TypedDict):
 class ActivityItem(TypedDict):
     id: str
     type: str
+    category: str
     occurred_at: datetime
     actor: ActivityActor | None
     visibility: str
@@ -91,6 +92,7 @@ def build_ticket_activity(
             "to_status",
         )
     )
+    custody_events = list(TicketCustodyEvent.objects.filter(ticket=ticket))
     audit_events = list(
         AuditEvent.objects.filter(
             object_type="ticket",
@@ -104,6 +106,21 @@ def build_ticket_activity(
         )
     )
     attachments = list(Attachment.objects.filter(ticket=ticket))
+    custody_transition_ids = {
+        event.source_record_id
+        for event in custody_events
+        if event.source_record_type == "workflow_transition" and event.source_record_id
+    }
+    custody_audit_ids = {
+        event.source_record_id
+        for event in custody_events
+        if event.source_record_type == "audit_event" and event.source_record_id
+    }
+    transitions = [
+        transition
+        for transition in transitions
+        if str(transition.id) not in custody_transition_ids
+    ]
     supplied_relationship_ids = (
         {relationship.id for relationship in relationships}
         if relationships is not None
@@ -204,11 +221,84 @@ def build_ticket_activity(
             "display_name": display_names.get(subject) or subject,
         }
 
+    def custody_actor_details(event: TicketCustodyEvent) -> ActivityActor:
+        """Custody records retain their actor snapshot independently of users."""
+        return {
+            "subject": event.actor_subject,
+            "display_name": event.actor_display_name,
+        }
+
+    def custody_payload(event: TicketCustodyEvent) -> dict[str, object]:
+        """Expose full immutable custody facts without looking up mutable rows."""
+        payload: dict[str, object] = {
+            "action": event.event_type,
+            "from": (
+                event.previous_status.get("code") if event.previous_status else None
+            ),
+            "to": event.new_status.get("code") if event.new_status else None,
+            "previous_owner": event.previous_owner,
+            "new_owner": event.new_owner,
+            "previous_queue": event.previous_queue,
+            "new_queue": event.new_queue,
+            "previous_status": event.previous_status,
+            "new_status": event.new_status,
+            "actor_kind": event.actor_kind,
+            "source_process": event.source_process,
+            "source_record_type": event.source_record_type,
+            "source_record_id": event.source_record_id,
+            "reason": event.reason,
+        }
+        matching_event = next(
+            (
+                audit_event
+                for audit_event in transition_audits
+                if audit_event.payload.get("after", {}).get("status")
+                == payload["to"]
+                and audit_event.occurred_at >= event.occurred_at
+            ),
+            None,
+        )
+        if matching_event is None:
+            return payload
+        transition_audits.remove(matching_event)
+        resolution_fields = {
+            "resolution_code",
+            "resolution_summary",
+            "resolved_at",
+            "reopened_at",
+        }
+        before = {
+            key: value
+            for key, value in matching_event.payload.get("before", {}).items()
+            if key in resolution_fields
+        }
+        after = {
+            key: value
+            for key, value in matching_event.payload.get("after", {}).items()
+            if key in resolution_fields
+        }
+        if before or after:
+            payload["before"] = before
+            payload["after"] = after
+        return payload
+
+    def work_state_payload(event: AuditEvent) -> dict[str, object] | None:
+        before = dict(event.payload.get("before", {}))
+        after = dict(event.payload.get("after", {}))
+        if str(event.id) in custody_audit_ids:
+            for key in ("assignee", "queue"):
+                before.pop(key, None)
+                after.pop(key, None)
+        if not before and not after:
+            return None
+        return {"before": before, "after": after}
+
     items: list[ActivityItem] = []
     items.extend(
         {
             "id": f"message:{message.id}",
             "type": "message",
+            "category": "public_reply",
             "occurred_at": message.created_at,
             "actor": actor_details(message.author_subject),
             "visibility": "requester",
@@ -226,6 +316,7 @@ def build_ticket_activity(
         {
             "id": f"note:{note.id}",
             "type": "internal_note",
+            "category": "internal_note",
             "occurred_at": note.created_at,
             "actor": actor_details(note.author_subject),
             "visibility": "internal",
@@ -237,6 +328,7 @@ def build_ticket_activity(
         {
             "id": f"transition:{transition.id}",
             "type": "status_transition",
+            "category": "workflow",
             "occurred_at": transition.occurred_at,
             "actor": actor_details(transition.actor_subject),
             "visibility": "internal",
@@ -244,26 +336,54 @@ def build_ticket_activity(
         }
         for transition in transitions
     )
+    for event in audit_events:
+        if event.action not in {
+            "ticket.work_state.changed",
+            "ticket.confidentiality.changed",
+        }:
+            continue
+        payload = work_state_payload(event)
+        if payload is None:
+            continue
+        items.append(
+            {
+                "id": f"audit:{event.id}",
+                "type": "work_state",
+                "category": "workflow",
+                "occurred_at": event.occurred_at,
+                "actor": actor_details(event.actor_subject),
+                "visibility": "internal",
+                "payload": payload,
+            }
+        )
+    custody_status_types = {
+        TicketCustodyEvent.EventType.STATUS_CHANGED,
+        TicketCustodyEvent.EventType.REOPENED,
+        TicketCustodyEvent.EventType.CLOSED,
+    }
     items.extend(
         {
-            "id": f"audit:{event.id}",
-            "type": "work_state",
+            "id": f"custody:{event.id}",
+            "type": (
+                "status_transition"
+                if event.event_type in custody_status_types
+                else "custody_event"
+            ),
+            "category": (
+                "workflow" if event.event_type in custody_status_types else "custody"
+            ),
             "occurred_at": event.occurred_at,
-            "actor": actor_details(event.actor_subject),
+            "actor": custody_actor_details(event),
             "visibility": "internal",
-            "payload": {
-                "before": event.payload.get("before", {}),
-                "after": event.payload.get("after", {}),
-            },
+            "payload": custody_payload(event),
         }
-        for event in audit_events
-        if event.action
-        in {"ticket.work_state.changed", "ticket.confidentiality.changed"}
+        for event in custody_events
     )
     items.extend(
         {
             "id": f"attachment:{attachment.id}",
             "type": "attachment",
+            "category": "attachment",
             "occurred_at": attachment.uploaded_at,
             "actor": actor_details(attachment.uploaded_by_subject),
             "visibility": "internal",
@@ -275,6 +395,7 @@ def build_ticket_activity(
         {
             "id": f"relationship:{relationship.id}",
             "type": "relationship",
+            "category": "relationship",
             "occurred_at": relationship.created_at,
             "actor": actor_details(
                 relationship_actors.get(str(relationship.id), "")

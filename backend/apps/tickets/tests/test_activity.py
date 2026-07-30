@@ -18,7 +18,14 @@ from apps.sla.models import SlaInstance, SlaPolicy
 from apps.tickets import services as ticket_services
 from apps.tickets.activity import build_ticket_activity
 from apps.tickets.api import TicketDetailSerializer
-from apps.tickets.models import Ticket, TicketLink, TicketMessage, TicketNote
+from apps.tickets.custody import (
+    CustodyActor,
+    CustodyEventInput,
+    CustodyQueue,
+    CustodyStatus,
+    record_custody_events,
+)
+from apps.tickets.models import Ticket, TicketCustodyEvent, TicketLink, TicketMessage, TicketNote
 from apps.workflow.models import Status, TransitionHistory
 
 pytestmark = pytest.mark.django_db
@@ -165,6 +172,14 @@ def test_activity_is_stable_typed_chronological_and_deduplicated(basic_world):
         "attachment",
         "relationship",
     ]
+    assert [item["category"] for item in activity] == [
+        "public_reply",
+        "internal_note",
+        "workflow",
+        "workflow",
+        "attachment",
+        "relationship",
+    ]
     assert [item["visibility"] for item in activity] == [
         "requester",
         "internal",
@@ -195,6 +210,227 @@ def test_activity_is_stable_typed_chronological_and_deduplicated(basic_world):
         "ticket_number": ticket.links_from.get().to_ticket.number,
         "direction": "outgoing",
     }
+
+
+def _seed_custody_activity(basic_world):
+    """Create one complete read-model stream with deliberate legacy overlap."""
+    ticket = ticket_services.create_ticket(
+        domain="operational",
+        title="Custody activity timeline",
+        description="",
+        requester=basic_world["contact"],
+        service=basic_world["gen_info"],
+        request_type=basic_world["gen_info"].request_types.get(),
+        office=basic_world["office"],
+        channel="web",
+    )
+    start = timezone.now() + timedelta(minutes=1)
+    message = TicketMessage.objects.create(
+        ticket=ticket,
+        direction="outbound",
+        author_subject="custody-agent",
+        author_label="Custody Agent",
+        body_text="Visible reply",
+        body_html_sanitized="<p>Visible reply</p>",
+    )
+    TicketMessage.objects.filter(pk=message.pk).update(created_at=start)
+    note = TicketNote.objects.create(
+        ticket=ticket,
+        author_subject="custody-agent",
+        body="Internal-only detail",
+    )
+    TicketNote.objects.filter(pk=note.pk).update(created_at=start + timedelta(minutes=1))
+
+    triage = Status.objects.get(domain="operational", code="triage")
+    in_progress = Status.objects.get(domain="operational", code="in_progress")
+    resolved = Status.objects.get(domain="operational", code="resolved")
+    reopened = Status.objects.get(domain="operational", code="reopened")
+    closed = Status.objects.get(domain="operational", code="closed")
+    status_histories = [
+        TransitionHistory.objects.create(
+            ticket=ticket,
+            from_status=triage,
+            to_status=in_progress,
+            actor_subject="legacy-agent",
+            reason="Started work",
+        ),
+        TransitionHistory.objects.create(
+            ticket=ticket,
+            from_status=resolved,
+            to_status=reopened,
+            actor_subject="legacy-agent",
+            reason="Requester replied",
+        ),
+        TransitionHistory.objects.create(
+            ticket=ticket,
+            from_status=resolved,
+            to_status=closed,
+            actor_subject="legacy-agent",
+            reason="Completed",
+        ),
+    ]
+    for offset, history in enumerate(status_histories, start=2):
+        TransitionHistory.objects.filter(pk=history.pk).update(
+            occurred_at=start + timedelta(minutes=offset)
+        )
+        history.refresh_from_db()
+
+    mixed_audit = AuditEvent.objects.create(
+        actor_subject="legacy-agent",
+        action="ticket.work_state.changed",
+        object_type="ticket",
+        object_id=str(ticket.id),
+        payload={
+            "before": {"assignee": None, "queue": None, "team": "Intake"},
+            "after": {"assignee": "agent-id", "queue": "queue-id", "team": "Estates"},
+        },
+        payload_hash="c" * 64,
+    )
+    AuditEvent.objects.filter(pk=mixed_audit.pk).update(
+        occurred_at=start + timedelta(minutes=5)
+    )
+    mixed_audit.refresh_from_db()
+
+    actor = CustodyActor.user("custody-agent", "Custody Snapshot")
+    record_custody_events(
+        ticket=ticket,
+        actor=actor,
+        events=(
+            CustodyEventInput(
+                event_type=TicketCustodyEvent.EventType.ASSIGNED,
+                source_process="ticket.assignment",
+                source_record_type="audit_event",
+                source_record_id=str(mixed_audit.id),
+                new_owner=None,
+                occurred_at=start + timedelta(minutes=4),
+            ),
+            CustodyEventInput(
+                event_type=TicketCustodyEvent.EventType.QUEUE_CHANGED,
+                source_process="ticket.routing",
+                source_record_type="audit_event",
+                source_record_id=str(mixed_audit.id),
+                new_queue=CustodyQueue(id="queue-id", label="Estates"),
+                occurred_at=start + timedelta(minutes=5),
+            ),
+            CustodyEventInput(
+                event_type=TicketCustodyEvent.EventType.ESCALATED,
+                source_process="ticket.escalation",
+                reason="SLA risk",
+                occurred_at=start + timedelta(minutes=6),
+            ),
+            CustodyEventInput(
+                event_type=TicketCustodyEvent.EventType.STATUS_CHANGED,
+                source_process="ticket.transition",
+                source_record_type="workflow_transition",
+                source_record_id=str(status_histories[0].id),
+                previous_status=CustodyStatus(code="triage", label="Triage"),
+                new_status=CustodyStatus(code="in_progress", label="In progress"),
+                reason="Started work",
+                occurred_at=status_histories[0].occurred_at,
+            ),
+            CustodyEventInput(
+                event_type=TicketCustodyEvent.EventType.REOPENED,
+                source_process="ticket.transition",
+                source_record_type="workflow_transition",
+                source_record_id=str(status_histories[1].id),
+                previous_status=CustodyStatus(code="resolved", label="Resolved"),
+                new_status=CustodyStatus(code="reopened", label="Reopened"),
+                reason="Requester replied",
+                occurred_at=status_histories[1].occurred_at,
+            ),
+            CustodyEventInput(
+                event_type=TicketCustodyEvent.EventType.CLOSED,
+                source_process="ticket.transition",
+                source_record_type="workflow_transition",
+                source_record_id=str(status_histories[2].id),
+                previous_status=CustodyStatus(code="resolved", label="Resolved"),
+                new_status=CustodyStatus(code="closed", label="Closed"),
+                reason="Completed",
+                occurred_at=status_histories[2].occurred_at,
+            ),
+        ),
+    )
+    return ticket, status_histories, mixed_audit
+
+
+def test_activity_merges_custody_into_one_categorised_deduplicated_stream(basic_world):
+    """Dropping custody or its source de-duplication would expose contradictory facts."""
+    ticket, status_histories, mixed_audit = _seed_custody_activity(basic_world)
+
+    activity = build_ticket_activity(ticket)
+
+    assert [(item["occurred_at"], item["id"]) for item in activity] == sorted(
+        (item["occurred_at"], item["id"]) for item in activity
+    )
+    assert {item["category"] for item in activity} >= {
+        "public_reply",
+        "internal_note",
+        "workflow",
+        "custody",
+    }
+    assert [
+        item["payload"]["action"]
+        for item in activity
+        if item["type"] == "custody_event"
+    ] == ["created", "assigned", "queue_changed", "escalated"]
+    assert len(
+        [
+            item
+            for item in activity
+            if item["type"] == "status_transition"
+            and item["payload"]["to"] == "closed"
+        ]
+    ) == 1
+    assert not {
+        f"transition:{history.id}" for history in status_histories
+    } & {item["id"] for item in activity}
+
+    custody_items = [item for item in activity if item["id"].startswith("custody:")]
+    required_payload_fields = {
+        "previous_owner",
+        "new_owner",
+        "previous_queue",
+        "new_queue",
+        "actor_kind",
+        "source_process",
+        "reason",
+    }
+    assert all(required_payload_fields <= item["payload"].keys() for item in custody_items)
+    assert all(
+        item["actor"] == {
+            "subject": "custody-agent",
+            "display_name": "Custody Snapshot",
+        }
+        for item in custody_items
+        if item["payload"]["action"] != "created"
+    )
+    assert [item["payload"] for item in activity if item["id"] == f"audit:{mixed_audit.id}"] == [
+        {"before": {"team": "Intake"}, "after": {"team": "Estates"}}
+    ]
+    assert [item["visibility"] for item in activity if item["type"] == "message"] == [
+        "requester"
+    ]
+    assert [item["visibility"] for item in activity if item["type"] == "internal_note"] == [
+        "internal"
+    ]
+
+
+def test_activity_endpoint_allows_auditors_to_read_custody_only_in_scope(basic_world):
+    """Bypassing get_object would leak the immutable stream across domains."""
+    ticket, _, _ = _seed_custody_activity(basic_world)
+    auditor = _user(["auditors"], subject="activity-auditor")
+    client = APIClient()
+    client.force_authenticate(user=auditor)
+
+    visible = client.get(reverse("tickets-activity", args=[ticket.number]))
+    hidden_ticket = _ticket(basic_world, domain="it")
+    client.force_authenticate(user=_user(["ops-agents"], subject="ops-only-activity"))
+    hidden = client.get(reverse("tickets-activity", args=[hidden_ticket.number]))
+
+    assert visible.status_code == 200
+    assert any(item["type"] == "custody_event" for item in visible.data["results"])
+    assert hidden.status_code == 404
+    assert "results" not in hidden.data
 
 
 @pytest.mark.parametrize(
