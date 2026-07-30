@@ -86,13 +86,18 @@ def backfill_ticket_custody(apps, schema_editor):
 
     context = {}
 
+    def uuid_lookup_key(value):
+        try:
+            return str(UUID(str(value)))
+        except (TypeError, ValueError, AttributeError):
+            return None
+
     def valid_uuid_values(values):
         valid = []
         for value in values:
-            try:
-                valid.append(UUID(str(value)))
-            except (TypeError, ValueError, AttributeError):
-                continue
+            normalized = uuid_lookup_key(value)
+            if normalized is not None:
+                valid.append(UUID(normalized))
         return valid
 
     def ticket_chunks():
@@ -186,7 +191,8 @@ def backfill_ticket_custody(apps, schema_editor):
     def owner(value):
         if value in (None, ""):
             return None
-        user = context["users_by_id"].get(str(value))
+        key = uuid_lookup_key(value)
+        user = context["users_by_id"].get(key) if key is not None else None
         if user is None:
             return None
         return {
@@ -198,7 +204,8 @@ def backfill_ticket_custody(apps, schema_editor):
     def queue(value):
         if value in (None, ""):
             return None
-        location = context["queues_by_id"].get(str(value))
+        key = uuid_lookup_key(value)
+        location = context["queues_by_id"].get(key) if key is not None else None
         if location is None:
             return None
         return {"id": str(location.pk), "label": location.name}

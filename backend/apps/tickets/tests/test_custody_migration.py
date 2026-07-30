@@ -315,3 +315,34 @@ def test_backfill_keeps_raw_assignment_direction_and_uses_explicit_tie_order(bas
     assert queue_event.previous_queue is None
     assert queue_event.new_queue is None
     assert verify_custody_chain(ticket) is True
+
+
+def test_backfill_resolves_uppercase_uuid_snapshots(basic_world):
+    """Valid UUID spellings must resolve even when legacy JSON uses uppercase."""
+    backfill_ticket_custody = import_module(
+        "apps.tickets.migrations.0006_backfill_ticket_custody"
+    ).backfill_ticket_custody
+    ticket = _ticket(basic_world, number="OP-LEGACY-UPPERCASE-UUID")
+    user = _user(username="upper", subject="upper-subject")
+    queue = ServiceLocation.objects.create(office=basic_world["office"], name="Upper queue")
+    at = datetime(2025, 1, 5, tzinfo=UTC)
+    Ticket.objects.filter(pk=ticket.pk).update(created_at=at)
+    _audit(
+        ticket=ticket,
+        action="ticket.assignment.changed",
+        actor_subject="legacy",
+        before={"assignee": None, "queue": None},
+        after={"assignee": str(user.pk).upper(), "queue": str(queue.pk).upper()},
+        occurred_at=at,
+    )
+
+    from django.apps import apps as django_apps
+
+    backfill_ticket_custody(django_apps, None)
+
+    assigned = ticket.custody_events.get(event_type="assigned")
+    queue_changed = ticket.custody_events.get(event_type="queue_changed")
+    assert assigned.new_owner["id"] == str(user.pk)
+    assert assigned.new_owner["display_name"] == "Upper Agent"
+    assert queue_changed.new_queue == {"id": str(queue.pk), "label": "Upper queue"}
+    assert verify_custody_chain(ticket) is True
