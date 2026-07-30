@@ -23,7 +23,7 @@ from typing import TYPE_CHECKING, Any, TypedDict, TypeGuard, Unpack, cast
 from uuid import UUID, uuid4
 
 from django.core.management.base import BaseCommand, CommandError, CommandParser
-from django.db import transaction
+from django.db import connection, transaction
 from django.db.models import Exists, OuterRef, Q
 from django.utils import timezone as djtz
 
@@ -467,6 +467,7 @@ class Command(BaseCommand):
                 ("tickets.TicketLink", "from_ticket", "CASCADE"),
                 ("tickets.TicketLink", "to_ticket", "CASCADE"),
                 ("tickets.Watcher", "ticket", "CASCADE"),
+                ("tickets.TicketCustodyEvent", "ticket", "CASCADE"),
                 ("workflow.TransitionHistory", "ticket", "CASCADE"),
                 ("sla.SlaInstance", "ticket", "CASCADE"),
                 ("files.Attachment", "ticket", "CASCADE"),
@@ -785,6 +786,14 @@ class Command(BaseCommand):
     def _delete_with_orm(
         self, table: str, cutoff: datetime, model_label: str
     ) -> OrmDisposalCounts:
+        if (
+            table == "ticket"
+            and connection.vendor == "postgresql"
+            and not connection.in_atomic_block
+        ):
+            raise CommandError(
+                "Ticket custody disposal requires an active database transaction."
+            )
         ticket_ids = self._candidate_ticket_ids(table, cutoff)
         self._lock_hold_graph(ticket_ids)
         rows_preserved_legal_hold = self._orm_held_count(table, cutoff)
@@ -801,6 +810,9 @@ class Command(BaseCommand):
                 legal_hold_preserved=rows_preserved_legal_hold,
             )
         queryset = self._orm_base_queryset(table, cutoff).filter(pk__in=candidate_ids)
+        if table == "ticket" and connection.vendor == "postgresql":
+            with connection.cursor() as cursor:
+                cursor.execute("SET LOCAL mhc.allow_ticket_custody_delete = 'on'")
         _total_deleted, deleted_by_model = queryset.delete()
         return OrmDisposalCounts(
             rows_selected=rows_selected,

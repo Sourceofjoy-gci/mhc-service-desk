@@ -8,8 +8,98 @@ from types import MethodType
 
 import pytest
 from django.core.management.base import CommandError
+from django.db import DatabaseError, connection
 
 from apps.administration import retention
+
+
+def _old_ticket_with_custody(basic_world, *, number: str):
+    from apps.catalogue.models import RequestType
+    from apps.tickets.custody import CustodyActor, CustodyEventInput, record_custody_events
+    from apps.tickets.models import Ticket
+    from apps.workflow.models import Status
+
+    ticket = Ticket.objects.create(
+        number=number,
+        domain="operational",
+        title="Retention custody test",
+        status=Status.objects.get(domain="operational", is_initial=True),
+        priority="P3",
+        channel="web",
+        requester=basic_world["contact"],
+        service=basic_world["gen_info"],
+        request_type=RequestType.objects.get(service=basic_world["gen_info"]),
+        office=basic_world["office"],
+    )
+    record_custody_events(
+        ticket=ticket,
+        actor=CustodyActor.system("retention-test", "Retention test"),
+        events=(CustodyEventInput.created(source_process="test.retention"),),
+    )
+    Ticket.objects.filter(pk=ticket.pk).update(
+        created_at=datetime(2000, 1, 1, tzinfo=UTC)
+    )
+    return ticket
+
+
+@pytest.mark.django_db(transaction=True)
+def test_direct_ticket_deletion_cannot_bypass_custody_protection(basic_world):
+    """A caller outside the approved disposal path must not delete custody rows."""
+    if connection.vendor != "postgresql":
+        pytest.skip("PostgreSQL trigger coverage")
+    from apps.tickets.models import Ticket
+
+    ticket = _old_ticket_with_custody(basic_world, number="OP-RETENTION-DIRECT-GUARD")
+
+    with pytest.raises(DatabaseError, match="immutable"):
+        Ticket.objects.filter(pk=ticket.pk).delete()
+
+
+@pytest.mark.django_db(transaction=True)
+def test_approved_ticket_retention_deletes_custody_rows(basic_world, monkeypatch, tmp_path):
+    """The transaction-local retention escape hatch permits only whole-ticket disposal."""
+    if connection.vendor != "postgresql":
+        pytest.skip("PostgreSQL trigger coverage")
+    from apps.administration.models import ConfigItem
+    from apps.tickets.models import Ticket, TicketCustodyEvent
+
+    monkeypatch.setattr(
+        retention.djtz, "now", lambda: datetime(2026, 7, 28, 14, 0, tzinfo=UTC)
+    )
+    monkeypatch.setattr(
+        retention.Command,
+        "_fsync_parent_directory",
+        staticmethod(lambda _path: None),
+    )
+    ConfigItem.objects.create(
+        key="retention.policy.v1", value={"ticket": {"days": 30}}
+    )
+    ticket = _old_ticket_with_custody(basic_world, number="OP-RETENTION-CUSTODY")
+
+    retention.Command().handle(
+        dry_run=False,
+        table=["ticket"],
+        out=str(tmp_path / "custody-retention-"),
+    )
+
+    assert not Ticket.objects.filter(pk=ticket.pk).exists()
+    assert not TicketCustodyEvent._base_manager.filter(ticket_id=ticket.pk).exists()
+
+
+@pytest.mark.django_db(transaction=True)
+def test_ticket_custody_retention_fails_closed_without_atomic_transaction(basic_world):
+    """SET LOCAL must never be used outside the command's approved transaction."""
+    if connection.vendor != "postgresql":
+        pytest.skip("PostgreSQL trigger coverage")
+
+    ticket = _old_ticket_with_custody(basic_world, number="OP-RETENTION-NO-ATOMIC")
+
+    with pytest.raises(CommandError, match="active database transaction"):
+        retention.Command()._delete_with_orm(
+            "ticket", datetime(2026, 7, 1, tzinfo=UTC), "tickets.Ticket"
+        )
+
+    assert ticket.custody_events.exists()
 
 
 def _compact(sql: str) -> str:

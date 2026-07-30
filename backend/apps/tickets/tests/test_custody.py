@@ -5,7 +5,7 @@ from zoneinfo import ZoneInfo
 
 import pytest
 from django.core.exceptions import ValidationError
-from django.db import IntegrityError, connection
+from django.db import DatabaseError, IntegrityError, connection
 from django.utils import timezone
 
 from apps.catalogue.models import RequestType
@@ -278,6 +278,14 @@ def test_verify_custody_chain_rejects_an_altered_previous_hash(ticket):
     """A changed link must not be accepted even when event content is otherwise valid."""
     _, event = _two_event_chain(ticket)
 
+    if connection.vendor == "postgresql":
+        with pytest.raises(DatabaseError, match="immutable"):
+            with connection.cursor() as cursor:
+                cursor.execute(
+                    "UPDATE ticket_custody_event SET previous_hash = %s WHERE id = %s",
+                    ["tampered", event.id],
+                )
+        return
     with connection.cursor() as cursor:
         cursor.execute(
             "UPDATE ticket_custody_event SET previous_hash = %s WHERE id = %s",
@@ -291,6 +299,14 @@ def test_verify_custody_chain_rejects_a_sequence_gap(ticket):
     """The verifier must require every sequence number from one onward."""
     _, event = _two_event_chain(ticket)
 
+    if connection.vendor == "postgresql":
+        with pytest.raises(DatabaseError, match="immutable"):
+            with connection.cursor() as cursor:
+                cursor.execute(
+                    "UPDATE ticket_custody_event SET sequence = %s WHERE id = %s",
+                    [3, event.id],
+                )
+        return
     with connection.cursor() as cursor:
         cursor.execute(
             "UPDATE ticket_custody_event SET sequence = %s WHERE id = %s",
@@ -304,6 +320,14 @@ def test_verify_custody_chain_rejects_a_tampered_content_hash(ticket):
     """An event hash that no longer represents its content must be rejected."""
     _, event = _two_event_chain(ticket)
 
+    if connection.vendor == "postgresql":
+        with pytest.raises(DatabaseError, match="immutable"):
+            with connection.cursor() as cursor:
+                cursor.execute(
+                    "UPDATE ticket_custody_event SET event_hash = %s WHERE id = %s",
+                    ["0" * 64, event.id],
+                )
+        return
     with connection.cursor() as cursor:
         cursor.execute(
             "UPDATE ticket_custody_event SET event_hash = %s WHERE id = %s",
@@ -311,3 +335,26 @@ def test_verify_custody_chain_rejects_a_tampered_content_hash(ticket):
         )
 
     assert verify_custody_chain(ticket) is False
+
+
+@pytest.mark.django_db(transaction=True)
+def test_postgresql_rejects_raw_custody_updates_and_deletes_but_allows_insert(ticket):
+    """The database trigger must protect rows even when ORM guards are bypassed."""
+    if connection.vendor != "postgresql":
+        pytest.skip("PostgreSQL trigger coverage")
+
+    event = record_custody_events(
+        ticket=ticket,
+        actor=CustodyActor.system("trigger-test", "Trigger test"),
+        events=(CustodyEventInput.created(source_process="test.trigger"),),
+    )[0]
+
+    with pytest.raises(DatabaseError, match="immutable"):
+        with connection.cursor() as cursor:
+            cursor.execute(
+                "UPDATE ticket_custody_event SET reason = 'tampered' WHERE id = %s",
+                [event.id],
+            )
+    with pytest.raises(DatabaseError, match="immutable"):
+        with connection.cursor() as cursor:
+            cursor.execute("DELETE FROM ticket_custody_event WHERE id = %s", [event.id])
