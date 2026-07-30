@@ -405,17 +405,17 @@ def test_activity_merges_custody_into_one_categorised_deduplicated_stream(basic_
         if item["payload"]["action"] != "created"
     )
     custody_by_action = {item["payload"]["action"]: item["payload"] for item in custody_items}
-    assert custody_by_action["created"].get("previous_owner") is None
-    assert custody_by_action["created"].get("new_owner") is None
-    assert custody_by_action["created"].get("previous_queue") is None
-    assert custody_by_action["created"].get("new_queue") is None
-    assert custody_by_action["created"].get("previous_status") is None
-    assert custody_by_action["escalated"].get("previous_owner") is None
-    assert custody_by_action["escalated"].get("new_owner") is None
-    assert custody_by_action["escalated"].get("previous_queue") is None
-    assert custody_by_action["escalated"].get("new_queue") is None
-    assert custody_by_action["escalated"].get("previous_status") is None
-    assert custody_by_action["escalated"].get("new_status") is None
+    assert custody_by_action["created"]["previous_owner"] is None
+    assert custody_by_action["created"]["new_owner"] is None
+    assert custody_by_action["created"]["previous_queue"] is None
+    assert custody_by_action["created"]["new_queue"] is None
+    assert custody_by_action["created"]["previous_status"] is None
+    assert custody_by_action["escalated"]["previous_owner"] is None
+    assert custody_by_action["escalated"]["new_owner"] is None
+    assert custody_by_action["escalated"]["previous_queue"] is None
+    assert custody_by_action["escalated"]["new_queue"] is None
+    assert custody_by_action["escalated"]["previous_status"] is None
+    assert custody_by_action["escalated"]["new_status"] is None
     assert [item["payload"] for item in activity if item["id"] == f"audit:{mixed_audit.id}"] == [
         {"before": {"team": "Intake"}, "after": {"team": "Estates"}}
     ]
@@ -531,6 +531,39 @@ def test_linked_owner_custody_redacts_only_duplicate_legacy_assignee(basic_world
         "id": "agent-id",
         "subject": "snapshot-agent",
         "display_name": "Snapshot Agent",
+    }
+
+
+def test_linked_queue_custody_redacts_only_duplicate_legacy_queue(basic_world):
+    """A queue snapshot must not erase a separate legacy assignment fact."""
+    activity = _activity_with_linked_work_state_custody(
+        basic_world,
+        before={"assignee": None, "queue": "intake-id", "team": "Intake"},
+        after={"assignee": "agent-id", "queue": "estates-id", "team": "Estates"},
+        custody_event=CustodyEventInput(
+            event_type=TicketCustodyEvent.EventType.QUEUE_CHANGED,
+            source_process="ticket.routing",
+            previous_queue=CustodyQueue(id="intake-id", label="Intake"),
+            new_queue=CustodyQueue(id="estates-id", label="Estates"),
+        ),
+    )
+
+    work_state = next(item for item in activity if item["type"] == "work_state")
+    custody = next(item for item in activity if item["type"] == "custody_event")
+
+    assert work_state["payload"] == {
+        "before": {"assignee": None, "team": "Intake"},
+        "after": {"assignee": "agent-id", "team": "Estates"},
+    }
+    assert custody["payload"]["previous_owner"] is None
+    assert custody["payload"]["new_owner"] is None
+    assert custody["payload"]["previous_queue"] == {
+        "id": "intake-id",
+        "label": "Intake",
+    }
+    assert custody["payload"]["new_queue"] == {
+        "id": "estates-id",
+        "label": "Estates",
     }
 
 
