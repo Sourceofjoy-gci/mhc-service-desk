@@ -9,18 +9,33 @@ from __future__ import annotations
 
 import os
 import sys
+
 import django
 
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 os.environ.setdefault("DJANGO_SETTINGS_MODULE", "config.settings")
 django.setup()
 
-from apps.organisations.models import Office, Region  # noqa: E402
 from apps.catalogue.models import RequestType, Service  # noqa: E402
-from apps.identity_access.models import Role, User  # noqa: E402
 from apps.contacts.models import Contact  # noqa: E402
+from apps.identity_access.models import Role, User  # noqa: E402
+from apps.organisations.models import Office, Region  # noqa: E402
 from apps.sla.seed_sla import seed_sla  # noqa: E402
 from apps.tickets.seed_workflow import seed_workflow  # noqa: E402
+
+PRIMARY_STAFF_ROLES = {
+    "master": "Master",
+    "deputy-master": "Deputy Master",
+    "assistant-master": "Assistant Master",
+    "assistant-accountant": "Assistant Accountant",
+    "accountant": "Accountant",
+    "senior-accountant": "Senior Accountant",
+    "principal-accountant": "Principal Accountant",
+    "financial-controller": "Financial Controller",
+    "estate-examiner": "Estate Examiner",
+    "records-clerk": "Records Clerk",
+    "data-clerk": "Data Clerk",
+}
 
 
 def ensure_region(code: str, name: str) -> Region:
@@ -56,6 +71,14 @@ def ensure_role(keycloak_role: str, name: str) -> Role:
         keycloak_role=keycloak_role, defaults={"name": name, "scopes": []}
     )
     return obj
+
+
+def seed_primary_staff_roles() -> None:
+    for keycloak_role, name in PRIMARY_STAFF_ROLES.items():
+        Role.objects.get_or_create(
+            keycloak_role=keycloak_role,
+            defaults={"name": name, "scopes": [{"domain": "operational"}]},
+        )
 
 
 def ensure_contact(name: str, email: str, phone: str = "") -> Contact:
@@ -106,6 +129,7 @@ def main():
     ensure_role("lead-it", "IT service desk lead")
     ensure_role("admin", "System administrator")
     ensure_role("auditor", "Auditor / privacy / records")
+    seed_primary_staff_roles()
 
     ensure_contact("Test Requester", "requester@example.com", "+26876123456")
     ensure_contact("Walk-in Visitor", "walkin@example.com")

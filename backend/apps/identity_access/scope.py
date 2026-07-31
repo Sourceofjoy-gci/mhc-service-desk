@@ -9,7 +9,7 @@ from __future__ import annotations
 from collections.abc import Callable, Iterable, Sequence
 from dataclasses import dataclass
 from datetime import datetime
-from typing import Protocol, TypeGuard, TypeVar, runtime_checkable
+from typing import TYPE_CHECKING, Protocol, TypeGuard, TypeVar, runtime_checkable
 from uuid import UUID
 
 from django.db.models import Model, Q, QuerySet
@@ -17,6 +17,9 @@ from django.utils import timezone
 from rest_framework import permissions
 from rest_framework.request import Request
 from rest_framework.views import APIView
+
+if TYPE_CHECKING:
+    from apps.identity_access.models import User
 
 type RawScope = dict[str, object]
 
@@ -69,12 +72,13 @@ _CallableT = TypeVar("_CallableT", bound=Callable[..., object])
 
 class _RoleConfig(Protocol):
     keycloak_role: str
+    name: str
     scopes: object
 
 
 class _RoleAssignment(Protocol):
     role: _RoleConfig
-    office_id: object
+    office_id: UUID | None
     expires_at: datetime | None
 
 
@@ -127,6 +131,15 @@ class Scope:
         if self.queue_id and other.queue_id and self.queue_id != other.queue_id:
             return False
         return True
+
+
+@dataclass(frozen=True)
+class EffectiveRoleGrant:
+    role_key: str
+    role_name: str
+    scopes: tuple[Scope, ...]
+    office_id: UUID | None
+    expires_at: datetime | None
 
 
 ScopeKey = tuple[str, str | None, str | None, str | None]
@@ -264,6 +277,32 @@ def _active_persisted_assignments(
         for assignment in persisted
         if assignment.expires_at is None or assignment.expires_at > now
     ]
+
+
+def get_effective_role_grants(user: User) -> tuple[EffectiveRoleGrant, ...]:
+    """Return active, strictly validated persisted role grants."""
+    if not _has_active_identity(user):
+        return ()
+
+    assignments = _active_persisted_assignments(user)
+    if not assignments:
+        return ()
+
+    grants: list[EffectiveRoleGrant] = []
+    for assignment in assignments:
+        scopes = _validated_role_scopes(assignment)
+        if not scopes:
+            continue
+        grants.append(
+            EffectiveRoleGrant(
+                role_key=assignment.role.keycloak_role,
+                role_name=assignment.role.name,
+                scopes=scopes,
+                office_id=assignment.office_id,
+                expires_at=assignment.expires_at,
+            )
+        )
+    return tuple(grants)
 
 
 def _snapshot_from_persisted(

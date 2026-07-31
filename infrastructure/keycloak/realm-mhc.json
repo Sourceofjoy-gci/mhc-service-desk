@@ -31,7 +31,18 @@
       { "name": "agent-it", "description": "IT service desk agent" },
       { "name": "lead-it", "description": "IT service desk lead" },
       { "name": "admin", "description": "System administrator" },
-      { "name": "auditor", "description": "Read-only auditor / privacy / records" }
+      { "name": "auditor", "description": "Read-only auditor / privacy / records" },
+      { "name": "master", "description": "Master" },
+      { "name": "deputy-master", "description": "Deputy Master" },
+      { "name": "assistant-master", "description": "Assistant Master" },
+      { "name": "assistant-accountant", "description": "Assistant Accountant" },
+      { "name": "accountant", "description": "Accountant" },
+      { "name": "senior-accountant", "description": "Senior Accountant" },
+      { "name": "principal-accountant", "description": "Principal Accountant" },
+      { "name": "financial-controller", "description": "Financial Controller" },
+      { "name": "estate-examiner", "description": "Estate Examiner" },
+      { "name": "records-clerk", "description": "Records Clerk" },
+      { "name": "data-clerk", "description": "Data Clerk" }
     ]
   },
   "groups": [

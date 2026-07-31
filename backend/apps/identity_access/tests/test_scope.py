@@ -12,9 +12,12 @@ from rest_framework.test import APIRequestFactory, force_authenticate
 from apps.catalogue.models import RequestType, Service
 from apps.identity_access.models import Role, User, UserRole
 from apps.identity_access.scope import (
+    EffectiveRoleGrant,
     Scope,
     ScopePermission,
     can_view_restricted,
+    get_authority_snapshot,
+    get_effective_role_grants,
     get_user_scopes,
     has_scope,
     has_unrestricted_domain_scope,
@@ -200,9 +203,94 @@ def _persisted_user(*, groups):
     user = User.objects.create(
         username=f"user-{uuid4().hex}",
         keycloak_subject=f"subject-{uuid4().hex}",
+        keycloak_groups=groups,
     )
     user._groups = groups
     return user
+
+
+def test_active_persisted_role_produces_exact_effective_grant(basic_world):
+    expires_at = timezone.now() + timedelta(hours=1)
+    service_id = uuid4()
+    queue_id = uuid4()
+    user = _persisted_user(groups=["ops-agents"])
+    role = Role.objects.create(
+        keycloak_role="estate-examiner",
+        name="Estate Examiner",
+        scopes=[
+            {
+                "domain": "operational",
+                "service": str(service_id),
+                "queue": str(queue_id),
+            }
+        ],
+    )
+    UserRole.objects.create(
+        user=user,
+        role=role,
+        office=basic_world["office"],
+        expires_at=expires_at,
+    )
+
+    assert get_effective_role_grants(user) == (
+        EffectiveRoleGrant(
+            role_key="estate-examiner",
+            role_name="Estate Examiner",
+            scopes=(
+                Scope(
+                    domain="operational",
+                    office_id=str(basic_world["office"].id),
+                    service_id=str(service_id),
+                    queue_id=str(queue_id),
+                ),
+            ),
+            office_id=basic_world["office"].id,
+            expires_at=expires_at,
+        ),
+    )
+
+
+def test_expired_persisted_role_produces_no_effective_grant():
+    user = _persisted_user(groups=["ops-agents"])
+    _assign_persisted_role(
+        user,
+        keycloak_role="estate-examiner",
+        scopes=[{"domain": "operational"}],
+        expires_at=timezone.now() - timedelta(seconds=1),
+    )
+
+    assert get_effective_role_grants(user) == ()
+
+
+def test_designation_keycloak_group_without_persisted_role_produces_no_grant():
+    user = _persisted_user(groups=["estate-examiner"])
+
+    assert get_effective_role_grants(user) == ()
+
+
+def test_legacy_agent_without_persisted_role_keeps_group_authority_fallback():
+    user = _persisted_user(groups=["ops-agents"])
+
+    assert get_effective_role_grants(user) == ()
+    assert get_authority_snapshot(user).scopes == (Scope(domain="operational"),)
+
+
+@pytest.mark.parametrize(
+    "scopes",
+    [
+        pytest.param([], id="empty"),
+        pytest.param([{"domain": "finance"}], id="invalid"),
+    ],
+)
+def test_invalid_or_empty_designation_scope_does_not_widen_grant(scopes):
+    user = _persisted_user(groups=["ops-agents"])
+    _assign_persisted_role(
+        user,
+        keycloak_role="estate-examiner",
+        scopes=scopes,
+    )
+
+    assert get_effective_role_grants(user) == ()
 
 
 def test_inactive_superuser_has_no_authority_across_canonical_scope_entry_points(
