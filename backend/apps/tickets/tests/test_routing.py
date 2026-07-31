@@ -57,6 +57,7 @@ def _ticket(
     *,
     queue: ServiceLocation | None = None,
     assignee: User | None = None,
+    confidentiality: str = Ticket.Confidentiality.NORMAL,
 ) -> Ticket:
     service = basic_world["gen_info"]
     return Ticket.objects.create(
@@ -71,6 +72,7 @@ def _ticket(
         office=basic_world["office"],
         queue=queue,
         assignee=assignee,
+        confidentiality=confidentiality,
     )
 
 
@@ -127,6 +129,30 @@ def _grant_with_independent_offices(
         user=user,
         role=role,
         office=assignment_office,
+    )
+
+
+def _grant_with_assignment_office_only(
+    user: User,
+    ticket: Ticket,
+    *,
+    role_key: str,
+    queues: tuple[ServiceLocation | None, ...],
+) -> UserRole:
+    configured_scopes: list[dict[str, object]] = []
+    for queue in queues:
+        scope = _scope(ticket, queue=queue)
+        scope.pop("office")
+        configured_scopes.append(scope)
+    role = Role.objects.create(
+        keycloak_role=role_key,
+        name=f"{role_key}-{uuid4().hex[:8]}",
+        scopes=configured_scopes,
+    )
+    return UserRole.objects.create(
+        user=user,
+        role=role,
+        office=ticket.office,
     )
 
 
@@ -426,6 +452,110 @@ def test_persisted_routing_authority_requires_independent_office_matches(
     assert ticket.assignee_id is None
     assert ticket.updated_at == previous_updated_at
     assert _counts(ticket) == (0, 0, 0)
+
+
+@pytest.mark.parametrize("role_key", ["supervisor-operational", "admin"])
+def test_restricted_route_uses_assignment_office_for_unconstrained_configured_scope(
+    basic_world,
+    role_key,
+):
+    current = _queue(basic_world, f"Restricted current {role_key}")
+    destination = _queue(basic_world, f"Restricted destination {role_key}")
+    ticket = _ticket(
+        basic_world,
+        queue=current,
+        confidentiality=Ticket.Confidentiality.RESTRICTED,
+    )
+    actor = _user(display_name="Restricted Route Supervisor")
+    _grant_with_assignment_office_only(
+        actor,
+        ticket,
+        role_key=role_key,
+        queues=(current, destination),
+    )
+
+    result = _route(
+        ticket,
+        actor,
+        queue_id=destination.id,
+        assignee_id=None,
+        reason="Route restricted work within the assigned office.",
+    )
+
+    ticket.refresh_from_db()
+    assert result.ticket.id == ticket.id
+    assert ticket.queue_id == destination.id
+    assert ticket.assignee_id is None
+    assert ticket.confidentiality == Ticket.Confidentiality.RESTRICTED
+    assert result.receipt.previous_queue is not None
+    assert result.receipt.previous_queue.id == str(current.id)
+    assert result.receipt.previous_queue.label == current.name
+    assert result.receipt.new_queue is not None
+    assert result.receipt.new_queue.id == str(destination.id)
+    assert result.receipt.new_queue.label == destination.name
+    event = TicketCustodyEvent.objects.get(ticket=ticket)
+    assert event.event_type == "queue_changed"
+    assert event.previous_queue == {
+        "id": str(current.id),
+        "label": current.name,
+    }
+    assert event.new_queue == {
+        "id": str(destination.id),
+        "label": destination.name,
+    }
+    assert event.reason == "Route restricted work within the assigned office."
+    assert event.actor_subject == actor.keycloak_subject
+    assert event.source_process == "ticket.routing"
+    assert _counts(ticket) == (1, 1, 1)
+
+
+@pytest.mark.parametrize("role_key", ["supervisor-operational", "admin"])
+def test_restricted_unqueue_uses_assignment_office_for_unconstrained_configured_scope(
+    basic_world,
+    role_key,
+):
+    current = _queue(basic_world, f"Restricted unqueue current {role_key}")
+    ticket = _ticket(
+        basic_world,
+        queue=current,
+        confidentiality=Ticket.Confidentiality.RESTRICTED,
+    )
+    actor = _user(display_name="Restricted Unqueue Supervisor")
+    _grant_with_assignment_office_only(
+        actor,
+        ticket,
+        role_key=role_key,
+        queues=(current, None),
+    )
+
+    result = _route(
+        ticket,
+        actor,
+        queue_id=None,
+        assignee_id=None,
+        reason="Return restricted work to its office intake.",
+    )
+
+    ticket.refresh_from_db()
+    assert result.ticket.id == ticket.id
+    assert ticket.queue_id is None
+    assert ticket.assignee_id is None
+    assert ticket.confidentiality == Ticket.Confidentiality.RESTRICTED
+    assert result.receipt.previous_queue is not None
+    assert result.receipt.previous_queue.id == str(current.id)
+    assert result.receipt.previous_queue.label == current.name
+    assert result.receipt.new_queue is None
+    event = TicketCustodyEvent.objects.get(ticket=ticket)
+    assert event.event_type == "queue_changed"
+    assert event.previous_queue == {
+        "id": str(current.id),
+        "label": current.name,
+    }
+    assert event.new_queue is None
+    assert event.reason == "Return restricted work to its office intake."
+    assert event.actor_subject == actor.keycloak_subject
+    assert event.source_process == "ticket.routing"
+    assert _counts(ticket) == (1, 1, 1)
 
 
 def test_queue_clear_keeps_owner_when_owner_has_queue_less_scope(basic_world):

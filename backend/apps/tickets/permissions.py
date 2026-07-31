@@ -107,6 +107,7 @@ def _scope_covers_routing_result(
     queue: ServiceLocation | None,
     *,
     authority: AuthoritySnapshot,
+    restricted_office_id: str | None = None,
 ) -> bool:
     if scope.domain != "admin" and scope.domain != ticket.domain:
         return False
@@ -123,7 +124,7 @@ def _scope_covers_routing_result(
         return True
     scope_key = (
         scope.domain,
-        scope.office_id,
+        restricted_office_id if restricted_office_id is not None else scope.office_id,
         scope.service_id,
         scope.queue_id,
     )
@@ -142,11 +143,17 @@ def _role_grant_covers_routing_result(
         return False
     if grant.office_id is not None and grant.office_id != ticket.office_id:
         return False
+    if scope.office_id is not None and scope.office_id != str(ticket.office_id):
+        return False
+    effective_office_id = (
+        str(grant.office_id) if grant.office_id is not None else scope.office_id
+    )
     return _scope_covers_routing_result(
         scope,
         ticket,
         queue,
         authority=authority,
+        restricted_office_id=effective_office_id,
     )
 
 
