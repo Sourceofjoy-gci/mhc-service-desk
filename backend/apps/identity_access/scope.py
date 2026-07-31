@@ -4,6 +4,7 @@ Authorisation is enforced **server-side** on every endpoint. Scopes combine
 a domain (operational | it), an office, a service, and an optional queue.
 The frontend never grants access — it only renders what the backend approves.
 """
+
 from __future__ import annotations
 
 from collections.abc import Callable, Iterable, Sequence
@@ -58,11 +59,7 @@ _SCOPE_DIMENSIONS: tuple[str, ...] = ("office", "service", "queue")
 _VALID_SCOPE_KEYS = {
     "domain",
     "restricted_only",
-    *(
-        key
-        for dimension in _SCOPE_DIMENSIONS
-        for key in (dimension, f"{dimension}_id")
-    ),
+    *(key for dimension in _SCOPE_DIMENSIONS for key in (dimension, f"{dimension}_id")),
 }
 
 _ModelT = TypeVar("_ModelT", bound=Model)
@@ -111,7 +108,7 @@ def _is_superuser(user: object) -> bool:
 
 @dataclass(frozen=True)
 class Scope:
-    domain: str          # "operational" | "it" | "admin" | "audit"
+    domain: str  # "operational" | "it" | "admin" | "audit"
     office_id: str | None = None
     service_id: str | None = None
     queue_id: str | None = None
@@ -166,9 +163,7 @@ def has_scope(user: object, required: Scope) -> bool:
     raw_scopes: object = getattr(user, "_scopes", None)
     if not isinstance(raw_scopes, list | tuple):
         return False
-    return any(
-        scope.matches(required) for scope in raw_scopes if isinstance(scope, Scope)
-    )
+    return any(scope.matches(required) for scope in raw_scopes if isinstance(scope, Scope))
 
 
 def _normalise_scopes(scopes: list[Scope]) -> list[Scope]:
@@ -227,10 +222,7 @@ def _validated_role_scopes(
 
     scopes: list[Scope] = []
     for raw_scope in raw_scopes:
-        if (
-            not _is_string_object_dict(raw_scope)
-            or not set(raw_scope) <= _VALID_SCOPE_KEYS
-        ):
+        if not _is_string_object_dict(raw_scope) or not set(raw_scope) <= _VALID_SCOPE_KEYS:
             return None
 
         domain = raw_scope.get("domain")
@@ -271,7 +263,17 @@ def _active_persisted_assignments(
     if not isinstance(assignments, _AssignmentManager) or not getattr(user, "pk", None):
         return None
 
-    persisted = list(assignments.select_related("role", "office").all())
+    prefetched_cache: object = getattr(user, "_prefetched_objects_cache", {})
+    prefetched_assignments: object = None
+    if isinstance(prefetched_cache, dict):
+        prefetched_assignments = prefetched_cache.get("user_roles")
+    if isinstance(prefetched_assignments, Iterable) and not isinstance(
+        prefetched_assignments,
+        str | bytes,
+    ):
+        persisted = list(prefetched_assignments)
+    else:
+        persisted = list(assignments.select_related("role", "office").all())
     if not persisted:
         return None
 
@@ -339,8 +341,7 @@ def _snapshot_from_persisted(
     capabilities: set[str] = set()
     restricted_scope_keys: set[ScopeKey] = set()
     auditor_identity = any(
-        assignment.role.keycloak_role in _AUDITOR_ROLES
-        for assignment in assignments
+        assignment.role.keycloak_role in _AUDITOR_ROLES for assignment in assignments
     )
 
     for assignment in assignments:
@@ -397,9 +398,7 @@ def _effective_group_names(user: object) -> set[str]:
     if getattr(user, "pk", None) and callable(values_list):
         durable_names: object = values_list("name", flat=True)
         if isinstance(durable_names, Iterable):
-            groups.update(
-                name for name in durable_names if isinstance(name, str)
-            )
+            groups.update(name for name in durable_names if isinstance(name, str))
     return groups
 
 
@@ -535,9 +534,7 @@ def get_user_scopes(
         system-admins       -> admin
         auditors            -> audit (read-only across domains)
     """
-    return list(
-        _resolved_authority_snapshot(user, request=request, snapshot=snapshot).scopes
-    )
+    return list(_resolved_authority_snapshot(user, request=request, snapshot=snapshot).scopes)
 
 
 def is_auditor(
@@ -561,8 +558,7 @@ def has_unrestricted_domain_scope(
     scopes = list(authority.scopes)
     vars(user)["_scopes"] = scopes
     return any(
-        scope.domain == "admin"
-        or (scope.domain == domain and not scope.restricted_only)
+        scope.domain == "admin" or (scope.domain == domain and not scope.restricted_only)
         for scope in scopes
     )
 

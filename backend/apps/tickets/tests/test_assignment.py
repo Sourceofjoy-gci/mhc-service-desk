@@ -1,15 +1,18 @@
 from __future__ import annotations
 
 from datetime import UTC, datetime, timedelta
+from threading import Event, Thread
 from uuid import UUID, uuid4
 
 import pytest
+from django.db import close_old_connections, connection, transaction
 from django.utils import timezone
 
 from apps.audit.models import AuditEvent
+from apps.identity_access.authority_lock import lock_user_authorities
 from apps.identity_access.models import Role, User, UserRole
 from apps.identity_access.scope import get_authority_snapshot
-from apps.tickets import eligibility
+from apps.tickets import assignment as assignment_service
 from apps.tickets.assignment import (
     AssignmentActor,
     AssignmentParty,
@@ -331,16 +334,17 @@ def test_target_is_revalidated_after_ticket_lock(basic_world, monkeypatch):
     actor = _user(["ops-supervisors"])
     target = _user(["ops-agents"])
     ticket = _ticket(basic_world)
-    original = eligibility.is_eligible_assignee
+    original = assignment_service.eligible_assignee_candidate
 
-    def deactivate_target_during_revalidation(locked_ticket, user):
+    def deactivate_target_during_revalidation(locked_ticket, user, *, snapshot):
         if user.pk == target.pk:
             User.objects.filter(pk=target.pk).update(is_active=False)
             user.is_active = False
-        return original(locked_ticket, user)
+        return original(locked_ticket, user, snapshot=snapshot)
 
     monkeypatch.setattr(
-        "apps.tickets.assignment.is_eligible_assignee",
+        assignment_service,
+        "eligible_assignee_candidate",
         deactivate_target_during_revalidation,
     )
 
@@ -480,3 +484,249 @@ def test_system_assignment_revalidates_target_and_records_system_actor(basic_wor
     result.ticket.refresh_from_db()
     assert result.ticket.status.code == "triage"
     assert not TransitionHistory.objects.filter(ticket=ticket).exists()
+
+
+def _set_bounded_database_timeouts() -> None:
+    with connection.cursor() as cursor:
+        cursor.execute("SET LOCAL lock_timeout = '3s'")
+        cursor.execute("SET LOCAL statement_timeout = '7s'")
+
+
+def _join_threads(*threads: Thread) -> None:
+    for thread in threads:
+        thread.join(timeout=10)
+    assert all(not thread.is_alive() for thread in threads), "authority race worker hung"
+
+
+@pytest.mark.django_db(transaction=True)
+def test_concurrent_target_deactivation_wins_then_assignment_revalidates_and_fails(
+    basic_world,
+):
+    if connection.vendor != "postgresql":
+        pytest.skip("Authority lock ordering requires PostgreSQL row locks.")
+    actor = _user(["ops-supervisors"])
+    target = _user(["ops-agents"])
+    ticket = _ticket(basic_world)
+    mutation_locked = Event()
+    release_mutation = Event()
+    assignment_finished = Event()
+    errors: list[BaseException] = []
+    assignment_errors: list[BaseException] = []
+
+    def deactivate_target() -> None:
+        close_old_connections()
+        try:
+            with transaction.atomic():
+                _set_bounded_database_timeouts()
+                locked = lock_user_authorities((target.id,))[target.id].user
+                locked.is_active = False
+                locked.save(update_fields=["is_active"])
+                mutation_locked.set()
+                if not release_mutation.wait(timeout=5):
+                    raise TimeoutError("target deactivation was not released")
+        except BaseException as exc:
+            errors.append(exc)
+        finally:
+            close_old_connections()
+
+    def assign_after_deactivation_started() -> None:
+        close_old_connections()
+        try:
+            with transaction.atomic():
+                _set_bounded_database_timeouts()
+                assign_ticket(
+                    ticket_id=ticket.id,
+                    actor=User.objects.get(pk=actor.pk),
+                    assignee_id=target.id,
+                    expected_updated_at=ticket.updated_at,
+                )
+        except BaseException as exc:
+            assignment_errors.append(exc)
+        finally:
+            assignment_finished.set()
+            close_old_connections()
+
+    mutation_thread = Thread(target=deactivate_target, daemon=True)
+    assignment_thread = Thread(target=assign_after_deactivation_started, daemon=True)
+    try:
+        mutation_thread.start()
+        assert mutation_locked.wait(timeout=5)
+        assignment_thread.start()
+        assert not assignment_finished.wait(timeout=0.5)
+    finally:
+        release_mutation.set()
+        _join_threads(mutation_thread, assignment_thread)
+
+    if errors:
+        raise errors[0]
+    assert len(assignment_errors) == 1
+    assert isinstance(assignment_errors[0], TicketValidationError)
+    assert assignment_errors[0].fields == {
+        "assignee_id": ["Select an eligible assignee."],
+    }
+    ticket.refresh_from_db()
+    target.refresh_from_db()
+    assert target.is_active is False
+    assert ticket.assignee_id is None
+    assert _assignment_rows(ticket) == (0, 0, 0)
+
+
+@pytest.mark.django_db(transaction=True)
+def test_assignment_wins_then_concurrent_grant_revocation_waits_until_commit(
+    basic_world,
+    monkeypatch,
+):
+    if connection.vendor != "postgresql":
+        pytest.skip("Authority lock ordering requires PostgreSQL row locks.")
+    actor = _user(["ops-supervisors"])
+    target = _user(display_name="Locked Estate Examiner")
+    role = Role.objects.create(
+        keycloak_role="estate-examiner",
+        name="Estate Examiner",
+        scopes=[{"domain": "operational"}],
+    )
+    grant = UserRole.objects.create(user=target, role=role)
+    ticket = _ticket(basic_world)
+    authority_locked = Event()
+    release_assignment = Event()
+    revocation_finished = Event()
+    errors: list[BaseException] = []
+    assignment_results = []
+    original = assignment_service.eligible_assignee_candidate
+
+    def pause_after_authority_lock(locked_ticket, user, *, snapshot):
+        authority_locked.set()
+        if not release_assignment.wait(timeout=5):
+            raise TimeoutError("assignment authority lock was not released")
+        return original(locked_ticket, user, snapshot=snapshot)
+
+    monkeypatch.setattr(
+        assignment_service,
+        "eligible_assignee_candidate",
+        pause_after_authority_lock,
+    )
+
+    def run_assignment() -> None:
+        close_old_connections()
+        try:
+            with transaction.atomic():
+                _set_bounded_database_timeouts()
+                assignment_results.append(
+                    assign_ticket(
+                        ticket_id=ticket.id,
+                        actor=User.objects.get(pk=actor.pk),
+                        assignee_id=target.id,
+                        expected_updated_at=ticket.updated_at,
+                    )
+                )
+        except BaseException as exc:
+            errors.append(exc)
+        finally:
+            close_old_connections()
+
+    def revoke_grant() -> None:
+        close_old_connections()
+        try:
+            with transaction.atomic():
+                _set_bounded_database_timeouts()
+                lock_user_authorities((target.id,))
+                UserRole.objects.filter(pk=grant.pk).delete()
+        except BaseException as exc:
+            errors.append(exc)
+        finally:
+            revocation_finished.set()
+            close_old_connections()
+
+    assignment_thread = Thread(target=run_assignment, daemon=True)
+    revocation_thread = Thread(target=revoke_grant, daemon=True)
+    try:
+        assignment_thread.start()
+        assert authority_locked.wait(timeout=5)
+        revocation_thread.start()
+        assert not revocation_finished.wait(timeout=0.5)
+    finally:
+        release_assignment.set()
+        _join_threads(assignment_thread, revocation_thread)
+
+    if errors:
+        raise errors[0]
+    assert len(assignment_results) == 1
+    ticket.refresh_from_db()
+    assert ticket.assignee_id == target.id
+    assert not UserRole.objects.filter(pk=grant.pk).exists()
+    assert _assignment_rows(ticket) == (1, 1, 1)
+
+
+@pytest.mark.django_db(transaction=True)
+def test_concurrent_precedence_grant_wins_then_assignment_uses_fresh_locked_facts(
+    basic_world,
+):
+    if connection.vendor != "postgresql":
+        pytest.skip("Authority lock ordering requires PostgreSQL row locks.")
+    actor = _user(["ops-supervisors"])
+    target = _user(["ops-agents"])
+    invalid_role = Role.objects.create(
+        keycloak_role="invalid-functional-role",
+        name="Invalid functional role",
+        scopes={"domain": "operational"},
+    )
+    ticket = _ticket(basic_world)
+    mutation_locked = Event()
+    release_mutation = Event()
+    assignment_finished = Event()
+    errors: list[BaseException] = []
+    assignment_errors: list[BaseException] = []
+
+    def add_precedence_grant() -> None:
+        close_old_connections()
+        try:
+            with transaction.atomic():
+                _set_bounded_database_timeouts()
+                lock_user_authorities((target.id,))
+                UserRole.objects.create(user_id=target.id, role_id=invalid_role.id)
+                mutation_locked.set()
+                if not release_mutation.wait(timeout=5):
+                    raise TimeoutError("precedence mutation was not released")
+        except BaseException as exc:
+            errors.append(exc)
+        finally:
+            close_old_connections()
+
+    def assign_after_precedence_change_started() -> None:
+        close_old_connections()
+        try:
+            with transaction.atomic():
+                _set_bounded_database_timeouts()
+                assign_ticket(
+                    ticket_id=ticket.id,
+                    actor=User.objects.get(pk=actor.pk),
+                    assignee_id=target.id,
+                    expected_updated_at=ticket.updated_at,
+                )
+        except BaseException as exc:
+            assignment_errors.append(exc)
+        finally:
+            assignment_finished.set()
+            close_old_connections()
+
+    mutation_thread = Thread(target=add_precedence_grant, daemon=True)
+    assignment_thread = Thread(
+        target=assign_after_precedence_change_started,
+        daemon=True,
+    )
+    try:
+        mutation_thread.start()
+        assert mutation_locked.wait(timeout=5)
+        assignment_thread.start()
+        assert not assignment_finished.wait(timeout=0.5)
+    finally:
+        release_mutation.set()
+        _join_threads(mutation_thread, assignment_thread)
+
+    if errors:
+        raise errors[0]
+    assert len(assignment_errors) == 1
+    assert isinstance(assignment_errors[0], TicketValidationError)
+    ticket.refresh_from_db()
+    assert ticket.assignee_id is None
+    assert _assignment_rows(ticket) == (0, 0, 0)

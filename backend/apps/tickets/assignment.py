@@ -10,6 +10,10 @@ from django.db import transaction
 from django.utils import timezone
 from rest_framework.request import Request
 
+from apps.identity_access.authority_lock import (
+    LockedUserAuthority,
+    lock_user_authorities,
+)
 from apps.identity_access.models import User
 from apps.identity_access.scope import (
     AuthoritySnapshot,
@@ -20,8 +24,8 @@ from apps.workflow.models import Transition
 
 from .custody import CustodyActor, CustodyEventInput, CustodyParty
 from .eligibility import (
-    custody_party_for_user,
-    is_eligible_assignee,
+    AssigneeCandidate,
+    eligible_assignee_candidate,
     matching_actor_role_aliases,
 )
 from .events import record_ticket_event
@@ -74,8 +78,17 @@ class _PartySnapshots:
     receipt: AssignmentParty
 
 
-def _party_snapshots(ticket: Ticket, user: User) -> _PartySnapshots:
-    custody = custody_party_for_user(ticket, user)
+def _party_snapshots(
+    user: User,
+    candidate: AssigneeCandidate | None,
+) -> _PartySnapshots:
+    custody = CustodyParty(
+        id=str(user.id),
+        subject=user.keycloak_subject,
+        display_name=user.display_name or user.username,
+        designations=candidate.designations if candidate else (),
+        team_labels=candidate.team_labels if candidate else (),
+    )
     return _PartySnapshots(
         custody=custody,
         receipt=AssignmentParty(
@@ -87,16 +100,54 @@ def _party_snapshots(ticket: Ticket, user: User) -> _PartySnapshots:
     )
 
 
-def _target_for_assignment(ticket: Ticket, assignee_id: UUID | None) -> User | None:
+def _target_for_assignment(
+    ticket: Ticket,
+    assignee_id: UUID | None,
+    *,
+    locked_authorities: dict[UUID, LockedUserAuthority],
+) -> tuple[User | None, AssigneeCandidate | None]:
     if assignee_id is None:
-        return None
+        return None, None
     try:
-        target = User.objects.get(pk=assignee_id, is_active=True)
-    except User.DoesNotExist as exc:
+        target_authority = locked_authorities[assignee_id]
+    except KeyError as exc:
         raise TicketValidationError({"assignee_id": ["Select an eligible assignee."]}) from exc
-    if not is_eligible_assignee(ticket, target):
+    target = target_authority.user
+    candidate = eligible_assignee_candidate(
+        ticket,
+        target,
+        snapshot=target_authority.snapshot,
+    )
+    if candidate is None:
         raise TicketValidationError({"assignee_id": ["Select an eligible assignee."]})
-    return target
+    return target, candidate
+
+
+def _assignment_party_snapshots(
+    *,
+    ticket: Ticket,
+    target: User | None,
+    target_candidate: AssigneeCandidate | None,
+    locked_authorities: dict[UUID, LockedUserAuthority],
+) -> tuple[_PartySnapshots | None, _PartySnapshots | None]:
+    previous_snapshots: _PartySnapshots | None = None
+    if ticket.assignee_id is not None:
+        previous_authority = locked_authorities[ticket.assignee_id]
+        previous_candidate = (
+            target_candidate
+            if target is not None and target.id == ticket.assignee_id
+            else eligible_assignee_candidate(
+                ticket,
+                previous_authority.user,
+                snapshot=previous_authority.snapshot,
+            )
+        )
+        previous_snapshots = _party_snapshots(
+            previous_authority.user,
+            previous_candidate,
+        )
+    new_snapshots = _party_snapshots(target, target_candidate) if target is not None else None
+    return previous_snapshots, new_snapshots
 
 
 def _can_assign_from_snapshot(
@@ -137,16 +188,13 @@ def _write_locked_assignment(
     *,
     locked: Ticket,
     target: User | None,
+    previous_snapshots: _PartySnapshots | None,
+    new_snapshots: _PartySnapshots | None,
     actor: AssignmentActor,
     custody_actor: CustodyActor,
     source_process: str,
     reason: str,
 ) -> AssignmentResult:
-    previous_user = locked.assignee
-    previous_snapshots = (
-        _party_snapshots(locked, previous_user) if previous_user is not None else None
-    )
-    new_snapshots = _party_snapshots(locked, target) if target is not None else None
     occurred_at = timezone.now()
 
     if locked.assignee_id == (target.id if target is not None else None):
@@ -243,6 +291,16 @@ def assign_ticket(
     if expected_updated_at != locked.updated_at:
         raise TicketConflictError(locked.updated_at)
 
+    authority_user_ids = {actor.id}
+    if locked.assignee_id is not None:
+        authority_user_ids.add(locked.assignee_id)
+    if assignee_id is not None:
+        authority_user_ids.add(assignee_id)
+    locked_authorities = lock_user_authorities(authority_user_ids)
+    locked_actor_authority = locked_authorities.get(actor.id)
+    if locked_actor_authority is None or not locked_actor_authority.user.is_active:
+        raise TicketPermissionError
+
     changing_owner = locked.assignee_id != assignee_id
     self_assignment = locked.assignee_id is None and assignee_id == actor.id
     if changing_owner:
@@ -252,7 +310,11 @@ def assign_ticket(
         elif not _can_assign_from_snapshot(actor, locked, authority):
             raise TicketPermissionError
 
-    target = _target_for_assignment(locked, assignee_id)
+    target, target_candidate = _target_for_assignment(
+        locked,
+        assignee_id,
+        locked_authorities=locked_authorities,
+    )
     if self_assignment and target is None:
         raise TicketPermissionError
     if changing_owner and locked.assignee_id is not None and not reason.strip():
@@ -263,17 +325,26 @@ def assign_ticket(
         and target is not None
         and _has_active_assigned_transition(locked)
     )
+    previous_snapshots, new_snapshots = _assignment_party_snapshots(
+        ticket=locked,
+        target=target,
+        target_candidate=target_candidate,
+        locked_authorities=locked_authorities,
+    )
+    locked_actor = locked_actor_authority.user
     result = _write_locked_assignment(
         locked=locked,
         target=target,
+        previous_snapshots=previous_snapshots,
+        new_snapshots=new_snapshots,
         actor=AssignmentActor(
             kind=TicketCustodyEvent.ActorKind.USER,
-            subject=actor.keycloak_subject,
-            display_name=actor.display_name or actor.username,
+            subject=locked_actor.keycloak_subject,
+            display_name=locked_actor.display_name or locked_actor.username,
         ),
         custody_actor=CustodyActor.user(
-            actor.keycloak_subject,
-            actor.display_name or actor.username,
+            locked_actor.keycloak_subject,
+            locked_actor.display_name or locked_actor.username,
         ),
         source_process="ticket.assignment",
         reason=reason,
@@ -326,10 +397,28 @@ def assign_ticket_by_system(
         .select_related("assignee", "status")
         .get(pk=ticket_id)
     )
-    target = _target_for_assignment(locked, assignee_id)
+    authority_user_ids: set[UUID] = set()
+    if locked.assignee_id is not None:
+        authority_user_ids.add(locked.assignee_id)
+    if assignee_id is not None:
+        authority_user_ids.add(assignee_id)
+    locked_authorities = lock_user_authorities(authority_user_ids)
+    target, target_candidate = _target_for_assignment(
+        locked,
+        assignee_id,
+        locked_authorities=locked_authorities,
+    )
+    previous_snapshots, new_snapshots = _assignment_party_snapshots(
+        ticket=locked,
+        target=target,
+        target_candidate=target_candidate,
+        locked_authorities=locked_authorities,
+    )
     return _write_locked_assignment(
         locked=locked,
         target=target,
+        previous_snapshots=previous_snapshots,
+        new_snapshots=new_snapshots,
         actor=AssignmentActor(
             kind=TicketCustodyEvent.ActorKind.SYSTEM,
             subject=actor_subject,

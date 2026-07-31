@@ -4,6 +4,7 @@ Tokens issued by Keycloak are verified against the realm's JWKS. The
 ``sub`` claim is the source of truth for identity; the ``groups`` and
 ``realm_access.roles`` claims drive authorisation.
 """
+
 from __future__ import annotations
 
 import json
@@ -19,6 +20,7 @@ from rest_framework import authentication, exceptions
 from rest_framework.request import Request
 from rest_framework_simplejwt.tokens import AccessToken
 
+from .authority_lock import lock_user_authorities
 from .models import User
 
 logger = logging.getLogger(__name__)
@@ -37,17 +39,13 @@ def _is_json_value(value: object) -> TypeGuard[JSONValue]:
     if isinstance(value, list):
         return all(_is_json_value(item) for item in value)
     if isinstance(value, dict):
-        return all(
-            isinstance(key, str) and _is_json_value(item)
-            for key, item in value.items()
-        )
+        return all(isinstance(key, str) and _is_json_value(item) for key, item in value.items())
     return False
 
 
 def _is_json_object(value: object) -> TypeGuard[JSONObject]:
     return isinstance(value, dict) and all(
-        isinstance(key, str) and _is_json_value(item)
-        for key, item in value.items()
+        isinstance(key, str) and _is_json_value(item) for key, item in value.items()
     )
 
 
@@ -156,9 +154,7 @@ class KeycloakJWTAuthentication(authentication.BaseAuthentication):
             raise exceptions.AuthenticationFailed("Token missing sub")
 
         raw_username = payload.get("preferred_username", sub)
-        preferred_username = (
-            raw_username[:150] if isinstance(raw_username, str) else sub[:150]
-        )
+        preferred_username = raw_username[:150] if isinstance(raw_username, str) else sub[:150]
         raw_email = payload.get("email", "")
         email = raw_email if isinstance(raw_email, str) else ""
         mfa_enabled = bool(payload.get("acr") in ("mfa", "urn:mace:incommon:iap:silver"))
@@ -223,9 +219,12 @@ def _normalize_groups(raw_groups: object) -> list[str]:
 
 
 def _synchronize_groups(user: User, groups: list[str]) -> None:
-    if user.keycloak_groups != groups:
-        user.keycloak_groups = groups
-        user.save(update_fields=["keycloak_groups"])
+    with transaction.atomic():
+        locked = lock_user_authorities((user.id,))[user.id].user
+        if locked.keycloak_groups != groups:
+            locked.keycloak_groups = groups
+            locked.save(update_fields=["keycloak_groups"])
+        user.keycloak_groups = list(locked.keycloak_groups)
     vars(user)["_groups"] = list(groups)
 
 

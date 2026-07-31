@@ -99,12 +99,8 @@ _LEGACY_ROLE_DETAILS: dict[str, tuple[str, str, str]] = {
 _ROLE_ALIASES: dict[str, frozenset[str]] = {
     "agent-operational": frozenset({"agent-operational", "ops-agents"}),
     "ops-agents": frozenset({"agent-operational", "ops-agents"}),
-    "supervisor-operational": frozenset(
-        {"supervisor-operational", "ops-supervisors"}
-    ),
-    "ops-supervisors": frozenset(
-        {"supervisor-operational", "ops-supervisors"}
-    ),
+    "supervisor-operational": frozenset({"supervisor-operational", "ops-supervisors"}),
+    "ops-supervisors": frozenset({"supervisor-operational", "ops-supervisors"}),
     "agent-it": frozenset({"agent-it", "it-agents"}),
     "it-agents": frozenset({"agent-it", "it-agents"}),
     "lead-it": frozenset({"lead-it", "it-leads"}),
@@ -149,16 +145,10 @@ def _active_assignments(
 
 
 def _effective_groups(user: User) -> set[str]:
-    groups = {
-        group
-        for group in (user.keycloak_groups or [])
-        if isinstance(group, str)
-    }
+    groups = {group for group in (user.keycloak_groups or []) if isinstance(group, str)}
     raw_request_groups = getattr(user, "_groups", ())
     if isinstance(raw_request_groups, list | tuple | set | frozenset):
-        groups.update(
-            group for group in raw_request_groups if isinstance(group, str)
-        )
+        groups.update(group for group in raw_request_groups if isinstance(group, str))
     prefetched = getattr(user, "_prefetched_objects_cache", {}).get("groups")
     if prefetched is not None:
         groups.update(group.name for group in prefetched)
@@ -187,10 +177,7 @@ def _scope_matches_ticket(scope: Scope, ticket: Ticket) -> bool:
         (scope.service_id, ticket.service_id),
         (scope.queue_id, ticket.queue_id),
     )
-    return all(
-        configured is None or configured == str(actual)
-        for configured, actual in dimensions
-    )
+    return all(configured is None or configured == str(actual) for configured, actual in dimensions)
 
 
 def _assignment_scope_matches_ticket(
@@ -302,18 +289,10 @@ def is_auditor_identity(
 ) -> bool:
     """Apply the read-only auditor boundary across every identity source."""
     if active_assignments is None and groups is None:
-        claim_groups = {
-            group
-            for group in (user.keycloak_groups or [])
-            if isinstance(group, str)
-        }
+        claim_groups = {group for group in (user.keycloak_groups or []) if isinstance(group, str)}
         raw_request_groups = getattr(user, "_groups", ())
         if isinstance(raw_request_groups, list | tuple | set | frozenset):
-            claim_groups.update(
-                group
-                for group in raw_request_groups
-                if isinstance(group, str)
-            )
+            claim_groups.update(group for group in raw_request_groups if isinstance(group, str))
         if _AUDITOR_ROLE_KEYS & claim_groups:
             return True
         if not user.pk:
@@ -347,9 +326,7 @@ def is_auditor_identity(
 
 
 def has_active_persisted_assignments(user: User) -> bool:
-    return bool(
-        _active_assignments(_prefetched_assignments(user), now=timezone.now())
-    )
+    return bool(_active_assignments(_prefetched_assignments(user), now=timezone.now()))
 
 
 def _matching_grant_role_aliases(
@@ -374,8 +351,7 @@ def _matching_grant_role_aliases(
             aliases.add("admin-scope")
         if role_key in _DESIGNATION_BY_KEY:
             if _ticket_visible_in_authority(ticket, authority) and any(
-                _role_grant_scope_matches_ticket(grant, scope, ticket)
-                for scope in grant.scopes
+                _role_grant_scope_matches_ticket(grant, scope, ticket) for scope in grant.scopes
             ):
                 aliases.update(
                     _ROLE_ALIASES[
@@ -406,8 +382,7 @@ def _role_grant_scope_matches_ticket(
         (scope.queue_id, ticket.queue_id),
     )
     if any(
-        configured is not None and configured != str(actual)
-        for configured, actual in dimensions
+        configured is not None and configured != str(actual) for configured, actual in dimensions
     ):
         return False
     if scope.restricted_only:
@@ -485,14 +460,10 @@ def _candidate_for_user(
         active_assignments=active_assignments,
         groups=groups,
     )
-    if (
-        resolved_authority.auditor_identity
-        or "auditor" in resolved_authority.capabilities
-    ):
+    if resolved_authority.auditor_identity or "auditor" in resolved_authority.capabilities:
         return None
-    if (
-        ticket.confidentiality == Ticket.Confidentiality.RESTRICTED
-        and not can_view_restricted(user, snapshot=resolved_authority)
+    if ticket.confidentiality == Ticket.Confidentiality.RESTRICTED and not can_view_restricted(
+        user, snapshot=resolved_authority
     ):
         return None
     if require_database_scope_check:
@@ -516,9 +487,7 @@ def _candidate_for_user(
     if not matches:
         return None
 
-    designation_order = {
-        item.display_name: index for index, item in enumerate(DESIGNATIONS)
-    }
+    designation_order = {item.display_name: index for index, item in enumerate(DESIGNATIONS)}
     designations = tuple(
         sorted(
             {match.display_name for match in matches},
@@ -593,6 +562,21 @@ def is_eligible_assignee(ticket: Ticket, user: User) -> bool:
             require_database_scope_check=True,
         )
         is not None
+    )
+
+
+def eligible_assignee_candidate(
+    ticket: Ticket,
+    user: User,
+    *,
+    snapshot: AuthoritySnapshot,
+) -> AssigneeCandidate | None:
+    """Resolve one candidate entirely from already-locked authority facts."""
+    return _candidate_for_user(
+        ticket,
+        user,
+        authority=snapshot,
+        require_database_scope_check=False,
     )
 
 
