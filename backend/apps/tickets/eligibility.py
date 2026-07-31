@@ -8,6 +8,7 @@ from types import SimpleNamespace
 from typing import Any, cast
 from uuid import UUID
 
+from django.db.models import Q
 from django.utils import timezone
 
 from apps.identity_access.models import User, UserRole
@@ -313,6 +314,36 @@ def is_auditor_identity(
     groups: set[str] | None = None,
 ) -> bool:
     """Apply the read-only auditor boundary across every identity source."""
+    if active_assignments is None and groups is None:
+        claim_groups = {
+            group
+            for group in (user.keycloak_groups or [])
+            if isinstance(group, str)
+        }
+        raw_request_groups = getattr(user, "_groups", ())
+        if isinstance(raw_request_groups, list | tuple | set | frozenset):
+            claim_groups.update(
+                group
+                for group in raw_request_groups
+                if isinstance(group, str)
+            )
+        if _AUDITOR_ROLE_KEYS & claim_groups:
+            return True
+        if not user.pk:
+            return False
+        now = timezone.now()
+        has_persisted_auditor = (
+            UserRole.objects.filter(
+                user_id=user.pk,
+                role__keycloak_role__in=_AUDITOR_ROLE_KEYS,
+            )
+            .filter(Q(expires_at__isnull=True) | Q(expires_at__gt=now))
+            .exists()
+        )
+        if has_persisted_auditor:
+            return True
+        return user.groups.filter(name__in=_AUDITOR_ROLE_KEYS).exists()
+
     resolved_assignments = (
         active_assignments
         if active_assignments is not None
@@ -356,7 +387,8 @@ def _matching_grant_role_aliases(
             aliases.add("admin-scope")
         if role_key in _DESIGNATION_BY_KEY:
             if _ticket_visible_in_authority(ticket, authority) and any(
-                _scope_matches_ticket(scope, ticket) for scope in grant.scopes
+                _role_grant_scope_matches_ticket(grant, scope, ticket)
+                for scope in grant.scopes
             ):
                 aliases.update(
                     _ROLE_ALIASES[
@@ -377,6 +409,8 @@ def _role_grant_scope_matches_ticket(
     scope: Scope,
     ticket: Ticket,
 ) -> bool:
+    if grant.office_id is not None and grant.office_id != ticket.office_id:
+        return False
     if scope.domain != "admin" and scope.domain != ticket.domain:
         return False
     dimensions = (
@@ -406,7 +440,7 @@ def matching_actor_role_aliases(
     if not user.is_active:
         return frozenset()
     authority = snapshot or get_authority_snapshot(user)
-    if "auditor" in authority.capabilities:
+    if authority.auditor_identity or "auditor" in authority.capabilities:
         return frozenset()
     if is_auditor_identity(user):
         return frozenset()
@@ -447,11 +481,16 @@ def _candidate_for_user(
     all_assignments = _prefetched_assignments(user)
     active_assignments = _active_assignments(all_assignments, now=timezone.now())
     groups = _effective_groups(user)
-    if is_auditor_identity(
-        user,
-        active_assignments=active_assignments,
-        groups=groups,
-    ):
+    current_auditor = (
+        is_auditor_identity(user)
+        if require_database_scope_check
+        else is_auditor_identity(
+            user,
+            active_assignments=active_assignments,
+            groups=groups,
+        )
+    )
+    if current_auditor:
         return None
     resolved_authority = authority or _authority_for_candidate(
         user,
@@ -459,7 +498,10 @@ def _candidate_for_user(
         active_assignments=active_assignments,
         groups=groups,
     )
-    if "auditor" in resolved_authority.capabilities:
+    if (
+        resolved_authority.auditor_identity
+        or "auditor" in resolved_authority.capabilities
+    ):
         return None
     if (
         ticket.confidentiality == Ticket.Confidentiality.RESTRICTED
@@ -573,9 +615,10 @@ def matching_designation_role_keys(ticket: Ticket, user: User) -> frozenset[str]
     active_assignments = _active_assignments(all_assignments, now=timezone.now())
     groups = _effective_groups(user)
     authority = get_authority_snapshot(user)
-    if "auditor" in authority.capabilities or not _ticket_visible_in_authority(
-        ticket,
-        authority,
+    if (
+        authority.auditor_identity
+        or "auditor" in authority.capabilities
+        or not _ticket_visible_in_authority(ticket, authority)
     ):
         return frozenset()
     return frozenset(

@@ -46,6 +46,7 @@ def _ticket(
     domain: str = "operational",
     confidentiality: str = Ticket.Confidentiality.NORMAL,
     queue: ServiceLocation | None = None,
+    office: Office | None = None,
 ) -> Ticket:
     service = basic_world["gen_info"] if domain == "operational" else basic_world["it_inc"]
     prefix = "OP" if domain == "operational" else "IT"
@@ -58,7 +59,7 @@ def _ticket(
         requester=basic_world["contact"],
         service=service,
         request_type=service.request_types.get(),
-        office=basic_world["office"],
+        office=office or basic_world["office"],
         confidentiality=confidentiality,
         queue=queue,
     )
@@ -109,6 +110,44 @@ def _grant(
 
 def _candidate(ticket: Ticket, user: User) -> AssigneeCandidate:
     return next(item for item in eligible_assignees(ticket) if item.id == user.id)
+
+
+@pytest.mark.parametrize("ticket_office_source", ["role", "assignment"])
+def test_designation_requires_role_and_assignment_offices_to_both_match(
+    basic_world,
+    ticket_office_source,
+):
+    assignment_office = Office.objects.create(
+        region=basic_world["region"],
+        code=f"CROSSED-{ticket_office_source}",
+        name="Crossed assignment office",
+    )
+    role_office = basic_world["office"]
+    ticket = _ticket(
+        basic_world,
+        office=(
+            role_office
+            if ticket_office_source == "role"
+            else assignment_office
+        ),
+    )
+    user = _user()
+    _grant(
+        user,
+        role_key="estate-examiner",
+        role_name="Estate Examiner",
+        scopes=[
+            {
+                "domain": "operational",
+                "office": str(role_office.id),
+                "service": str(ticket.service_id),
+            }
+        ],
+        office=assignment_office,
+    )
+
+    assert is_eligible_assignee(ticket, user) is False
+    assert user.id not in {candidate.id for candidate in eligible_assignees(ticket)}
 
 
 @pytest.mark.parametrize(

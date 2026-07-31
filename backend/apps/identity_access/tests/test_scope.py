@@ -240,7 +240,6 @@ def test_active_persisted_role_produces_exact_effective_grant(basic_world):
             scopes=(
                 Scope(
                     domain="operational",
-                    office_id=str(basic_world["office"].id),
                     service_id=str(service_id),
                     queue_id=str(queue_id),
                 ),
@@ -794,6 +793,11 @@ def test_reloaded_expired_role_user_uses_durable_legacy_group_fallback(
 
 def test_authority_snapshot_captures_active_validated_grants_immutably(basic_world):
     user = _persisted_user(groups=["ops-supervisors"])
+    assignment_office = Office.objects.create(
+        region=basic_world["region"],
+        code="IMMUTABLE-GRANT",
+        name="Immutable grant assignment office",
+    )
     role = Role.objects.create(
         keycloak_role="supervisor-operational",
         name="Operational Supervisor",
@@ -808,7 +812,7 @@ def test_authority_snapshot_captures_active_validated_grants_immutably(basic_wor
     assignment = UserRole.objects.create(
         user=user,
         role=role,
-        office=basic_world["office"],
+        office=assignment_office,
     )
 
     snapshot = get_authority_snapshot(user)
@@ -827,7 +831,7 @@ def test_authority_snapshot_captures_active_validated_grants_immutably(basic_wor
                     service_id=str(basic_world["gen_info"].id),
                 ),
             ),
-            office_id=basic_world["office"].id,
+            office_id=assignment_office.id,
             expires_at=None,
         ),
     )

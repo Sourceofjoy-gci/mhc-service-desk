@@ -552,3 +552,138 @@ def test_reloaded_expired_role_actor_uses_durable_legacy_group_fallback(
 
     assert can_assign(reloaded, ticket=ticket) is True
     assert can_update_work_state(reloaded, ticket) is True
+
+
+@pytest.mark.parametrize(
+    ("authority_role", "domain"),
+    [
+        ("supervisor-operational", "operational"),
+        ("lead-it", "it"),
+        ("admin", "operational"),
+    ],
+)
+@pytest.mark.parametrize("ticket_office_source", ["role", "assignment"])
+def test_authority_role_requires_configured_and_assignment_offices_to_match(
+    basic_world,
+    authority_role,
+    domain,
+    ticket_office_source,
+):
+    user = _user(groups=[])
+    role_office = basic_world["office"]
+    assignment_office = Office.objects.create(
+        region=basic_world["region"],
+        code=f"AUTH-{authority_role[:4]}-{ticket_office_source[:3]}",
+        name="Crossed authority assignment office",
+    )
+    service = basic_world["gen_info"] if domain == "operational" else basic_world["it_inc"]
+    role = Role.objects.create(
+        keycloak_role=authority_role,
+        name=authority_role,
+        scopes=[
+            {
+                "domain": "admin" if authority_role == "admin" else domain,
+                "office": str(role_office.id),
+                "service": str(service.id),
+            }
+        ],
+    )
+    UserRole.objects.create(
+        user=user,
+        role=role,
+        office=assignment_office,
+    )
+    ticket_office = (
+        role_office
+        if ticket_office_source == "role"
+        else assignment_office
+    )
+    ticket = Ticket.objects.create(
+        number=f"{'OP' if domain == 'operational' else 'IT'}-202607-{uuid4().int % 1000000:06d}",
+        domain=domain,
+        title="Independent authority office boundaries",
+        status=Status.objects.get(domain=domain, code="new"),
+        channel="internal",
+        requester=basic_world["contact"],
+        service=service,
+        request_type=service.request_types.get(),
+        office=ticket_office,
+    )
+
+    assert can_assign(user, ticket=ticket) is False
+    assert can_update_work_state(user, ticket) is False
+
+
+def test_cached_malformed_auditor_identity_survives_role_removal_for_superuser(
+    basic_world,
+):
+    user = _user(groups=[])
+    user.is_superuser = True
+    user.save(update_fields=["is_superuser"])
+    auditor = Role.objects.create(
+        keycloak_role="auditor",
+        name="Malformed auditor",
+        scopes={"domain": "operational"},
+    )
+    assignment = UserRole.objects.create(user=user, role=auditor)
+    request = SimpleNamespace(user=user)
+    snapshot = get_authority_snapshot(user, request=request)
+    assignment.delete()
+    ticket = Ticket.objects.create(
+        number="OP-202607-901200",
+        domain="operational",
+        title="Malformed cached auditor",
+        status=Status.objects.get(domain="operational", code="new"),
+        channel="internal",
+        requester=basic_world["contact"],
+        service=basic_world["gen_info"],
+        request_type=basic_world["gen_info"].request_types.get(),
+        office=basic_world["office"],
+    )
+
+    assert snapshot.role_grants == ()
+    assert "auditor" not in snapshot.capabilities
+    assert snapshot.auditor_identity is True
+    assert can_assign(user, ticket=ticket, request=request) is False
+    assert can_update_work_state(user, ticket, request=request) is False
+
+
+@pytest.mark.parametrize("auditor_source", ["persisted", "django"])
+def test_fresh_auditor_tightening_bypasses_prefetched_identity_caches(
+    basic_world,
+    auditor_source,
+):
+    base_user = _user(groups=[])
+    base_user.is_superuser = True
+    base_user.save(update_fields=["is_superuser"])
+    user = User.objects.prefetch_related("user_roles__role", "groups").get(
+        pk=base_user.pk,
+    )
+    request = SimpleNamespace(user=user)
+    get_authority_snapshot(user, request=request)
+
+    if auditor_source == "persisted":
+        auditor = Role.objects.create(
+            keycloak_role="auditor",
+            name="Auditor",
+            scopes=[{"domain": "operational"}],
+        )
+        UserRole.objects.create(user_id=user.pk, role=auditor)
+    else:
+        auditor_group = Group.objects.create(name="auditors")
+        User.objects.get(pk=user.pk).groups.add(auditor_group)
+
+    ticket = Ticket.objects.create(
+        number=f"OP-202607-{901300 if auditor_source == 'persisted' else 901301}",
+        domain="operational",
+        title="Fresh auditor tightening",
+        status=Status.objects.get(domain="operational", code="new"),
+        channel="internal",
+        requester=basic_world["contact"],
+        service=basic_world["gen_info"],
+        request_type=basic_world["gen_info"].request_types.get(),
+        office=basic_world["office"],
+    )
+
+    assert can_assign(user, ticket=ticket, request=request) is False
+    assert can_update_work_state(user, ticket, request=request) is False

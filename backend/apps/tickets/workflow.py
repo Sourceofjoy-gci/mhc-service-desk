@@ -38,6 +38,7 @@ def available_transitions(
     ).exists()
     if (
         not actor.is_active
+        or authority.auditor_identity
         or "auditor" in authority.capabilities
         or is_auditor_identity(actor)
         or not ticket_is_in_scope

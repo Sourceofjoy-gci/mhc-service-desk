@@ -155,6 +155,7 @@ class AuthoritySnapshot:
     role_grants: tuple[EffectiveRoleGrant, ...] = ()
     group_role_keys: frozenset[str] = frozenset()
     uses_persisted_roles: bool = False
+    auditor_identity: bool = False
 
 
 def has_scope(user: object, required: Scope) -> bool:
@@ -205,6 +206,8 @@ def _validated_scope_id(
 
 def _validated_role_scopes(
     assignment: _RoleAssignment,
+    *,
+    preserve_configured_office: bool = False,
 ) -> tuple[Scope, ...] | None:
     """Validate one persisted assignment atomically.
 
@@ -245,11 +248,9 @@ def _validated_role_scopes(
                 return None
             identifiers[dimension] = value
 
-        office_id = (
-            str(assignment.office_id)
-            if assignment.office_id is not None
-            else identifiers["office"]
-        )
+        office_id = identifiers["office"]
+        if not preserve_configured_office and assignment.office_id is not None:
+            office_id = str(assignment.office_id)
         scopes.append(
             Scope(
                 domain=domain,
@@ -288,7 +289,10 @@ def _effective_grants_from_assignments(
 ) -> tuple[EffectiveRoleGrant, ...]:
     grants: list[EffectiveRoleGrant] = []
     for assignment in assignments:
-        scopes = _validated_role_scopes(assignment)
+        scopes = _validated_role_scopes(
+            assignment,
+            preserve_configured_office=True,
+        )
         if not scopes:
             continue
         grants.append(
@@ -334,15 +338,23 @@ def _snapshot_from_persisted(
     scopes: list[Scope] = []
     capabilities: set[str] = set()
     restricted_scope_keys: set[ScopeKey] = set()
+    auditor_identity = any(
+        assignment.role.keycloak_role in _AUDITOR_ROLES
+        for assignment in assignments
+    )
 
-    for grant in grants:
-        scopes.extend(grant.scopes)
-        if grant.role_key in _AUDITOR_ROLES:
+    for assignment in assignments:
+        assignment_scopes = _validated_role_scopes(assignment)
+        if not assignment_scopes:
+            continue
+        scopes.extend(assignment_scopes)
+        role_key = assignment.role.keycloak_role
+        if role_key in _AUDITOR_ROLES:
             capabilities.add("auditor")
-        if grant.role_key in _RESTRICTED_VIEW_ROLES:
-            restricted_scope_keys.update(map(_scope_key, grant.scopes))
+        if role_key in _RESTRICTED_VIEW_ROLES:
+            restricted_scope_keys.update(map(_scope_key, assignment_scopes))
         restricted_scope_keys.update(
-            _scope_key(scope) for scope in grant.scopes if scope.restricted_only
+            _scope_key(scope) for scope in assignment_scopes if scope.restricted_only
         )
 
     return AuthoritySnapshot(
@@ -351,6 +363,7 @@ def _snapshot_from_persisted(
         restricted_scope_keys=frozenset(restricted_scope_keys),
         role_grants=grants,
         uses_persisted_roles=True,
+        auditor_identity=auditor_identity,
     )
 
 
@@ -437,6 +450,7 @@ def _snapshot_from_groups(user: object) -> AuthoritySnapshot:
         capabilities=frozenset(capabilities),
         restricted_scope_keys=frozenset(restricted_scope_keys),
         group_role_keys=frozenset(groups),
+        auditor_identity=bool(_AUDITOR_ROLES & groups),
     )
 
 
@@ -461,6 +475,7 @@ def _build_authority_snapshot(user: object) -> AuthoritySnapshot:
         role_grants=resolved.role_grants,
         group_role_keys=resolved.group_role_keys,
         uses_persisted_roles=resolved.uses_persisted_roles,
+        auditor_identity=resolved.auditor_identity,
     )
 
 
@@ -532,7 +547,7 @@ def is_auditor(
     snapshot: AuthoritySnapshot | None = None,
 ) -> bool:
     authority = _resolved_authority_snapshot(user, request=request, snapshot=snapshot)
-    return "auditor" in authority.capabilities
+    return authority.auditor_identity or "auditor" in authority.capabilities
 
 
 def has_unrestricted_domain_scope(
