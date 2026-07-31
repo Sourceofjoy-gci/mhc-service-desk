@@ -1,5 +1,11 @@
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
-import { act, render, screen, waitFor } from "@testing-library/react";
+import {
+  act,
+  fireEvent,
+  render,
+  screen,
+  waitFor,
+} from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import {
   MemoryRouter,
@@ -9,7 +15,13 @@ import {
   type Location,
 } from "react-router-dom";
 import { beforeEach, describe, expect, it, vi } from "vitest";
-import { ApiError, type ActivityItem, type TicketDetail } from "@/lib/api";
+import {
+  ApiError,
+  type ActivityItem,
+  type AssignmentResponse,
+  type TicketAssignee,
+  type TicketDetail,
+} from "@/lib/api";
 import { TicketCard } from "./TicketCard";
 import TicketDetailPage from "./TicketDetailPage";
 
@@ -21,6 +33,7 @@ const harness = vi.hoisted(() => ({
   transition: vi.fn(),
   updateWorkState: vi.fn(),
   assignees: vi.fn(),
+  assign: vi.fn(),
   attachmentList: vi.fn(),
 }));
 
@@ -37,6 +50,7 @@ vi.mock("@/lib/api", async (importOriginal) => {
       transition: harness.transition,
       updateWorkState: harness.updateWorkState,
       assignees: harness.assignees,
+      assign: harness.assign,
     },
     attachmentsApi: {
       ...original.attachmentsApi,
@@ -158,6 +172,42 @@ const INITIAL_ACTIVITY: ActivityItem = {
   },
 };
 
+const NEW_ASSIGNEE: TicketAssignee = {
+  id: "agent-2",
+  username: "thandi.mokoena",
+  display_name: "Thandi Mokoena",
+  designations: ["Accountant"],
+  team_labels: ["Finance"],
+};
+
+function assignmentResponse(ticket: TicketDetail): AssignmentResponse {
+  return {
+    ticket,
+    receipt: {
+      ticket_number: ticket.number,
+      action: "reassigned",
+      previous_assignee: {
+        id: "agent-1",
+        display_name: "Case Agent",
+        designations: ["Estate Examiner"],
+        team_labels: ["Estate Administration"],
+      },
+      new_assignee: {
+        id: NEW_ASSIGNEE.id,
+        display_name: NEW_ASSIGNEE.display_name,
+        designations: NEW_ASSIGNEE.designations,
+        team_labels: NEW_ASSIGNEE.team_labels,
+      },
+      occurred_at: "2026-07-27T09:22:00Z",
+      performed_by: {
+        kind: "user",
+        subject: "deputy-master-1",
+        display_name: "Deputy Master Dlamini",
+      },
+    },
+  };
+}
+
 function deferred<T>() {
   let resolve!: (value: T) => void;
   let reject!: (reason: unknown) => void;
@@ -221,6 +271,7 @@ beforeEach(() => {
   harness.transition.mockReset();
   harness.updateWorkState.mockReset();
   harness.assignees.mockReset().mockResolvedValue({ results: [] });
+  harness.assign.mockReset();
   harness.attachmentList.mockReset().mockResolvedValue({ results: [] });
 });
 
@@ -335,6 +386,84 @@ describe("ticket operator workspace", () => {
     );
   });
 
+  it("shows the new owner from the exact cache before dependent refetches resolve", async () => {
+    const candidateRefetch = deferred<{ results: TicketAssignee[] }>();
+    const activityRefetch = deferred<{ results: ActivityItem[] }>();
+    const transferable = {
+      ...TICKET,
+      capabilities: {
+        ...TICKET.capabilities,
+        can_assign: true,
+        can_reassign: true,
+      },
+    };
+    const updated = {
+      ...transferable,
+      assignee: NEW_ASSIGNEE.id,
+      assignee_detail: {
+        id: NEW_ASSIGNEE.id,
+        display_name: NEW_ASSIGNEE.display_name,
+      },
+      updated_at: "2026-07-27T09:22:00Z",
+    };
+    harness.get.mockResolvedValue(transferable);
+    harness.assignees
+      .mockResolvedValueOnce({ results: [NEW_ASSIGNEE] })
+      .mockReturnValueOnce(candidateRefetch.promise);
+    harness.activity
+      .mockResolvedValueOnce({ results: [INITIAL_ACTIVITY] })
+      .mockReturnValueOnce(activityRefetch.promise);
+    harness.assign.mockResolvedValue(assignmentResponse(updated));
+    const user = userEvent.setup();
+    const { queryClient } = renderDetail();
+
+    await screen.findByRole("heading", { name: transferable.title });
+    expect(queryClient.getQueryData(["ticket", transferable.number])).toEqual(
+      transferable,
+    );
+    const replaceExact = vi.spyOn(queryClient, "setQueryData");
+    const invalidate = vi.spyOn(queryClient, "invalidateQueries");
+
+    await user.click(
+      screen.getByRole("combobox", { name: "Eligible team member" }),
+    );
+    fireEvent.click(
+      await screen.findByRole("option", { name: /Thandi Mokoena/ }),
+    );
+    await user.type(
+      screen.getByRole("textbox", { name: "Reason for transfer" }),
+      "Move to finance review",
+    );
+    await user.click(screen.getByRole("button", { name: "Transfer" }));
+
+    await waitFor(() =>
+      expect(screen.getByText("Current owner").parentElement).toHaveTextContent(
+        NEW_ASSIGNEE.display_name,
+      ),
+    );
+    expect(queryClient.getQueryData(["ticket", updated.number])).toEqual(
+      updated,
+    );
+    expect(replaceExact).toHaveBeenCalledWith(
+      ["ticket", updated.number],
+      updated,
+    );
+    expect(invalidate.mock.calls.map(([filters]) => filters)).toEqual([
+      { queryKey: ["tickets"] },
+      { queryKey: ["kanban"] },
+      { queryKey: ["dashboard"] },
+      { queryKey: ["ticket", updated.number, "assignees"] },
+      { queryKey: ["ticket-activity", updated.number] },
+    ]);
+    const replacementOrder = replaceExact.mock.invocationCallOrder[0];
+    expect(
+      invalidate.mock.invocationCallOrder.every(
+        (invalidationOrder) => replacementOrder < invalidationOrder,
+      ),
+    ).toBe(true);
+    expect(harness.get).toHaveBeenCalledTimes(1);
+  });
+
   it("refetches the exact ticket and activity when an operator accepts a stale reload", async () => {
     const refreshed = {
       ...TICKET,
@@ -369,7 +498,6 @@ describe("ticket operator workspace", () => {
     expect(invalidate).toHaveBeenCalledTimes(1);
     expect(invalidate).toHaveBeenCalledWith({
       queryKey: ["ticket-activity", TICKET.number],
-      exact: true,
     });
     await waitFor(() => expect(harness.activity).toHaveBeenCalledTimes(2));
     expect(harness.get).toHaveBeenCalledTimes(2);
@@ -397,10 +525,7 @@ describe("ticket operator workspace", () => {
 
     await screen.findByText("No activity yet");
     const reply = screen.getByRole("textbox", { name: "Reply message" });
-    await user.type(
-      reply,
-      "The estate file is ready.",
-    );
+    await user.type(reply, "The estate file is ready.");
     await user.click(screen.getByRole("button", { name: "Send reply" }));
 
     expect(await screen.findByText("The estate file is ready.")).toBeVisible();

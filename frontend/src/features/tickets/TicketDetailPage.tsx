@@ -358,12 +358,17 @@ export default function TicketDetailPage() {
 
   const ticket = ticketQuery.data;
   const replaceTicket = (updatedTicket: TicketDetail) => {
-    queryClient.setQueryData(["ticket", number], updatedTicket);
+    queryClient.setQueryData(["ticket", updatedTicket.number], updatedTicket);
+    void queryClient.invalidateQueries({ queryKey: ["tickets"] });
+    void queryClient.invalidateQueries({ queryKey: ["kanban"] });
+    void queryClient.invalidateQueries({ queryKey: ["dashboard"] });
+    void queryClient.invalidateQueries({
+      queryKey: ["ticket", updatedTicket.number, "assignees"],
+    });
   };
   const refreshActivity = () =>
     queryClient.invalidateQueries({
       queryKey: ["ticket-activity", number],
-      exact: true,
     });
   const reloadTicket = async () => {
     await queryClient.refetchQueries({

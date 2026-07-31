@@ -1,12 +1,18 @@
 import { fireEvent, screen, waitFor } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { beforeEach, describe, expect, it, vi } from "vitest";
-import { ApiError, type TicketDetail } from "@/lib/api";
+import {
+  ApiError,
+  type AssignmentResponse,
+  type TicketAssignee,
+  type TicketDetail,
+} from "@/lib/api";
 import { renderWithProviders } from "@/test/render";
 import { OperationsPanel } from "./OperationsPanel";
 
 const harness = vi.hoisted(() => ({
   assignees: vi.fn(),
+  assign: vi.fn(),
   updateWorkState: vi.fn(),
 }));
 
@@ -17,6 +23,7 @@ vi.mock("@/lib/api", async (importOriginal) => {
     ticketsApi: {
       ...original.ticketsApi,
       assignees: harness.assignees,
+      assign: harness.assign,
       updateWorkState: harness.updateWorkState,
     },
   };
@@ -101,6 +108,42 @@ const TICKET: TicketDetail = {
   notes: [],
 };
 
+const SECOND_AGENT: TicketAssignee = {
+  id: "agent-2",
+  username: "second.agent",
+  display_name: "Second Agent",
+  designations: ["Accountant"],
+  team_labels: ["Finance"],
+};
+
+function assignmentResponse(ticket: TicketDetail): AssignmentResponse {
+  return {
+    ticket,
+    receipt: {
+      ticket_number: ticket.number,
+      action: "reassigned",
+      previous_assignee: {
+        id: "agent-1",
+        display_name: "Case Agent",
+        designations: ["Estate Examiner"],
+        team_labels: ["Estate Administration"],
+      },
+      new_assignee: {
+        id: SECOND_AGENT.id,
+        display_name: SECOND_AGENT.display_name,
+        designations: SECOND_AGENT.designations,
+        team_labels: SECOND_AGENT.team_labels,
+      },
+      occurred_at: "2026-07-27T09:20:00Z",
+      performed_by: {
+        kind: "user",
+        subject: "deputy-master-1",
+        display_name: "Deputy Master Dlamini",
+      },
+    },
+  };
+}
+
 function deferred<T>() {
   let resolve!: (value: T) => void;
   let reject!: (reason: unknown) => void;
@@ -128,122 +171,87 @@ function renderPanel(
 
 beforeEach(() => {
   harness.assignees.mockReset();
+  harness.assign.mockReset();
   harness.updateWorkState.mockReset();
   harness.assignees.mockResolvedValue({ results: [] });
 });
 
 describe("server-driven ticket operations", () => {
-  it("self-assigns an unassigned agent with the server-provided assignee id", async () => {
-    const unassigned = {
+  it("renders assignment above non-ownership operations without a legacy candidate request", () => {
+    const legacyReassignCapability = {
       ...TICKET,
-      assignee: null,
-      assignee_detail: null,
       capabilities: {
         ...TICKET.capabilities,
-        can_self_assign: true,
-        self_assignee_id: "user-record-42",
+        can_reassign: true,
       },
     };
-    harness.updateWorkState.mockResolvedValue({
-      ...unassigned,
-      assignee: "user-record-42",
-    });
-    const user = userEvent.setup();
-    renderPanel(unassigned);
+    renderPanel(legacyReassignCapability);
 
-    expect(screen.getByRole("button", { name: "Self-assign" })).toBeVisible();
+    const assignment = screen.getByRole("heading", { name: "Assignment" });
+    const operations = screen.getByRole("heading", { name: "Operations" });
+    expect(assignment).toBeVisible();
+    expect(screen.getByText("Current owner").parentElement).toHaveTextContent(
+      "Case Agent",
+    );
+    expect(
+      assignment.compareDocumentPosition(operations) &
+        Node.DOCUMENT_POSITION_FOLLOWING,
+    ).toBeTruthy();
+    expect(
+      screen.getByText("Work state and the next planned action."),
+    ).toBeVisible();
     expect(
       screen.queryByRole("combobox", { name: "Assignee" }),
     ).not.toBeInTheDocument();
     expect(harness.assignees).not.toHaveBeenCalled();
-
-    await user.click(screen.getByRole("button", { name: "Self-assign" }));
-
-    await waitFor(() =>
-      expect(harness.updateWorkState).toHaveBeenCalledWith(TICKET.number, {
-        assignee: "user-record-42",
-        updated_at: TICKET.updated_at,
-      }),
-    );
   });
 
-  it("loads reassignment choices and confidentiality controls only from capabilities", async () => {
+  it("delegates ownership changes to the dedicated assignment endpoint", async () => {
     const supervisor = {
       ...TICKET,
       capabilities: {
         ...TICKET.capabilities,
+        can_assign: true,
         can_reassign: true,
-        can_change_confidentiality: true,
       },
     };
     harness.assignees.mockResolvedValue({
-      results: [
-        { id: "agent-1", username: "case.agent", display_name: "Case Agent" },
-        { id: "agent-2", username: "second.agent", display_name: "Second Agent" },
-      ],
+      results: [SECOND_AGENT],
     });
-    renderPanel(supervisor);
-
-    expect(
-      await screen.findByRole("option", { name: "Second Agent" }),
-    ).toBeVisible();
-    expect(screen.getByRole("combobox", { name: "Assignee" })).toBeEnabled();
-    expect(
-      screen.getByRole("combobox", { name: "Confidentiality" }),
-    ).toBeEnabled();
-    expect(harness.assignees).toHaveBeenCalledWith(TICKET.number);
-  });
-
-  it("fails reassignment safely while preserving other work after an assignee lookup error", async () => {
-    const supervisor = {
-      ...TICKET,
-      capabilities: {
-        ...TICKET.capabilities,
-        can_reassign: true,
-        can_change_confidentiality: true,
-      },
-    };
-    harness.assignees.mockRejectedValue(
-      new ApiError(503, {
-        code: "assignees_unavailable",
-        detail: "Eligible assignees are temporarily unavailable.",
-        fields: {},
-        correlation_id: "corr-assignees-503",
+    harness.assign.mockResolvedValue(
+      assignmentResponse({
+        ...supervisor,
+        assignee: SECOND_AGENT.id,
+        assignee_detail: {
+          id: SECOND_AGENT.id,
+          display_name: SECOND_AGENT.display_name,
+        },
+        updated_at: "2026-07-27T09:20:00Z",
       }),
     );
-    harness.updateWorkState.mockResolvedValue({
-      ...supervisor,
-      team: "Escalations",
-    });
     const user = userEvent.setup();
     renderPanel(supervisor);
 
-    expect(
-      await screen.findByText(/Eligible assignees are temporarily unavailable\./),
-    ).toBeVisible();
-    expect(screen.getByText(/corr-assignees-503/)).toBeVisible();
-
-    const assignee = screen.getByRole("combobox", { name: "Assignee" });
-    expect(assignee).toBeDisabled();
-    expect(assignee).toHaveValue("agent-1");
-    expect(
-      screen.getByRole("option", { name: "Case Agent" }),
-    ).toBeInTheDocument();
-    expect(screen.getByRole("textbox", { name: "Team" })).toBeEnabled();
-    expect(
-      screen.getByRole("combobox", { name: "Confidentiality" }),
-    ).toBeEnabled();
-
-    await user.clear(screen.getByRole("textbox", { name: "Team" }));
-    await user.type(screen.getByRole("textbox", { name: "Team" }), "Escalations");
-    await user.click(screen.getByRole("button", { name: "Save" }));
+    await user.click(
+      screen.getByRole("combobox", { name: "Eligible team member" }),
+    );
+    fireEvent.click(
+      await screen.findByRole("option", { name: /Second Agent/ }),
+    );
+    await user.type(
+      screen.getByRole("textbox", { name: "Reason for transfer" }),
+      "Move to finance review",
+    );
+    await user.click(screen.getByRole("button", { name: "Transfer" }));
 
     await waitFor(() =>
-      expect(harness.updateWorkState).toHaveBeenCalledWith(TICKET.number, {
-        team: "Escalations",
-        updated_at: TICKET.updated_at,
+      expect(harness.assign).toHaveBeenCalledWith(TICKET.number, {
+        assignee_id: SECOND_AGENT.id,
+        expected_updated_at: TICKET.updated_at,
+        reason: "Move to finance review",
       }),
     );
+    expect(harness.updateWorkState).not.toHaveBeenCalled();
   });
 
   it("does not infer elevated controls when capability flags deny them", () => {
@@ -281,25 +289,38 @@ describe("server-driven ticket operations", () => {
     expect(screen.getByText("Awaiting signed form")).toBeVisible();
     expect(screen.getByText("Review file")).toBeVisible();
     expect(screen.queryByRole("textbox")).not.toBeInTheDocument();
-    expect(screen.queryByRole("button", { name: "Save" })).not.toBeInTheDocument();
+    expect(
+      screen.queryByRole("button", { name: "Save" }),
+    ).not.toBeInTheDocument();
   });
 
   it("patches only dirty work-state fields plus the observed timestamp", async () => {
-    const refreshed = {
+    const editableTicket = {
       ...TICKET,
+      capabilities: {
+        ...TICKET.capabilities,
+        can_change_confidentiality: true,
+      },
+    };
+    const refreshed = {
+      ...editableTicket,
       team: "Escalations",
       waiting_reason: "third_party",
       blocked_reason: "Awaiting registrar",
       next_action: "Call registrar (confirmed)",
       next_action_at: "2026-07-30T10:45:00.000Z",
+      confidentiality: "sensitive",
       updated_at: "2026-07-27T09:20:00Z",
     };
     harness.updateWorkState.mockResolvedValue(refreshed);
     const user = userEvent.setup();
-    const { onUpdated } = renderPanel();
+    const { onUpdated } = renderPanel(editableTicket);
 
     await user.clear(screen.getByRole("textbox", { name: "Team" }));
-    await user.type(screen.getByRole("textbox", { name: "Team" }), "Escalations");
+    await user.type(
+      screen.getByRole("textbox", { name: "Team" }),
+      "Escalations",
+    );
     await user.selectOptions(
       screen.getByRole("combobox", { name: "Waiting reason" }),
       "third_party",
@@ -317,6 +338,10 @@ describe("server-driven ticket operations", () => {
     fireEvent.change(screen.getByLabelText("Next action time"), {
       target: { value: "2026-07-30T12:45" },
     });
+    await user.selectOptions(
+      screen.getByRole("combobox", { name: "Confidentiality" }),
+      "sensitive",
+    );
     await user.click(screen.getByRole("button", { name: "Save" }));
 
     const expectedNextActionAt = new Date("2026-07-30T12:45").toISOString();
@@ -327,6 +352,7 @@ describe("server-driven ticket operations", () => {
         blocked_reason: "Awaiting registrar",
         next_action: "Call the registrar",
         next_action_at: expectedNextActionAt,
+        confidentiality: "sensitive",
         updated_at: TICKET.updated_at,
       }),
     );
@@ -344,13 +370,20 @@ describe("server-driven ticket operations", () => {
     renderPanel();
 
     await user.clear(screen.getByRole("textbox", { name: "Team" }));
-    await user.type(screen.getByRole("textbox", { name: "Team" }), "Escalations");
+    await user.type(
+      screen.getByRole("textbox", { name: "Team" }),
+      "Escalations",
+    );
     await user.click(screen.getByRole("button", { name: "Save" }));
 
-    await waitFor(() => expect(harness.updateWorkState).toHaveBeenCalledTimes(1));
+    await waitFor(() =>
+      expect(harness.updateWorkState).toHaveBeenCalledTimes(1),
+    );
     expect(screen.getByRole("heading", { name: "Operations" })).toBeVisible();
     expect(screen.getByRole("textbox", { name: "Team" })).toBeDisabled();
-    expect(screen.getByRole("combobox", { name: "Waiting reason" })).toBeDisabled();
+    expect(
+      screen.getByRole("combobox", { name: "Waiting reason" }),
+    ).toBeDisabled();
     expect(screen.getByRole("button", { name: "Saving…" })).toBeDisabled();
 
     pending.resolve(TICKET);
@@ -391,7 +424,10 @@ describe("server-driven ticket operations", () => {
     const { onReload } = renderPanel();
 
     await user.clear(screen.getByRole("textbox", { name: "Team" }));
-    await user.type(screen.getByRole("textbox", { name: "Team" }), "Escalations");
+    await user.type(
+      screen.getByRole("textbox", { name: "Team" }),
+      "Escalations",
+    );
     await user.click(screen.getByRole("button", { name: "Save" }));
 
     expect(
