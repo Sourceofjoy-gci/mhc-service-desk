@@ -39,6 +39,12 @@ export interface AssignmentControlProps {
 }
 
 type AssignmentAction = "assign" | "transfer" | "unassign";
+type ProposalSource = "directory" | "self";
+
+interface AssignmentProposal {
+  selected: TicketAssignee | null;
+  source: ProposalSource;
+}
 
 const actionLabels: Record<AssignmentAction, string> = {
   assign: "Assign",
@@ -90,6 +96,19 @@ function errorDetail(problem: ApiProblem | null, fallback: string) {
 
 export function AssignmentControl({
   ticket,
+  ...callbacks
+}: AssignmentControlProps) {
+  return (
+    <ScopedAssignmentControl
+      key={ticket.number}
+      ticket={ticket}
+      {...callbacks}
+    />
+  );
+}
+
+function ScopedAssignmentControl({
+  ticket,
   onUpdated,
   onReload,
   onActivityChanged,
@@ -97,15 +116,24 @@ export function AssignmentControl({
   const panelRef = useRef<HTMLElement>(null);
   const returnFocusRef = useRef<HTMLButtonElement | null>(null);
   const submitLockRef = useRef(false);
+  const scopeActiveRef = useRef(true);
+  const observedUpdatedAtRef = useRef(ticket.updated_at);
   const candidateSnapshots = useRef(new Map<string, TicketAssignee>());
   const [search, setSearch] = useState("");
   const debouncedSearch = useDebouncedValue(search, 250);
-  const [proposal, setProposal] = useState<TicketAssignee | null | undefined>();
+  const [proposal, setProposal] = useState<AssignmentProposal | undefined>();
   const [reason, setReason] = useState("");
   const [receipt, setReceipt] = useState<string | null>(null);
   const [permissionProblem, setPermissionProblem] = useState<ApiProblem | null>(
     null,
   );
+
+  useEffect(() => {
+    scopeActiveRef.current = true;
+    return () => {
+      scopeActiveRef.current = false;
+    };
+  }, []);
 
   const candidates = useQuery({
     queryKey: ["ticket", ticket.number, "assignees", debouncedSearch],
@@ -128,6 +156,7 @@ export function AssignmentControl({
         reason: values.submittedReason,
       }),
     onSuccess: async (response) => {
+      if (!scopeActiveRef.current) return;
       onUpdated(response.ticket);
       const summary = receiptSummary(response.receipt);
       setReceipt(summary);
@@ -137,6 +166,7 @@ export function AssignmentControl({
       await onActivityChanged?.();
     },
     onError: (error) => {
+      if (!scopeActiveRef.current) return;
       if (error instanceof ApiError && error.status === 403) {
         setPermissionProblem(apiProblem(error));
         setProposal(undefined);
@@ -151,9 +181,11 @@ export function AssignmentControl({
 
   const currentId = ticket.assignee_detail?.id ?? null;
   const selectedId =
-    proposal === undefined ? currentId : (proposal?.id ?? null);
+    proposal === undefined ? currentId : (proposal.selected?.id ?? null);
   const action =
-    proposal === undefined ? null : proposedAction(currentId, proposal);
+    proposal === undefined
+      ? null
+      : proposedAction(currentId, proposal.selected);
   const reasonRequired = action === "transfer" || action === "unassign";
   const disabled = mutation.isPending;
   const mutationProblem = apiProblem(mutation.error);
@@ -162,6 +194,37 @@ export function AssignmentControl({
   const forbidden =
     mutation.error instanceof ApiError && mutation.error.status === 403;
   const candidateProblem = apiProblem(candidates.error);
+  const selfCandidate = ticket.capabilities.self_assignee_detail;
+  const canSelfAssign =
+    ticket.capabilities.can_self_assign && selfCandidate !== null;
+  const proposalAllowed =
+    proposal === undefined ||
+    (proposal.source === "directory"
+      ? ticket.capabilities.can_assign
+      : proposal.selected !== null &&
+        canSelfAssign &&
+        selfCandidate.id === proposal.selected.id);
+
+  useEffect(() => {
+    const timestampChanged = observedUpdatedAtRef.current !== ticket.updated_at;
+    observedUpdatedAtRef.current = ticket.updated_at;
+    if (
+      timestampChanged &&
+      mutation.error instanceof ApiError &&
+      mutation.error.status === 409
+    ) {
+      mutation.reset();
+    }
+  }, [mutation, ticket.updated_at]);
+
+  useEffect(() => {
+    if (proposal === undefined || proposalAllowed) return;
+    mutation.reset();
+    submitLockRef.current = false;
+    setReason("");
+    setProposal(undefined);
+    window.setTimeout(() => returnFocusRef.current?.focus(), 0);
+  }, [mutation, proposal, proposalAllowed]);
 
   const candidateError = candidates.isError
     ? errorDetail(
@@ -186,6 +249,7 @@ export function AssignmentControl({
 
   const openProposal = (
     selected: TicketAssignee | null,
+    source: ProposalSource,
     button?: HTMLButtonElement | null,
   ) => {
     if (
@@ -199,16 +263,16 @@ export function AssignmentControl({
     mutation.reset();
     setPermissionProblem(null);
     setReason("");
-    setProposal(selected);
+    setProposal({ selected, source });
   };
 
   const selectCandidate = (id: string | null) => {
     if (id === null) {
-      openProposal(null);
+      openProposal(null, "directory");
       return;
     }
     const selected = candidateSnapshots.current.get(id);
-    if (selected) openProposal(selected);
+    if (selected) openProposal(selected, "directory");
   };
 
   const cancel = () => {
@@ -223,6 +287,7 @@ export function AssignmentControl({
     event.preventDefault();
     if (
       proposal === undefined ||
+      !proposalAllowed ||
       submitLockRef.current ||
       disabled ||
       (reasonRequired && !reason.trim())
@@ -230,12 +295,12 @@ export function AssignmentControl({
       return;
     }
     submitLockRef.current = true;
-    mutation.mutate({ selected: proposal, submittedReason: reason.trim() });
+    mutation.mutate({
+      selected: proposal.selected,
+      submittedReason: reason.trim(),
+    });
   };
 
-  const selfCandidate = ticket.capabilities.self_assignee_detail;
-  const canSelfAssign =
-    ticket.capabilities.can_self_assign && selfCandidate !== null;
   const currentOwner = ticket.assignee_detail?.display_name ?? "Unassigned";
 
   return (
@@ -276,6 +341,7 @@ export function AssignmentControl({
             onClick={(event) =>
               openProposal(
                 selfCandidate,
+                "self",
                 event.currentTarget as HTMLButtonElement,
               )
             }
@@ -310,7 +376,7 @@ export function AssignmentControl({
       ) : null}
 
       <Dialog
-        open={proposal !== undefined}
+        open={proposal !== undefined && proposalAllowed}
         onOpenChange={(open) => {
           if (!open) cancel();
         }}
@@ -339,7 +405,7 @@ export function AssignmentControl({
                 <p>
                   <span className="text-muted-foreground">New assignee:</span>{" "}
                   <span className="font-medium">
-                    {proposal?.display_name ?? "Unassigned"}
+                    {proposal.selected?.display_name ?? "Unassigned"}
                   </span>
                 </p>
               </div>
@@ -410,7 +476,11 @@ export function AssignmentControl({
                 ) : (
                   <Button
                     type="submit"
-                    disabled={disabled || (reasonRequired && !reason.trim())}
+                    disabled={
+                      disabled ||
+                      !proposalAllowed ||
+                      (reasonRequired && !reason.trim())
+                    }
                   >
                     {disabled ? pendingLabels[action] : actionLabels[action]}
                   </Button>

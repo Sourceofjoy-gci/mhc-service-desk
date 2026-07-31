@@ -1,4 +1,10 @@
-import { fireEvent, screen, waitFor, within } from "@testing-library/react";
+import {
+  act,
+  fireEvent,
+  screen,
+  waitFor,
+  within,
+} from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 
@@ -215,7 +221,7 @@ function renderControl(
   const onUpdated = options.onUpdated ?? vi.fn();
   const onReload = options.onReload ?? vi.fn();
   const onActivityChanged = options.onActivityChanged ?? vi.fn();
-  renderWithProviders(
+  const view = renderWithProviders(
     <AssignmentControl
       ticket={ticket}
       onUpdated={onUpdated}
@@ -223,7 +229,20 @@ function renderControl(
       onActivityChanged={onActivityChanged}
     />,
   );
-  return { onUpdated, onReload, onActivityChanged };
+  return {
+    onUpdated,
+    onReload,
+    onActivityChanged,
+    rerenderTicket: (nextTicket: TicketDetail) =>
+      view.rerender(
+        <AssignmentControl
+          ticket={nextTicket}
+          onUpdated={onUpdated}
+          onReload={onReload}
+          onActivityChanged={onActivityChanged}
+        />,
+      ),
+  };
 }
 
 async function openCandidateList(user: ReturnType<typeof userEvent.setup>) {
@@ -497,6 +516,257 @@ describe("internal ticket assignment", () => {
 
     await user.click(screen.getByRole("button", { name: "Reload" }));
     expect(onReload).toHaveBeenCalledTimes(1);
+  });
+
+  it("clears only a stale conflict when the same ticket refreshes and retries with its new timestamp", async () => {
+    const refreshedTimestamp = "2026-07-30T10:45:00Z";
+    const refreshedTicket = {
+      ...ticketWithCapabilities({ can_assign: true }),
+      updated_at: refreshedTimestamp,
+    };
+    harness.assign
+      .mockRejectedValueOnce(
+        new ApiError(409, {
+          code: "stale_ticket",
+          detail: "The ticket changed.",
+          fields: {
+            expected_updated_at: ["Use the current ticket version."],
+          },
+          correlation_id: "corr-assignment-stale-refresh",
+        }),
+      )
+      .mockResolvedValueOnce(responseWith(refreshedTicket));
+    const user = userEvent.setup();
+    const { rerenderTicket } = renderControl(
+      ticketWithCapabilities({ can_assign: true }),
+    );
+
+    await chooseCandidate(user, ACCOUNTANT.display_name);
+    const reason = screen.getByRole("textbox", {
+      name: "Reason for transfer",
+    });
+    await user.type(reason, "Finance review required");
+    await user.click(screen.getByRole("button", { name: "Transfer" }));
+    expect(
+      await screen.findByText("This ticket changed since you opened it"),
+    ).toBeVisible();
+
+    rerenderTicket(refreshedTicket);
+
+    await waitFor(() =>
+      expect(
+        screen.queryByText("This ticket changed since you opened it"),
+      ).not.toBeInTheDocument(),
+    );
+    expect(screen.getByRole("dialog")).toHaveTextContent(
+      `New assignee: ${ACCOUNTANT.display_name}`,
+    );
+    expect(reason).toHaveValue("Finance review required");
+    await user.click(screen.getByRole("button", { name: "Transfer" }));
+
+    await waitFor(() => expect(harness.assign).toHaveBeenCalledTimes(2));
+    expect(harness.assign).toHaveBeenLastCalledWith(BASE_TICKET.number, {
+      assignee_id: ACCOUNTANT.id,
+      expected_updated_at: refreshedTimestamp,
+      reason: "Finance review required",
+    });
+  });
+
+  it("drops every transient interaction when the component changes tickets", async () => {
+    harness.assign.mockResolvedValue(
+      responseWith({
+        ...BASE_TICKET,
+        assignee: ACCOUNTANT.id,
+        assignee_detail: {
+          id: ACCOUNTANT.id,
+          display_name: ACCOUNTANT.display_name,
+        },
+      }),
+    );
+    const firstTicket = ticketWithCapabilities({ can_assign: true });
+    const secondTicket = {
+      ...ticketWithCapabilities({ can_assign: true }),
+      id: "ticket-2",
+      number: "MHC-2026-000002",
+      title: "Second estate matter",
+      assignee: ACCOUNTANT.id,
+      assignee_detail: {
+        id: ACCOUNTANT.id,
+        display_name: ACCOUNTANT.display_name,
+      },
+      updated_at: "2026-07-30T11:00:00Z",
+    };
+    const user = userEvent.setup();
+    const { rerenderTicket } = renderControl(firstTicket);
+
+    await chooseCandidate(user, ACCOUNTANT.display_name);
+    await user.type(
+      screen.getByRole("textbox", { name: "Reason for transfer" }),
+      "First ticket finance review",
+    );
+    await user.click(screen.getByRole("button", { name: "Transfer" }));
+    expect(await screen.findByRole("status")).toHaveTextContent(
+      BASE_TICKET.number,
+    );
+
+    await openCandidateList(user);
+    await user.type(
+      screen.getByRole("combobox", {
+        name: "Search Eligible team member",
+      }),
+      "records",
+    );
+    fireEvent.click(
+      await screen.findByRole("option", { name: /Siphiwe Ndlovu/ }),
+    );
+    expect(screen.getByRole("dialog")).toHaveTextContent(BASE_TICKET.number);
+
+    rerenderTicket(secondTicket);
+
+    expect(screen.queryByRole("dialog")).not.toBeInTheDocument();
+    expect(screen.queryByRole("status")).not.toBeInTheDocument();
+    expect(screen.getByText("Current owner").nextSibling).toHaveTextContent(
+      ACCOUNTANT.display_name,
+    );
+    await waitFor(() =>
+      expect(
+        screen.getByRole("combobox", { name: "Eligible team member" }),
+      ).toHaveTextContent(ACCOUNTANT.display_name),
+    );
+    const { search } = await openCandidateList(user);
+    expect(search).toHaveValue("");
+    await waitFor(() =>
+      expect(harness.assignees).toHaveBeenCalledWith(secondTicket.number, ""),
+    );
+    expect(harness.assign).toHaveBeenCalledTimes(1);
+  });
+
+  it("does not surface a late assignment result from the previous ticket scope", async () => {
+    const pending = deferred<AssignmentResponse>();
+    harness.assign.mockReturnValue(pending.promise);
+    const firstTicket = unassignedTicket({ can_assign: true });
+    const secondTicket = {
+      ...BASE_TICKET,
+      id: "ticket-2",
+      number: "MHC-2026-000002",
+      title: "Second estate matter",
+    };
+    const user = userEvent.setup();
+    const { onUpdated, onActivityChanged, rerenderTicket } =
+      renderControl(firstTicket);
+
+    await chooseCandidate(user, ACCOUNTANT.display_name);
+    await user.click(screen.getByRole("button", { name: "Assign" }));
+    await waitFor(() => expect(harness.assign).toHaveBeenCalledTimes(1));
+
+    rerenderTicket(secondTicket);
+    await act(async () => {
+      pending.resolve(
+        responseWith({
+          ...firstTicket,
+          assignee: ACCOUNTANT.id,
+          assignee_detail: {
+            id: ACCOUNTANT.id,
+            display_name: ACCOUNTANT.display_name,
+          },
+        }),
+      );
+      await pending.promise;
+    });
+
+    expect(screen.queryByRole("status")).not.toBeInTheDocument();
+    expect(harness.toastSuccess).not.toHaveBeenCalled();
+    expect(onUpdated).not.toHaveBeenCalled();
+    expect(onActivityChanged).not.toHaveBeenCalled();
+    expect(screen.getByText(CURRENT_ASSIGNEE.display_name)).toBeVisible();
+  });
+
+  it("closes and discards a directory proposal when can_assign is revoked", async () => {
+    const user = userEvent.setup();
+    const { rerenderTicket } = renderControl(
+      ticketWithCapabilities({ can_assign: true }),
+    );
+
+    await chooseCandidate(user, ACCOUNTANT.display_name);
+    await user.type(
+      screen.getByRole("textbox", { name: "Reason for transfer" }),
+      "Finance review required",
+    );
+
+    rerenderTicket(ticketWithCapabilities({ can_assign: false }));
+
+    expect(screen.queryByRole("dialog")).not.toBeInTheDocument();
+    expect(harness.assign).not.toHaveBeenCalled();
+    expect(
+      screen.queryByRole("button", { name: "Transfer" }),
+    ).not.toBeInTheDocument();
+    expect(screen.getByText(CURRENT_ASSIGNEE.display_name)).toBeVisible();
+  });
+
+  it("preserves a self proposal only while the same self detail remains authorized", async () => {
+    const selfTicket = unassignedTicket({
+      can_assign: false,
+      can_self_assign: true,
+      self_assignee_id: RECORDS_CLERK.id,
+      self_assignee_detail: RECORDS_CLERK,
+    });
+    harness.assign.mockResolvedValue(
+      responseWith({
+        ...selfTicket,
+        assignee: RECORDS_CLERK.id,
+        assignee_detail: {
+          id: RECORDS_CLERK.id,
+          display_name: RECORDS_CLERK.display_name,
+        },
+      }),
+    );
+    const user = userEvent.setup();
+    const { rerenderTicket } = renderControl(selfTicket);
+
+    await user.click(screen.getByRole("button", { name: "Self-assign" }));
+    await user.type(
+      screen.getByRole("textbox", { name: "Reason for transfer" }),
+      "Pick up own queue work",
+    );
+    rerenderTicket({ ...selfTicket, title: "Server-refreshed title" });
+
+    expect(screen.getByRole("dialog")).toHaveTextContent(
+      `New assignee: ${RECORDS_CLERK.display_name}`,
+    );
+    await user.click(screen.getByRole("button", { name: "Assign" }));
+    await waitFor(() => expect(harness.assign).toHaveBeenCalledTimes(1));
+    expect(harness.assign).toHaveBeenCalledWith(BASE_TICKET.number, {
+      assignee_id: RECORDS_CLERK.id,
+      expected_updated_at: BASE_TICKET.updated_at,
+      reason: "Pick up own queue work",
+    });
+  });
+
+  it("discards a self proposal when self_assignee_detail changes identity", async () => {
+    const selfTicket = unassignedTicket({
+      can_assign: false,
+      can_self_assign: true,
+      self_assignee_id: RECORDS_CLERK.id,
+      self_assignee_detail: RECORDS_CLERK,
+    });
+    const user = userEvent.setup();
+    const { rerenderTicket } = renderControl(selfTicket);
+
+    await user.click(screen.getByRole("button", { name: "Self-assign" }));
+    rerenderTicket(
+      ticketWithCapabilities(
+        {
+          can_assign: false,
+          can_self_assign: true,
+          self_assignee_id: ACCOUNTANT.id,
+          self_assignee_detail: ACCOUNTANT,
+        },
+        selfTicket,
+      ),
+    );
+
+    expect(screen.queryByRole("dialog")).not.toBeInTheDocument();
+    expect(harness.assign).not.toHaveBeenCalled();
   });
 
   it("keeps the dialog open and renders structured validation errors", async () => {
