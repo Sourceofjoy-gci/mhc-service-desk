@@ -431,11 +431,12 @@ def _activity_with_linked_work_state_custody(
     before: dict[str, object],
     after: dict[str, object],
     custody_event: CustodyEventInput,
+    audit_action: str = "ticket.work_state.changed",
 ):
     ticket = _ticket(basic_world)
     audit = AuditEvent.objects.create(
         actor_subject="legacy-agent",
-        action="ticket.work_state.changed",
+        action=audit_action,
         object_type="ticket",
         object_id=str(ticket.id),
         payload={"before": before, "after": after},
@@ -463,32 +464,67 @@ def _activity_with_linked_work_state_custody(
     return build_ticket_activity(ticket)
 
 
-def test_linked_custody_without_owner_snapshot_keeps_legacy_assignee(basic_world):
-    """A null custody owner cannot replace the only recorded assignment fact."""
+@pytest.mark.parametrize(
+    ("before_assignee", "after_assignee", "event_type", "payload_key"),
+    [
+        (None, "deleted-owner", TicketCustodyEvent.EventType.ASSIGNED, "new_owner"),
+        ("deleted-owner", None, TicketCustodyEvent.EventType.UNASSIGNED, "previous_owner"),
+    ],
+)
+def test_linked_custody_moves_raw_unresolvable_owner_without_a_duplicate_audit_fact(
+    basic_world,
+    before_assignee,
+    after_assignee,
+    event_type,
+    payload_key,
+):
+    """Removing the raw fallback would lose deleted assign/unassign evidence."""
     activity = _activity_with_linked_work_state_custody(
         basic_world,
-        before={"assignee": None, "team": "Intake"},
-        after={"assignee": "agent-id", "team": "Estates"},
+        before={"assignee": before_assignee, "team": "Intake"},
+        after={"assignee": after_assignee, "team": "Estates"},
         custody_event=CustodyEventInput(
-            event_type=TicketCustodyEvent.EventType.ASSIGNED,
+            event_type=event_type,
             source_process="ticket.assignment",
         ),
     )
 
     work_state = next(item for item in activity if item["type"] == "work_state")
+    custody = next(item for item in activity if item["type"] == "custody_event")
 
     assert work_state["payload"] == {
-        "before": {"assignee": None, "team": "Intake"},
-        "after": {"assignee": "agent-id", "team": "Estates"},
+        "before": {"team": "Intake"},
+        "after": {"team": "Estates"},
+    }
+    assert custody["payload"][payload_key] == {
+        "id": "deleted-owner",
+        "subject": None,
+        "display_name": None,
+        "designations": [],
+        "team_labels": [],
+        "raw_value": "deleted-owner",
+        "unresolved": True,
     }
 
 
-def test_linked_custody_without_queue_snapshot_keeps_legacy_queue(basic_world):
-    """A null custody queue cannot replace the only recorded routing fact."""
+@pytest.mark.parametrize(
+    ("before_queue", "after_queue", "payload_key"),
+    [
+        (None, "deleted-queue", "new_queue"),
+        ("deleted-queue", None, "previous_queue"),
+    ],
+)
+def test_linked_custody_moves_raw_unresolvable_queue_without_a_duplicate_audit_fact(
+    basic_world,
+    before_queue,
+    after_queue,
+    payload_key,
+):
+    """Removing the raw fallback would lose deleted queue-change evidence."""
     activity = _activity_with_linked_work_state_custody(
         basic_world,
-        before={"queue": None, "team": "Intake"},
-        after={"queue": "queue-id", "team": "Estates"},
+        before={"queue": before_queue, "team": "Intake"},
+        after={"queue": after_queue, "team": "Estates"},
         custody_event=CustodyEventInput(
             event_type=TicketCustodyEvent.EventType.QUEUE_CHANGED,
             source_process="ticket.routing",
@@ -496,11 +532,115 @@ def test_linked_custody_without_queue_snapshot_keeps_legacy_queue(basic_world):
     )
 
     work_state = next(item for item in activity if item["type"] == "work_state")
+    custody = next(item for item in activity if item["type"] == "custody_event")
 
     assert work_state["payload"] == {
-        "before": {"queue": None, "team": "Intake"},
-        "after": {"queue": "queue-id", "team": "Estates"},
+        "before": {"team": "Intake"},
+        "after": {"team": "Estates"},
     }
+    assert custody["payload"][payload_key] == {
+        "id": "deleted-queue",
+        "label": None,
+        "raw_value": "deleted-queue",
+        "unresolved": True,
+    }
+
+
+def test_linked_assignment_audit_preserves_a_raw_unresolvable_owner_in_custody(basic_world):
+    """Excluding assignment audits from the source lookup would erase legacy ownership evidence."""
+    activity = _activity_with_linked_work_state_custody(
+        basic_world,
+        before={"assignee": "deleted-owner"},
+        after={"assignee": None},
+        custody_event=CustodyEventInput(
+            event_type=TicketCustodyEvent.EventType.UNASSIGNED,
+            source_process="ticket.assignment",
+        ),
+        audit_action="ticket.assignment.changed",
+    )
+
+    custody = next(item for item in activity if item["type"] == "custody_event")
+
+    assert custody["payload"]["previous_owner"]["raw_value"] == "deleted-owner"
+    assert not [item for item in activity if item["type"] == "work_state"]
+
+
+def test_linked_mixed_custody_audit_routes_partial_snapshot_fallbacks_once_per_fact(basic_world):
+    """A linked audit must not duplicate either ownership or routing evidence."""
+    ticket = _ticket(basic_world)
+    audit = AuditEvent.objects.create(
+        actor_subject="legacy-agent",
+        action="ticket.work_state.changed",
+        object_type="ticket",
+        object_id=str(ticket.id),
+        payload={
+            "before": {"assignee": "deleted-owner", "queue": "deleted-queue", "team": "Intake"},
+            "after": {"assignee": "agent-id", "queue": None, "team": "Estates"},
+        },
+        payload_hash="e" * 64,
+    )
+    record_custody_events(
+        ticket=ticket,
+        actor=CustodyActor.user("snapshot-agent", "Snapshot Agent"),
+        events=(
+            CustodyEventInput(
+                event_type=TicketCustodyEvent.EventType.REASSIGNED,
+                source_process="ticket.assignment",
+                source_record_type="audit_event",
+                source_record_id=str(audit.id),
+                new_owner=CustodyParty(
+                    id="agent-id",
+                    subject="snapshot-agent",
+                    display_name="Snapshot Agent",
+                ),
+            ),
+            CustodyEventInput(
+                event_type=TicketCustodyEvent.EventType.QUEUE_CHANGED,
+                source_process="ticket.routing",
+                source_record_type="audit_event",
+                source_record_id=str(audit.id),
+            ),
+        ),
+    )
+
+    activity = build_ticket_activity(ticket)
+
+    custody_items = [
+        item
+        for item in activity
+        if item["type"] == "custody_event"
+        and item["payload"]["source_record_id"] == str(audit.id)
+    ]
+    work_state = next(item for item in activity if item["type"] == "work_state")
+
+    assert len(custody_items) == 2
+    assert work_state["payload"] == {
+        "before": {"team": "Intake"},
+        "after": {"team": "Estates"},
+    }
+    owner_custody = next(
+        item for item in custody_items if item["payload"]["action"] == "reassigned"
+    )
+    queue_custody = next(
+        item for item in custody_items if item["payload"]["action"] == "queue_changed"
+    )
+    assert owner_custody["payload"]["previous_owner"] == {
+        "id": "deleted-owner",
+        "subject": None,
+        "display_name": None,
+        "designations": [],
+        "team_labels": [],
+        "raw_value": "deleted-owner",
+        "unresolved": True,
+    }
+    assert owner_custody["payload"]["new_owner"]["id"] == "agent-id"
+    assert queue_custody["payload"]["previous_queue"] == {
+        "id": "deleted-queue",
+        "label": None,
+        "raw_value": "deleted-queue",
+        "unresolved": True,
+    }
+    assert queue_custody["payload"]["new_queue"] is None
 
 
 def test_linked_owner_custody_redacts_only_duplicate_legacy_assignee(basic_world):

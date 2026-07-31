@@ -100,6 +100,7 @@ def build_ticket_activity(
             object_id=str(ticket.id),
             action__in=(
                 "ticket.work_state.changed",
+                "ticket.assignment.changed",
                 "ticket.confidentiality.changed",
                 "ticket.relationship.created",
                 "ticket.transitioned",
@@ -116,13 +117,26 @@ def build_ticket_activity(
         event.event_type == TicketCustodyEvent.EventType.CREATED for event in custody_events
     )
     custody_audit_fields: dict[str, set[str]] = {}
+    owner_custody_types = {
+        TicketCustodyEvent.EventType.ASSIGNED,
+        TicketCustodyEvent.EventType.REASSIGNED,
+        TicketCustodyEvent.EventType.UNASSIGNED,
+    }
     for custody_event in custody_events:
         if custody_event.source_record_type != "audit_event" or not custody_event.source_record_id:
             continue
         represented_fields = custody_audit_fields.setdefault(custody_event.source_record_id, set())
-        if custody_event.previous_owner is not None or custody_event.new_owner is not None:
+        if (
+            custody_event.event_type in owner_custody_types
+            or custody_event.previous_owner is not None
+            or custody_event.new_owner is not None
+        ):
             represented_fields.add("assignee")
-        if custody_event.previous_queue is not None or custody_event.new_queue is not None:
+        if (
+            custody_event.event_type == TicketCustodyEvent.EventType.QUEUE_CHANGED
+            or custody_event.previous_queue is not None
+            or custody_event.new_queue is not None
+        ):
             represented_fields.add("queue")
     transitions = [
         transition
@@ -175,6 +189,7 @@ def build_ticket_activity(
         (event for event in audit_events if event.action == "ticket.transitioned"),
         key=lambda event: (event.occurred_at, str(event.id)),
     )
+    custody_audits_by_id = {str(event.id): event for event in audit_events}
 
     def transition_payload(transition: TransitionHistory) -> dict[str, object]:
         payload: dict[str, object] = {
@@ -244,6 +259,31 @@ def build_ticket_activity(
             "team_labels": list(team_labels),
         }
 
+    def unresolved_owner_presentation(value: object) -> dict[str, object] | None:
+        """Present a deleted legacy owner without inventing identity details."""
+        if value in (None, ""):
+            return None
+        return {
+            "id": str(value),
+            "subject": None,
+            "display_name": None,
+            "designations": [],
+            "team_labels": [],
+            "raw_value": value,
+            "unresolved": True,
+        }
+
+    def unresolved_queue_presentation(value: object) -> dict[str, object] | None:
+        """Present a deleted legacy queue without inventing its label."""
+        if value in (None, ""):
+            return None
+        return {
+            "id": str(value),
+            "label": None,
+            "raw_value": value,
+            "unresolved": True,
+        }
+
     def custody_payload(event: TicketCustodyEvent) -> dict[str, object]:
         """Expose full immutable custody facts without looking up mutable rows."""
         payload: dict[str, object] = {
@@ -279,28 +319,61 @@ def build_ticket_activity(
             ),
             None,
         )
-        if matching_event is None:
+        if matching_event is not None:
+            transition_audits.remove(matching_event)
+            resolution_fields = {
+                "resolution_code",
+                "resolution_summary",
+                "resolved_at",
+                "reopened_at",
+            }
+            before = {
+                key: value
+                for key, value in matching_event.payload.get("before", {}).items()
+                if key in resolution_fields
+            }
+            after = {
+                key: value
+                for key, value in matching_event.payload.get("after", {}).items()
+                if key in resolution_fields
+            }
+            if before or after:
+                payload["before"] = before
+                payload["after"] = after
+        linked_audit = (
+            custody_audits_by_id.get(event.source_record_id)
+            if event.source_record_type == "audit_event"
+            else None
+        )
+        if linked_audit is None:
             return payload
-        transition_audits.remove(matching_event)
-        resolution_fields = {
-            "resolution_code",
-            "resolution_summary",
-            "resolved_at",
-            "reopened_at",
-        }
-        before = {
-            key: value
-            for key, value in matching_event.payload.get("before", {}).items()
-            if key in resolution_fields
-        }
-        after = {
-            key: value
-            for key, value in matching_event.payload.get("after", {}).items()
-            if key in resolution_fields
-        }
-        if before or after:
-            payload["before"] = before
-            payload["after"] = after
+        audit_payload = linked_audit.payload if isinstance(linked_audit.payload, dict) else {}
+        audit_before = audit_payload.get("before", {})
+        audit_after = audit_payload.get("after", {})
+        if not isinstance(audit_before, dict):
+            audit_before = {}
+        if not isinstance(audit_after, dict):
+            audit_after = {}
+        if "assignee" in custody_audit_fields.get(event.source_record_id, set()) and (
+            event.event_type in owner_custody_types
+            or event.previous_owner is not None
+            or event.new_owner is not None
+        ):
+            if payload["previous_owner"] is None:
+                payload["previous_owner"] = unresolved_owner_presentation(
+                    audit_before.get("assignee")
+                )
+            if payload["new_owner"] is None:
+                payload["new_owner"] = unresolved_owner_presentation(audit_after.get("assignee"))
+        if "queue" in custody_audit_fields.get(event.source_record_id, set()) and (
+            event.event_type == TicketCustodyEvent.EventType.QUEUE_CHANGED
+            or event.previous_queue is not None
+            or event.new_queue is not None
+        ):
+            if payload["previous_queue"] is None:
+                payload["previous_queue"] = unresolved_queue_presentation(audit_before.get("queue"))
+            if payload["new_queue"] is None:
+                payload["new_queue"] = unresolved_queue_presentation(audit_after.get("queue"))
         return payload
 
     def work_state_payload(event: AuditEvent) -> dict[str, object] | None:
