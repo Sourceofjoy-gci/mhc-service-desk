@@ -90,7 +90,7 @@ apply before an object action runs.
 | `/api/v1/tickets/{number}/work-state/` | PATCH | Scoped ticket plus active Operational/IT agent or lead group for the ticket domain, or `system-admins`; auditor and inactive users are denied |
 | `/api/v1/tickets/{number}/work-state/` reassignment/confidentiality | PATCH | `ops-supervisors`, `it-leads`, or `system-admins`, after the work-state check; self-assignment uses the server-provided capability and assignee ID |
 | `/api/v1/tickets/{number}/transition/` | POST | Scoped ticket, active actor, active transition from the current state, and any transition `required_role`; admin scope bypasses the transition role but not persisted scope dimensions |
-| `/api/v1/tickets/{number}/activity/` | GET | Scoped ticket; relationship identifiers are included only when the counterpart is also visible |
+| `/api/v1/tickets/{number}/activity/` | GET | Scoped ticket; returns the internal chronological timeline (public reply, internal note, workflow, custody, attachment, and relationship categories). Relationship identifiers are included only when the counterpart is also visible. |
 | `/api/v1/tickets/{number}/messages/` | GET, POST | Scoped ticket; POST requires active domain mutation authority and revalidates scope on the locked ticket |
 | `/api/v1/tickets/{number}/notes/` | GET, POST | Scoped ticket; POST requires active domain mutation authority and revalidates scope on the locked ticket |
 | `/api/v1/tickets/{number}/it-child/` | POST | Scoped mutable Operational parent; the service locks and revalidates the canonical parent before creating a sanitized IT child atomically |
@@ -102,6 +102,25 @@ Work-state and transition mutations require the caller's observed
 timestamp and no mutation. Ticket detail and list responses expose only
 server-derived capabilities and available transitions; the frontend does not
 grant lifecycle authority.
+
+## Custody and audit evidence
+
+Custody is available only inside the scoped ticket activity endpoint; there is
+no public custody endpoint or requester self-service timeline. The scope lookup
+applies before any timeline category is returned, including for Restricted
+tickets. Auditors can read custody evidence only through their existing
+read-only scope and cannot create, update, or delete ticket, message, note, or
+custody data.
+
+Custody entries are immutable and display the stored timestamp, action, actor
+or named system process, source process, reason, and applicable prior/new
+owner, queue, and status snapshots. Administrators and records staff must use
+the approved retention/disposal process for a whole-ticket disposal after its
+hold and candidate checks; there is no custody edit or selective-delete route.
+The current custody integration covers creation, workflow, approved IT-child
+workflow, and SLA escalation. Assignment/queue integration is explicitly a
+Plan 2 pending change, not an authorization for current assignment writers to
+bypass the future guarded assignment service.
 
 The base ticket viewset deliberately exposes list and retrieve only. Collection
 create and inherited detail update/delete methods are not routes; unsupported

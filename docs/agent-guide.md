@@ -89,11 +89,17 @@ mutation.
 
 ## 6. Communicate and record internal work
 
-The activity stream combines requester messages, internal notes, status
-changes, work-state changes, relationships, and attachments in server order.
+The activity stream is an internal, authorised ticket timeline. It combines
+requester messages, internal notes, workflow changes, custody events,
+relationships, and attachments in server order. It is not a requester
+self-service timeline and it does not expand what a requester can see.
 
 - Use **Reply** for requester-visible communication.
 - Use **Internal note** for staff-only context.
+- **Workflow** records status changes, reopening, and closure.
+- **Custody** records ticket creation, owner or queue changes, and SLA
+  escalation. It shows the action, timestamp, prior/new owner, queue or status
+  when applicable, actor or named system process, source process, and reason.
 - The two drafts are separate. A failed send keeps the draft so it can be
   corrected or retried.
 - The activity stream refreshes after the server confirms a send; no temporary
@@ -101,6 +107,17 @@ changes, work-state changes, relationships, and attachments in server order.
 
 A requester must never receive an internal note. Avoid secrets and unnecessary
 personal data in either channel.
+
+Custody items are read-only, immutable evidence: do not try to correct their
+displayed snapshots by editing a user, queue, or ticket. Use the timeline,
+alongside the canonical audit record, to investigate ownership, workflow, and
+SLA escalation history. Report a suspected mistake or integrity concern through
+the approved audit/records process; it is not repaired by direct editing.
+
+The same scope gate applies to every timeline category. An out-of-scope ticket
+returns no timeline, and Restricted content remains available only to identities
+with the matching Restricted authority. Auditors may review in-scope custody and
+workflow evidence but cannot change a ticket, note, message, or custody record.
 
 ## 7. Use attachments safely
 

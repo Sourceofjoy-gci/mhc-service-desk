@@ -772,6 +772,20 @@ def test_reopen_restarts_existing_resolution_clock_from_reopened_at(basic_world)
     assert restarted.breach_reason == ""
 
 
+def test_reopen_without_resolution_instance_or_policy_returns_no_sla(basic_world):
+    """A reopen without an applicable policy must not fabricate an SLA instance."""
+    ticket = _ticket(basic_world, status_code="reopened")
+    SlaPolicy.objects.filter(domain=ticket.domain, priority=ticket.priority).delete()
+
+    restarted = restart_resolution_sla(
+        ticket=ticket,
+        at=datetime(2026, 7, 27, 8, 0, tzinfo=UTC),
+    )
+
+    assert restarted is None
+    assert SlaInstance.objects.filter(ticket=ticket, kind="resolution").count() == 0
+
+
 def test_transition_service_synchronizes_pause_without_losing_task_four_events(
     basic_world,
 ):

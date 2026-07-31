@@ -14,7 +14,7 @@ from apps.sla.serializers import serialize_sla_clocks
 from apps.workflow.models import Status
 
 from .activity import scoped_ticket_relationships
-from .models import OutboxEvent, Ticket, TicketLink, TicketMessage, TicketNote, Watcher
+from .models import Ticket, TicketLink, TicketMessage, TicketNote
 from .permissions import (
     can_add_ticket_content,
     can_change_confidentiality,

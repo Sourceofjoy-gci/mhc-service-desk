@@ -426,8 +426,7 @@ def restart_resolution_sla(*, ticket: Ticket, at: datetime) -> SlaInstance | Non
         .order_by("created_at", "id")
         .first()
     )
-    creating = instance is None
-    if creating:
+    if instance is None:
         policy = SlaPolicy.objects.select_related("calendar").filter(
             domain=ticket.domain,
             priority=ticket.priority,
@@ -436,6 +435,9 @@ def restart_resolution_sla(*, ticket: Ticket, at: datetime) -> SlaInstance | Non
         if policy is None:
             return None
         instance = SlaInstance(ticket=ticket, policy=policy, kind="resolution")
+        creating = True
+    else:
+        creating = False
 
     instance.started_at = at
     instance.due_at = add_business_seconds(

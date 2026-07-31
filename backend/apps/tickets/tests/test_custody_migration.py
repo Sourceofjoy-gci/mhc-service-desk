@@ -20,6 +20,40 @@ from apps.workflow.models import Status, TransitionHistory
 pytestmark = pytest.mark.django_db(transaction=True)
 
 
+def test_0005_table_rolls_back_and_restores_through_current_leaf():
+    """The original custody-table migration must reverse and replay cleanly."""
+    from django.db.migrations.executor import MigrationExecutor
+
+    leaf = "0007_ticket_custody_collector_state"
+    table = "ticket_custody_event"
+    try:
+        executor = MigrationExecutor(connection)
+        executor.migrate([("tickets", "0004_ticket_next_action_ticket_next_action_at")])
+
+        executor = MigrationExecutor(connection)
+        executor.migrate([("tickets", "0005_ticketcustodyevent")])
+        forward_apps = executor.loader.project_state([("tickets", "0005_ticketcustodyevent")]).apps
+        assert forward_apps.get_model("tickets", "TicketCustodyEvent") is not None
+        assert table in connection.introspection.table_names()
+
+        executor = MigrationExecutor(connection)
+        executor.migrate([("tickets", "0004_ticket_next_action_ticket_next_action_at")])
+        backward_apps = executor.loader.project_state(
+            [("tickets", "0004_ticket_next_action_ticket_next_action_at")]
+        ).apps
+        with pytest.raises(LookupError):
+            backward_apps.get_model("tickets", "TicketCustodyEvent")
+        assert table not in connection.introspection.table_names()
+
+        executor = MigrationExecutor(connection)
+        executor.migrate([("tickets", leaf)])
+        restored_apps = executor.loader.project_state([("tickets", leaf)]).apps
+        assert restored_apps.get_model("tickets", "TicketCustodyEvent") is not None
+        assert table in connection.introspection.table_names()
+    finally:
+        MigrationExecutor(connection).migrate([("tickets", leaf)])
+
+
 def _ticket(basic_world, *, number: str) -> Ticket:
     return Ticket.objects.create(
         number=number,
