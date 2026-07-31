@@ -84,7 +84,7 @@ class Ticket(models.Model):
     )
     queue = models.ForeignKey(
         "organisations.ServiceLocation",
-        on_delete=models.SET_NULL,
+        on_delete=models.PROTECT,
         null=True,
         blank=True,
         related_name="tickets",

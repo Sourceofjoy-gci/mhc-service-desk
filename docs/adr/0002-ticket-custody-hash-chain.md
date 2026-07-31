@@ -81,6 +81,32 @@ User deletion changes current ownership without passing through the guarded
 assignment/custody writer. Operational rollback must consequently disable User
 deletion and preserve the deactivation-only policy until `0009` is reapplied.
 
+Ticket and queue administration follows the same service-boundary rule. The
+Ticket Django admin does not expose allocation scope, owner, queue, work-state,
+status, resolution, or lifecycle timestamp fields for editing, and it disables
+direct ticket creation and deletion. Those changes must pass through the
+ticket services so eligibility, actor authority, audit, outbox, and custody
+records commit together. The ServiceLocation admin permits `is_active` to be
+cleared but disables ordinary hard deletion; queue retirement is therefore a
+deactivation-first operation.
+
+Migration `0010` changes `Ticket.queue` from `SET_NULL` to `PROTECT`. It has no
+data rewrite, preserves existing queue references, and keeps the column
+nullable so an authorised routing service can still record an explicit queue
+clear. Django's deletion collector raises `ProtectedError` when a referenced
+ServiceLocation is deleted, while the database foreign-key constraint rejects
+a direct delete that would orphan the reference. A failed deletion leaves the
+ticket and its evidence unchanged; it must not manufacture a queue-change
+custody event for a route that never occurred.
+
+Rolling back `0010` restores Django's `SET_NULL` collector behavior. Under that
+state an ORM deletion can again clear every referencing `Ticket.queue` before
+deleting the ServiceLocation, without actor or custody evidence. Operational
+rollback must therefore keep ServiceLocation hard deletion disabled and use
+deactivation only until `0010` is reapplied. Raw database deletion remains
+subject to the physical foreign-key constraint, but it is not an approved
+queue lifecycle path.
+
 The `0006` rollback removes the PostgreSQL trigger and restores the original
 non-cascading foreign key while deliberately retaining rows backfilled by that
 migration, because they cannot safely be separated from rows created after
@@ -108,6 +134,9 @@ the PRD records policy; this ledger is evidence, not an exemption from it.
 - Staff identities remain available as stable custody references after
   deactivation. Assigned identities cannot be hard-deleted, so account
   lifecycle operations cannot silently bypass unassignment custody evidence.
+- Service locations are retired by deactivation and remain available as stable
+  routing references. A referenced queue cannot be hard-deleted through the
+  ORM or Django admin, so deletion cannot silently appear as an unqueue event.
 
 ## Alternatives considered
 

@@ -53,6 +53,13 @@ The assignee list is filtered for the ticket's domain and excludes inactive
 users and auditors. If the list cannot be loaded, reassignment is unavailable;
 do not treat a blank choice as an unassigned result.
 
+Do not assign, route, unassign, or change ticket status through Django admin.
+The admin displays allocation and lifecycle fields as read-only; the staff
+workspace and its guarded APIs are the write boundary that records custody.
+Queues are retired by clearing **Active**, not by deleting the queue record.
+Tickets already routed to a deactivated queue keep that historical reference
+until an authorised transfer records the new queue.
+
 Use a concrete next action and date. A waiting or blocked state without useful
 follow-up information makes handover and SLA management harder.
 
@@ -170,6 +177,8 @@ support message. The correlation reference is the safe diagnostic handle.
 - MFA and individual accounts are mandatory. Never share passwords or tokens.
 - Staff accounts are deactivated by authorized administrators rather than
   deleted; this preserves ownership and custody history.
+- Service locations and queues are deactivated rather than deleted; existing
+  ticket routing remains intact until a guarded transfer changes it.
 - Audit/activity history is the source of truth for actions that the server
   accepted.
 - A clean automated component test is not a substitute for current UAT or

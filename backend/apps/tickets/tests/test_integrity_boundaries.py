@@ -170,6 +170,7 @@ def test_supported_ticket_boundaries_have_no_direct_post_creation_allocation_wri
         apps_root / "tickets" / "it_child.py",
         apps_root / "tickets" / "api.py",
         apps_root / "tickets" / "views.py",
+        apps_root / "tickets" / "admin.py",
         apps_root / "automation" / "views.py",
     )
     protected_names = {"assignee", "assignee_id", "queue", "queue_id"}

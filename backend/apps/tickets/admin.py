@@ -16,7 +16,6 @@ from .models import (
     Watcher,
 )
 
-admin.site.register(Ticket)
 admin.site.register(TicketMessage)
 admin.site.register(TicketNote)
 admin.site.register(TicketLink)
@@ -24,13 +23,58 @@ admin.site.register(Watcher)
 admin.site.register(OutboxEvent)
 
 
+TICKET_CUSTODY_CONTROLLED_FIELDS = (
+    "domain",
+    "status",
+    "priority",
+    "channel",
+    "service",
+    "request_type",
+    "office",
+    "queue",
+    "assignee",
+    "team",
+    "confidentiality",
+    "waiting_reason",
+    "blocked_reason",
+    "next_action",
+    "next_action_at",
+    "resolution_code",
+    "resolution_summary",
+    "acknowledged_at",
+    "first_responded_at",
+    "resolved_at",
+    "closed_at",
+    "reopened_at",
+)
+
+
 if TYPE_CHECKING:
+
+    class _TicketAdminBase(admin.ModelAdmin[Ticket]):
+        pass
 
     class _TicketCustodyEventAdminBase(admin.ModelAdmin[TicketCustodyEvent]):
         pass
 
 else:
+    _TicketAdminBase = admin.ModelAdmin
     _TicketCustodyEventAdminBase = admin.ModelAdmin
+
+
+@admin.register(Ticket)
+class TicketAdmin(_TicketAdminBase):
+    """Keep custody-controlled writes behind ticket domain services."""
+
+    readonly_fields = TICKET_CUSTODY_CONTROLLED_FIELDS
+
+    def has_add_permission(self, request: HttpRequest) -> bool:
+        return False
+
+    def has_delete_permission(
+        self, request: HttpRequest, obj: Ticket | None = None
+    ) -> bool:
+        return False
 
 
 @admin.register(TicketCustodyEvent)

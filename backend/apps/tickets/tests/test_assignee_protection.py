@@ -178,15 +178,17 @@ def test_assignment_wins_concurrent_user_delete_without_deadlock_or_silent_unass
     assert _event_counts(ticket) == (1, 1, 1)
 
 
-def test_0009_changes_assignee_deletion_from_set_null_to_protect() -> None:
+def test_0009_changes_assignee_deletion_from_set_null_to_protect_and_rolls_back() -> None:
     from django.db.migrations.executor import MigrationExecutor
 
+    previous = "0008_harden_ticket_custody_contract"
     leaf = "0009_protect_ticket_assignee"
+    current_leaf = "0010_protect_ticket_queue"
     try:
         executor = MigrationExecutor(connection)
-        executor.migrate([("tickets", "0008_harden_ticket_custody_contract")])
+        executor.migrate([("tickets", previous)])
         before_apps = executor.loader.project_state(
-            [("tickets", "0008_harden_ticket_custody_contract")]
+            [("tickets", previous)]
         ).apps
         before_field = before_apps.get_model("tickets", "Ticket")._meta.get_field("assignee")
         assert before_field.remote_field.on_delete is SET_NULL
@@ -196,5 +198,13 @@ def test_0009_changes_assignee_deletion_from_set_null_to_protect() -> None:
         after_apps = executor.loader.project_state([("tickets", leaf)]).apps
         after_field = after_apps.get_model("tickets", "Ticket")._meta.get_field("assignee")
         assert after_field.remote_field.on_delete is PROTECT
+
+        executor = MigrationExecutor(connection)
+        executor.migrate([("tickets", previous)])
+        rollback_apps = executor.loader.project_state([("tickets", previous)]).apps
+        rollback_field = rollback_apps.get_model("tickets", "Ticket")._meta.get_field(
+            "assignee"
+        )
+        assert rollback_field.remote_field.on_delete is SET_NULL
     finally:
-        MigrationExecutor(connection).migrate([("tickets", leaf)])
+        MigrationExecutor(connection).migrate([("tickets", current_leaf)])
