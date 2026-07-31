@@ -279,8 +279,10 @@ class TicketViewSet(
 
         changes = dict(serializer.validated_data)
         expected_updated_at = changes.pop("updated_at")
+        reason_value = changes.pop("reason", "")
+        reason = reason_value if isinstance(reason_value, str) else ""
         actor = _authenticated_user(request)
-        if "assignee" in changes and len(changes) > 1:
+        if "assignee" in changes and (changes.keys() - {"assignee"}):
             return _ticket_action_error(
                 request,
                 code="assignment_must_be_separate",
@@ -300,6 +302,7 @@ class TicketViewSet(
                     actor=actor,
                     assignee_id=changes["assignee"],
                     expected_updated_at=expected_updated_at,
+                    reason=reason,
                     request=request,
                 )
                 updated = assignment_result.ticket

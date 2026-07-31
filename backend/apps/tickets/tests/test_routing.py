@@ -104,6 +104,32 @@ def _grant(
     return UserRole.objects.create(user=user, role=role, office=ticket.office)
 
 
+def _grant_with_independent_offices(
+    user: User,
+    ticket: Ticket,
+    *,
+    role_key: str,
+    queue: ServiceLocation | None,
+    assignment_office: Office,
+    configured_office: Office,
+) -> UserRole:
+    role = Role.objects.create(
+        keycloak_role=role_key,
+        name=f"{role_key}-{uuid4().hex[:8]}",
+        scopes=[
+            {
+                **_scope(ticket, queue=queue),
+                "office": str(configured_office.id),
+            }
+        ],
+    )
+    return UserRole.objects.create(
+        user=user,
+        role=role,
+        office=assignment_office,
+    )
+
+
 def _counts(ticket: Ticket) -> tuple[int, int, int]:
     return (
         AuditEvent.objects.filter(object_id=str(ticket.id)).count(),
@@ -342,6 +368,64 @@ def test_unqueue_requires_non_queue_scope_and_queue_less_owner_eligibility(basic
     )
     assert result.ticket.queue_id is None
     assert result.ticket.assignee_id is None
+
+
+@pytest.mark.parametrize(
+    "mismatch_direction",
+    ["assignment_office", "configured_scope_office"],
+)
+@pytest.mark.parametrize("routing_kind", ["destination", "unqueue"])
+def test_persisted_routing_authority_requires_independent_office_matches(
+    basic_world,
+    mismatch_direction,
+    routing_kind,
+):
+    current = _queue(basic_world, f"Office authority current {routing_kind}")
+    destination = _queue(basic_world, f"Office authority target {routing_kind}")
+    ticket = _ticket(basic_world, queue=current)
+    actor = _user()
+    _grant(
+        actor,
+        ticket,
+        role_key="supervisor-operational",
+        queues=(current,),
+    )
+    other_office = Office.objects.create(
+        region=basic_world["region"],
+        code=f"AUTH-{uuid4().hex[:8]}",
+        name="Mismatched routing authority office",
+    )
+    _grant_with_independent_offices(
+        actor,
+        ticket,
+        role_key="estate-examiner",
+        queue=destination if routing_kind == "destination" else None,
+        assignment_office=(
+            other_office
+            if mismatch_direction == "assignment_office"
+            else ticket.office
+        ),
+        configured_office=(
+            other_office
+            if mismatch_direction == "configured_scope_office"
+            else ticket.office
+        ),
+    )
+    previous_updated_at = ticket.updated_at
+
+    with pytest.raises(TicketPermissionError):
+        _route(
+            ticket,
+            actor,
+            queue_id=destination.id if routing_kind == "destination" else None,
+            assignee_id=None,
+        )
+
+    ticket.refresh_from_db()
+    assert ticket.queue_id == current.id
+    assert ticket.assignee_id is None
+    assert ticket.updated_at == previous_updated_at
+    assert _counts(ticket) == (0, 0, 0)
 
 
 def test_queue_clear_keeps_owner_when_owner_has_queue_less_scope(basic_world):

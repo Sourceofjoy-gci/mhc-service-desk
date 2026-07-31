@@ -7,6 +7,7 @@ from rest_framework.request import Request
 from apps.identity_access.models import User
 from apps.identity_access.scope import (
     AuthoritySnapshot,
+    EffectiveRoleGrant,
     Scope,
     get_authority_snapshot,
     get_effective_role_grants,
@@ -38,6 +39,7 @@ REASSIGN_GROUPS = {
     "admin",
     "system-admins",
 }
+_AUDITOR_ROLE_KEYS = {"auditor", "auditors"}
 
 
 def user_groups(user: User) -> set[str]:
@@ -128,6 +130,59 @@ def _scope_covers_routing_result(
     return scope_key in authority.restricted_scope_keys
 
 
+def _role_grant_covers_routing_result(
+    grant: EffectiveRoleGrant,
+    scope: Scope,
+    ticket: Ticket,
+    queue: ServiceLocation | None,
+    *,
+    authority: AuthoritySnapshot,
+) -> bool:
+    if grant.role_key in _AUDITOR_ROLE_KEYS:
+        return False
+    if grant.office_id is not None and grant.office_id != ticket.office_id:
+        return False
+    return _scope_covers_routing_result(
+        scope,
+        ticket,
+        queue,
+        authority=authority,
+    )
+
+
+def _has_routing_result_scope(
+    user: User,
+    ticket: Ticket,
+    queue: ServiceLocation | None,
+    *,
+    authority: AuthoritySnapshot,
+    require_unconstrained_queue: bool,
+) -> bool:
+    if user.is_superuser or not authority.uses_persisted_roles:
+        return any(
+            (not require_unconstrained_queue or scope.queue_id is None)
+            and _scope_covers_routing_result(
+                scope,
+                ticket,
+                queue,
+                authority=authority,
+            )
+            for scope in authority.scopes
+        )
+    return any(
+        (not require_unconstrained_queue or scope.queue_id is None)
+        and _role_grant_covers_routing_result(
+            grant,
+            scope,
+            ticket,
+            queue,
+            authority=authority,
+        )
+        for grant in authority.role_grants
+        for scope in grant.scopes
+    )
+
+
 def _can_assign_with_snapshot(
     user: User,
     ticket: Ticket,
@@ -161,15 +216,12 @@ def can_unqueue_ticket(
         snapshot=authority,
     ):
         return False
-    return any(
-        scope.queue_id is None
-        and _scope_covers_routing_result(
-            scope,
-            ticket,
-            None,
-            authority=authority,
-        )
-        for scope in authority.scopes
+    return _has_routing_result_scope(
+        user,
+        ticket,
+        None,
+        authority=authority,
+        require_unconstrained_queue=True,
     )
 
 
@@ -199,14 +251,12 @@ def can_route_ticket(
         snapshot=authority,
     ):
         return False
-    return any(
-        _scope_covers_routing_result(
-            scope,
-            ticket,
-            queue,
-            authority=authority,
-        )
-        for scope in authority.scopes
+    return _has_routing_result_scope(
+        user,
+        ticket,
+        queue,
+        authority=authority,
+        require_unconstrained_queue=False,
     )
 
 

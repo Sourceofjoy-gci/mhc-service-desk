@@ -29,7 +29,13 @@ def _user(groups: list[str], *, display_name: str = "") -> User:
     return user
 
 
-def _ticket(basic_world, *, domain: str = "operational", confidentiality="normal") -> Ticket:
+def _ticket(
+    basic_world,
+    *,
+    domain: str = "operational",
+    confidentiality="normal",
+    assignee: User | None = None,
+) -> Ticket:
     service = basic_world["gen_info"] if domain == "operational" else basic_world["it_inc"]
     prefix = "OP" if domain == "operational" else "IT"
     return Ticket.objects.create(
@@ -44,6 +50,7 @@ def _ticket(basic_world, *, domain: str = "operational", confidentiality="normal
         request_type=service.request_types.get(),
         office=basic_world["office"],
         confidentiality=confidentiality,
+        assignee=assignee,
     )
 
 
@@ -193,6 +200,111 @@ def test_assignment_only_legacy_work_state_delegates_to_atomic_assignment(basic_
     assert event.event_type == "assigned"
     assert event.actor_subject == actor.keycloak_subject
     assert event.source_process == "ticket.assignment"
+
+
+@pytest.mark.parametrize("owner_change", ["transfer", "unassign"])
+def test_legacy_work_state_owner_change_accepts_separate_reason(
+    basic_world,
+    owner_change,
+):
+    actor = _user(["ops-supervisors"], display_name="Compatibility Supervisor")
+    previous = _user(["ops-agents"], display_name="Compatibility Previous")
+    replacement = _user(["ops-agents"], display_name="Compatibility Replacement")
+    ticket = _ticket(basic_world, assignee=previous)
+
+    response = _patch(
+        _client(actor),
+        ticket,
+        {
+            "updated_at": ticket.updated_at.isoformat(),
+            "assignee": (
+                str(replacement.id) if owner_change == "transfer" else None
+            ),
+            "reason": "Compatibility owner change.",
+        },
+    )
+
+    assert response.status_code == 200
+    expected_owner = replacement.id if owner_change == "transfer" else None
+    assert response.data["assignee"] == expected_owner
+    ticket.refresh_from_db()
+    assert ticket.assignee_id == expected_owner
+    event = TicketCustodyEvent.objects.get(ticket=ticket)
+    assert event.event_type == (
+        "reassigned" if owner_change == "transfer" else "unassigned"
+    )
+    assert event.reason == "Compatibility owner change."
+
+
+@pytest.mark.parametrize("owner_change", ["transfer", "unassign"])
+@pytest.mark.parametrize("reason", [None, "", "   "])
+def test_legacy_work_state_owner_change_requires_non_blank_reason_without_mutation(
+    basic_world,
+    owner_change,
+    reason,
+):
+    actor = _user(["ops-supervisors"])
+    previous = _user(["ops-agents"])
+    replacement = _user(["ops-agents"])
+    ticket = _ticket(basic_world, assignee=previous)
+    previous_updated_at = ticket.updated_at
+    payload: dict[str, object] = {
+        "updated_at": ticket.updated_at.isoformat(),
+        "assignee": str(replacement.id) if owner_change == "transfer" else None,
+    }
+    if reason is not None:
+        payload["reason"] = reason
+
+    response = _patch(_client(actor), ticket, payload)
+
+    assert response.status_code == 400
+    assert response.data["code"] == "invalid_work_state"
+    assert response.data["fields"] == {"reason": ["This field is required."]}
+    ticket.refresh_from_db()
+    assert ticket.assignee_id == previous.id
+    assert ticket.updated_at == previous_updated_at
+    assert not AuditEvent.objects.filter(object_id=str(ticket.id)).exists()
+    assert not OutboxEvent.objects.filter(aggregate_id=str(ticket.id)).exists()
+    assert not TicketCustodyEvent.objects.filter(ticket=ticket).exists()
+
+
+def test_legacy_reason_is_only_valid_with_assignee_and_does_not_hide_mixed_fields(
+    basic_world,
+):
+    actor = _user(["ops-supervisors"])
+    target = _user(["ops-agents"])
+    ticket = _ticket(basic_world)
+
+    reason_only = _patch(
+        _client(actor),
+        ticket,
+        {
+            "updated_at": ticket.updated_at.isoformat(),
+            "reason": "No owner field.",
+        },
+    )
+    assert reason_only.status_code == 400
+    assert reason_only.data["code"] == "invalid_work_state"
+    assert reason_only.data["fields"] == {
+        "reason": ["This field is only valid with assignee."],
+    }
+
+    mixed = _patch(
+        _client(actor),
+        ticket,
+        {
+            "updated_at": ticket.updated_at.isoformat(),
+            "assignee": str(target.id),
+            "reason": "Valid assignment reason.",
+            "team": "Must remain unchanged",
+        },
+    )
+    assert mixed.status_code == 400
+    assert mixed.data["code"] == "assignment_must_be_separate"
+    ticket.refresh_from_db()
+    assert ticket.assignee_id is None
+    assert ticket.team == ""
+    assert not AuditEvent.objects.filter(object_id=str(ticket.id)).exists()
 
 
 def test_work_state_returns_field_error_for_ineligible_target(basic_world):

@@ -307,6 +307,11 @@ class NoteCreateSerializer(serializers.Serializer[dict[str, object]]):
 class WorkStateRequestSerializer(serializers.Serializer[dict[str, object]]):
     updated_at = serializers.DateTimeField()
     assignee = serializers.UUIDField(required=False, allow_null=True)
+    reason = serializers.CharField(
+        required=False,
+        allow_blank=True,
+        max_length=1000,
+    )
     team = serializers.CharField(required=False, allow_blank=True, max_length=128)
     waiting_reason = serializers.CharField(required=False, allow_blank=True, max_length=64)
     blocked_reason = serializers.CharField(required=False, allow_blank=True)
@@ -316,6 +321,13 @@ class WorkStateRequestSerializer(serializers.Serializer[dict[str, object]]):
         required=False,
         choices=Ticket.Confidentiality.choices,
     )
+
+    def validate(self, attrs: dict[str, object]) -> dict[str, object]:
+        if "reason" in attrs and "assignee" not in attrs:
+            raise serializers.ValidationError(
+                {"reason": ["This field is only valid with assignee."]}
+            )
+        return attrs
 
 
 class AssigneeSearchSerializer(serializers.Serializer[dict[str, object]]):
