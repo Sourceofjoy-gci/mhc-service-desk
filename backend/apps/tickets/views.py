@@ -42,12 +42,14 @@ from .api import (
     MessageCreateSerializer,
     NoteCreateSerializer,
     PublicIntakeSerializer,
+    QueueRoutingRequestSerializer,
+    RoutingReceiptSerializer,
     TicketDetailSerializer,
     TicketListSerializer,
     TransitionRequestSerializer,
     WorkStateRequestSerializer,
 )
-from .assignment import assign_ticket
+from .assignment import assign_ticket, route_ticket
 from .eligibility import eligible_assignees
 from .models import Ticket
 from .permissions import can_add_ticket_content, can_assign
@@ -134,7 +136,7 @@ class TicketViewSet(
         code: str | None = None,
     ) -> Never:
         if (
-            self.action in {"transition", "work_state", "assignment"}
+            self.action in {"transition", "work_state", "assignment", "routing"}
             and request.user.is_authenticated
         ):
             raise PermissionDenied(
@@ -153,6 +155,7 @@ class TicketViewSet(
             "work_state",
             "assignees",
             "assignment",
+            "routing",
             "activity",
         ):
             return TicketDetailSerializer
@@ -277,22 +280,48 @@ class TicketViewSet(
         changes = dict(serializer.validated_data)
         expected_updated_at = changes.pop("updated_at")
         actor = _authenticated_user(request)
-        try:
-            updated = services.update_work_state(
-                ticket_id=ticket.id,
-                actor=actor,
-                expected_updated_at=expected_updated_at,
-                changes=changes,
-                request=request,
+        if "assignee" in changes and len(changes) > 1:
+            return _ticket_action_error(
+                request,
+                code="assignment_must_be_separate",
+                detail="Assignment must be submitted separately.",
+                fields={
+                    "assignee": [
+                        "Use the ticket assignment action for owner changes."
+                    ]
+                },
+                response_status=status.HTTP_400_BAD_REQUEST,
             )
+        try:
+            if "assignee" in changes:
+                # One-release compatibility path; clients should use /assignment/.
+                assignment_result = assign_ticket(
+                    ticket_id=ticket.id,
+                    actor=actor,
+                    assignee_id=changes["assignee"],
+                    expected_updated_at=expected_updated_at,
+                    request=request,
+                )
+                updated = assignment_result.ticket
+            else:
+                updated = services.update_work_state(
+                    ticket_id=ticket.id,
+                    actor=actor,
+                    expected_updated_at=expected_updated_at,
+                    changes=changes,
+                    request=request,
+                )
         except services.TicketScopeError as exc:
             raise NotFound from exc
         except services.TicketValidationError as exc:
+            fields = dict(exc.fields)
+            if "assignee" in changes and "assignee_id" in fields:
+                fields["assignee"] = fields.pop("assignee_id")
             return _ticket_action_error(
                 request,
                 code="invalid_work_state",
                 detail="Work state is invalid.",
-                fields=exc.fields,
+                fields=fields,
                 response_status=status.HTTP_400_BAD_REQUEST,
             )
         except services.TicketPermissionError:
@@ -429,6 +458,72 @@ class TicketViewSet(
                     context=self.get_serializer_context(),
                 ).data,
                 "receipt": AssignmentReceiptSerializer(result.receipt).data,
+            }
+        )
+
+    @action(detail=True, methods=["post"], url_path="routing")
+    def routing(
+        self,
+        request: Request,
+        number: str | None = None,
+    ) -> Response:
+        ticket = self.get_object()
+        serializer = QueueRoutingRequestSerializer(data=request.data)
+        if not serializer.is_valid():
+            return _ticket_action_error(
+                request,
+                code="invalid_routing",
+                detail="Routing is invalid.",
+                fields=_serializer_error_fields(serializer.errors),
+                response_status=status.HTTP_400_BAD_REQUEST,
+            )
+        actor = _authenticated_user(request)
+        try:
+            result = route_ticket(
+                ticket_id=ticket.id,
+                actor=actor,
+                queue_id=serializer.validated_data["queue_id"],
+                assignee_id=serializer.validated_data["assignee_id"],
+                expected_updated_at=serializer.validated_data["updated_at"],
+                reason=serializer.validated_data["reason"],
+                request=request,
+            )
+        except services.TicketScopeError as exc:
+            raise NotFound from exc
+        except services.TicketValidationError as exc:
+            return _ticket_action_error(
+                request,
+                code="invalid_routing",
+                detail="Routing is invalid.",
+                fields=exc.fields,
+                response_status=status.HTTP_400_BAD_REQUEST,
+            )
+        except services.TicketPermissionError:
+            return _ticket_action_error(
+                request,
+                code="ticket_action_forbidden",
+                detail="You cannot perform this ticket action.",
+                fields={},
+                response_status=status.HTTP_403_FORBIDDEN,
+            )
+        except services.TicketConflictError as exc:
+            current = serializers.DateTimeField().to_representation(
+                exc.current_updated_at
+            )
+            return _ticket_action_error(
+                request,
+                code="stale_ticket",
+                detail="The ticket was updated by another user.",
+                fields={"updated_at": [current]},
+                response_status=status.HTTP_409_CONFLICT,
+            )
+        return Response(
+            {
+                "ticket": TicketDetailSerializer(
+                    result.ticket,
+                    context=self.get_serializer_context(),
+                ).data,
+                "receipt": RoutingReceiptSerializer(result.receipt).data,
             }
         )
 

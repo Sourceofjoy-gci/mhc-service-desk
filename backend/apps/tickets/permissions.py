@@ -2,12 +2,16 @@
 from __future__ import annotations
 
 from django.db.models import QuerySet
+from rest_framework.request import Request
 
 from apps.identity_access.models import User
 from apps.identity_access.scope import (
+    AuthoritySnapshot,
+    Scope,
     get_authority_snapshot,
     get_effective_role_grants,
 )
+from apps.organisations.models import ServiceLocation
 
 from .eligibility import (
     eligible_assignees,
@@ -93,6 +97,117 @@ def can_reassign(
     request: object | None = None,
 ) -> bool:
     return can_assign(user, ticket=ticket, request=request)
+
+
+def _scope_covers_routing_result(
+    scope: Scope,
+    ticket: Ticket,
+    queue: ServiceLocation | None,
+    *,
+    authority: AuthoritySnapshot,
+) -> bool:
+    if scope.domain != "admin" and scope.domain != ticket.domain:
+        return False
+    dimensions = (
+        (scope.office_id, str(ticket.office_id)),
+        (scope.service_id, str(ticket.service_id)),
+        (scope.queue_id, str(queue.id) if queue is not None else None),
+    )
+    if any(configured is not None and configured != actual for configured, actual in dimensions):
+        return False
+    if scope.restricted_only:
+        return ticket.confidentiality == Ticket.Confidentiality.RESTRICTED
+    if ticket.confidentiality != Ticket.Confidentiality.RESTRICTED:
+        return True
+    scope_key = (
+        scope.domain,
+        scope.office_id,
+        scope.service_id,
+        scope.queue_id,
+    )
+    return scope_key in authority.restricted_scope_keys
+
+
+def _can_assign_with_snapshot(
+    user: User,
+    ticket: Ticket,
+    *,
+    request: object | None,
+    snapshot: AuthoritySnapshot,
+) -> bool:
+    if _cannot_mutate(user, request=request):
+        return False
+    if snapshot.auditor_identity or "auditor" in snapshot.capabilities:
+        return False
+    return bool(
+        matching_actor_role_aliases(ticket, user, snapshot=snapshot)
+        & REASSIGN_GROUPS
+    )
+
+
+def can_unqueue_ticket(
+    user: User,
+    ticket: Ticket,
+    *,
+    request: Request | None = None,
+    snapshot: AuthoritySnapshot | None = None,
+) -> bool:
+    """Require explicit authority that remains valid after queue removal."""
+    authority = snapshot or get_authority_snapshot(user, request=request)
+    if not _can_assign_with_snapshot(
+        user,
+        ticket,
+        request=request,
+        snapshot=authority,
+    ):
+        return False
+    return any(
+        scope.queue_id is None
+        and _scope_covers_routing_result(
+            scope,
+            ticket,
+            None,
+            authority=authority,
+        )
+        for scope in authority.scopes
+    )
+
+
+def can_route_ticket(
+    user: User,
+    ticket: Ticket,
+    queue: ServiceLocation | None,
+    *,
+    request: Request | None = None,
+    snapshot: AuthoritySnapshot | None = None,
+) -> bool:
+    """Require assignment authority plus exact resulting queue scope."""
+    authority = snapshot or get_authority_snapshot(user, request=request)
+    if queue is None:
+        return can_unqueue_ticket(
+            user,
+            ticket,
+            request=request,
+            snapshot=authority,
+        )
+    if not queue.is_active or queue.office_id != ticket.office_id:
+        return False
+    if not _can_assign_with_snapshot(
+        user,
+        ticket,
+        request=request,
+        snapshot=authority,
+    ):
+        return False
+    return any(
+        _scope_covers_routing_result(
+            scope,
+            ticket,
+            queue,
+            authority=authority,
+        )
+        for scope in authority.scopes
+    )
 
 
 def can_change_confidentiality(

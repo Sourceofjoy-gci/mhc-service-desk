@@ -7,6 +7,7 @@ from django.utils.dateparse import parse_datetime
 
 from apps.audit.models import AuditEvent
 from apps.identity_access.models import Role, User, UserRole
+from apps.tickets.assignment import assign_ticket
 from apps.tickets.models import OutboxEvent, Ticket
 from apps.tickets.services import (
     TicketConflictError,
@@ -58,12 +59,12 @@ def test_unassigned_agent_can_assign_ticket_to_self(basic_world):
     actor = _user(["ops-agents"])
     ticket = _ticket(basic_world)
 
-    updated = update_work_state(
+    updated = assign_ticket(
         ticket_id=ticket.id,
         actor=actor,
+        assignee_id=actor.id,
         expected_updated_at=_expected(ticket),
-        changes={"assignee": actor.id},
-    )
+    ).ticket
 
     assert updated.assignee_id == actor.id
 
@@ -74,13 +75,14 @@ def test_agent_cannot_assign_another_user_and_ticket_is_unchanged(basic_world):
     ticket = _ticket(basic_world)
     previous_updated_at = ticket.updated_at
 
-    with pytest.raises(TicketPermissionError):
+    with pytest.raises(TicketValidationError) as caught:
         update_work_state(
             ticket_id=ticket.id,
             actor=actor,
             expected_updated_at=_expected(ticket),
             changes={"assignee": other.id, "team": "Operations"},
         )
+    assert caught.value.fields == {"changes": ["Unsupported work-state field."]}
 
     ticket.refresh_from_db()
     assert ticket.assignee_id is None
@@ -93,12 +95,12 @@ def test_supervisor_can_assign_eligible_same_domain_user(basic_world):
     target = _user(["ops-agents"])
     ticket = _ticket(basic_world)
 
-    updated = update_work_state(
+    updated = assign_ticket(
         ticket_id=ticket.id,
         actor=supervisor,
+        assignee_id=target.id,
         expected_updated_at=_expected(ticket),
-        changes={"assignee": target.id},
-    )
+    ).ticket
 
     assert updated.assignee_id == target.id
 
@@ -118,14 +120,16 @@ def test_supervisor_cannot_assign_ineligible_users(basic_world, groups, active):
     ticket = _ticket(basic_world)
 
     with pytest.raises(TicketValidationError) as caught:
-        update_work_state(
+        assign_ticket(
             ticket_id=ticket.id,
             actor=supervisor,
+            assignee_id=target.id,
             expected_updated_at=_expected(ticket),
-            changes={"assignee": target.id},
         )
 
-    assert caught.value.fields == {"assignee": ["Select a valid assignee."]}
+    assert caught.value.fields == {
+        "assignee_id": ["Select an eligible assignee."],
+    }
     ticket.refresh_from_db()
     assert ticket.assignee_id is None
 
@@ -240,7 +244,6 @@ def test_stale_update_returns_current_timestamp_and_changes_nothing(basic_world)
 
 def test_success_records_one_matching_changed_field_event_pair(basic_world):
     actor = _user(["ops-supervisors"])
-    target = _user(["ops-agents"])
     ticket = _ticket(basic_world)
 
     update_work_state(
@@ -248,7 +251,6 @@ def test_success_records_one_matching_changed_field_event_pair(basic_world):
         actor=actor,
         expected_updated_at=_expected(ticket),
         changes={
-            "assignee": target.id,
             "team": "Operations",
             "waiting_reason": "requester",
         },
@@ -265,12 +267,10 @@ def test_success_records_one_matching_changed_field_event_pair(basic_world):
     assert audit.payload == outbox.payload
     assert audit.payload["actor"] == actor.keycloak_subject
     assert audit.payload["before"] == {
-        "assignee": None,
         "team": "",
         "waiting_reason": "",
     }
     assert audit.payload["after"] == {
-        "assignee": str(target.id),
         "team": "Operations",
         "waiting_reason": "requester",
     }

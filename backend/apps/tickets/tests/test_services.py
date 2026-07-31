@@ -12,6 +12,7 @@ from apps.contacts.models import Contact
 from apps.identity_access.models import User
 from apps.organisations.models import Office, Region
 from apps.tickets import services
+from apps.tickets.models import Ticket
 from apps.workflow.models import Status, Transition
 from apps.workflow.shortcuts import seed_workflow_for_tests
 
@@ -68,6 +69,38 @@ def test_ticket_numbering_is_per_domain_and_sequential(basic_world):
     assert a.number.startswith("OP-")
     assert b.number.startswith("OP-")
     assert a.number != b.number
+
+
+def test_generic_work_state_service_rejects_direct_assignment_changes(basic_world):
+    actor = _actor("ops-supervisors")
+    target = _actor("ops-agents")
+    ticket = services.create_ticket(
+        domain="operational",
+        title="Direct assignment boundary",
+        description="",
+        requester=basic_world["contact"],
+        service=basic_world["service"],
+        request_type=basic_world["request_type"],
+        office=basic_world["office"],
+        channel="internal",
+    )
+    previous_updated_at = ticket.updated_at
+
+    with pytest.raises(services.TicketValidationError) as caught:
+        services.update_work_state(
+            ticket_id=ticket.id,
+            actor=actor,
+            expected_updated_at=ticket.updated_at,
+            changes={"assignee": target.id},
+        )
+
+    assert caught.value.fields == {
+        "changes": ["Unsupported work-state field."],
+    }
+    ticket.refresh_from_db()
+    assert ticket.assignee_id is None
+    assert ticket.updated_at == previous_updated_at
+    assert Ticket.objects.get(pk=ticket.pk).assignee_id is None
 
 
 def test_create_ticket_records_initial_status_history(basic_world):

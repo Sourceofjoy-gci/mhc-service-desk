@@ -577,3 +577,32 @@ def test_assignment_validates_request_fields(basic_world, payload, field):
     assert field in response.data["fields"]
     assert response.data["correlation_id"] == CORRELATION_ID
     assert _side_effect_counts(ticket) == (0, 0, 0)
+
+
+def test_routing_action_is_a_separate_guarded_staff_endpoint(basic_world):
+    actor = _user(["ops-supervisors"])
+    target = _user(["ops-agents"])
+    destination = ServiceLocation.objects.create(
+        office=basic_world["office"],
+        name="Separate routing API queue",
+    )
+    ticket = _ticket(basic_world)
+
+    response = _client(actor).post(
+        reverse("tickets-routing", args=[ticket.number]),
+        {
+            "queue_id": str(destination.id),
+            "assignee_id": str(target.id),
+            "updated_at": ticket.updated_at.isoformat(),
+            "reason": "Route through the dedicated action.",
+        },
+        format="json",
+        HTTP_X_CORRELATION_ID=CORRELATION_ID,
+    )
+
+    assert response.status_code == 200
+    assert response.data["ticket"]["assignee"] == target.id
+    assert response.data["receipt"]["new_queue"] == {
+        "id": str(destination.id),
+        "label": destination.name,
+    }

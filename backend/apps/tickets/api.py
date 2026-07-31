@@ -14,7 +14,13 @@ from apps.sla.serializers import serialize_sla_clocks
 from apps.workflow.models import Status
 
 from .activity import scoped_ticket_relationships
-from .assignment import AssignmentActor, AssignmentParty, AssignmentReceipt
+from .assignment import (
+    AssignmentActor,
+    AssignmentParty,
+    AssignmentReceipt,
+    RoutingReceipt,
+)
+from .custody import CustodyQueue
 from .eligibility import custody_party_for_user, is_eligible_assignee
 from .models import Ticket, TicketLink, TicketMessage, TicketNote
 from .permissions import (
@@ -353,6 +359,28 @@ class AssignmentActorSerializer(serializers.Serializer[AssignmentActor]):
 class AssignmentReceiptSerializer(serializers.Serializer[AssignmentReceipt]):
     ticket_number = serializers.CharField(read_only=True)
     action = serializers.CharField(read_only=True)
+    previous_assignee = AssignmentPartySerializer(read_only=True, allow_null=True)
+    new_assignee = AssignmentPartySerializer(read_only=True, allow_null=True)
+    occurred_at = serializers.DateTimeField(read_only=True)
+    performed_by = AssignmentActorSerializer(read_only=True)
+
+
+class QueueRoutingRequestSerializer(serializers.Serializer[dict[str, object]]):
+    queue_id = serializers.UUIDField(allow_null=True)
+    assignee_id = serializers.UUIDField(allow_null=True)
+    updated_at = serializers.DateTimeField()
+    reason = serializers.CharField(max_length=1000, allow_blank=False)
+
+
+class CustodyQueueSerializer(serializers.Serializer[CustodyQueue]):
+    id = serializers.CharField(read_only=True)
+    label = serializers.CharField(read_only=True, allow_null=True)  # type: ignore[assignment]
+
+
+class RoutingReceiptSerializer(serializers.Serializer[RoutingReceipt]):
+    ticket_number = serializers.CharField(read_only=True)
+    previous_queue = CustodyQueueSerializer(read_only=True, allow_null=True)
+    new_queue = CustodyQueueSerializer(read_only=True, allow_null=True)
     previous_assignee = AssignmentPartySerializer(read_only=True, allow_null=True)
     new_assignee = AssignmentPartySerializer(read_only=True, allow_null=True)
     occurred_at = serializers.DateTimeField(read_only=True)

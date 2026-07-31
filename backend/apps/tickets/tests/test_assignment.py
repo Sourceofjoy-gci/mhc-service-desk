@@ -13,6 +13,7 @@ from apps.audit.models import AuditEvent
 from apps.identity_access.authority_lock import lock_user_authorities
 from apps.identity_access.models import Role, User, UserRole
 from apps.identity_access.scope import get_authority_snapshot
+from apps.organisations.models import ServiceLocation
 from apps.tickets import assignment as assignment_service
 from apps.tickets.assignment import (
     AssignmentActor,
@@ -497,6 +498,44 @@ def test_system_assignment_revalidates_target_and_records_system_actor(basic_wor
     result.ticket.refresh_from_db()
     assert result.ticket.status.code == "triage"
     assert not TransitionHistory.objects.filter(ticket=ticket).exists()
+
+
+def test_routing_reuses_locked_owner_eligibility_without_changing_owner_only_contract(
+    basic_world,
+):
+    actor = _user(["ops-supervisors"])
+    target = _user(["ops-agents"])
+    destination = ServiceLocation.objects.create(
+        office=basic_world["office"],
+        name="Shared allocation writer queue",
+    )
+    ticket = _ticket(basic_world)
+
+    routed = assignment_service.route_ticket(
+        ticket_id=ticket.id,
+        actor=actor,
+        queue_id=destination.id,
+        assignee_id=target.id,
+        expected_updated_at=ticket.updated_at,
+        reason="Assign while routing.",
+    )
+    assert routed.ticket.queue_id == destination.id
+    assert routed.ticket.assignee_id == target.id
+
+    reassigned = assign_ticket(
+        ticket_id=ticket.id,
+        actor=actor,
+        assignee_id=None,
+        expected_updated_at=routed.ticket.updated_at,
+        reason="Owner-only release.",
+    )
+    assert reassigned.ticket.queue_id == destination.id
+    assert reassigned.ticket.assignee_id is None
+    assert [event.event_type for event in ticket.custody_events.order_by("sequence")] == [
+        "queue_changed",
+        "assigned",
+        "unassigned",
+    ]
 
 
 def _set_bounded_database_timeouts() -> None:

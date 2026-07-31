@@ -39,8 +39,9 @@ outbox side effects.
 Staff accounts are deactivated rather than hard-deleted. User deletion is
 disabled in Django admin, and `Ticket.assignee` uses `PROTECT`; assigned-user
 deletion through application code fails and rolls back instead of silently
-setting the ticket owner to null. Explicit assignment and unassignment remain
-the only supported ownership paths and record their custody evidence.
+setting the ticket owner to null. Explicit assignment, unassignment, and
+guarded routing remain the only supported post-creation allocation paths and
+record their custody evidence.
 
 Out-of-scope ticket lookups, including attachment lookups, return `404` so a
 caller cannot use the response to enumerate another domain.
@@ -94,7 +95,9 @@ apply before an object action runs.
 | `/api/v1/tickets/kanban/` | GET | Same scoped ticket queryset; terminal tickets excluded |
 | `/api/v1/tickets/{number}/assignees/` | GET | Scoped ticket; returns active non-auditors eligible for that ticket's domain |
 | `/api/v1/tickets/{number}/work-state/` | PATCH | Scoped ticket plus active Operational/IT agent or lead group for the ticket domain, or `system-admins`; auditor and inactive users are denied |
-| `/api/v1/tickets/{number}/work-state/` reassignment/confidentiality | PATCH | `ops-supervisors`, `it-leads`, or `system-admins`, after the work-state check; self-assignment uses the server-provided capability and assignee ID |
+| `/api/v1/tickets/{number}/work-state/` legacy assignment | PATCH | Assignment-only payloads delegate to the guarded assignment service for one compatibility release; mixed assignment/work-state payloads fail with `assignment_must_be_separate` |
+| `/api/v1/tickets/{number}/assignment/` | POST | Scoped ticket plus server-side assignment authority and exact active target eligibility; reassignment and unassignment require a reason |
+| `/api/v1/tickets/{number}/routing/` | POST | Scoped ticket plus assignment authority, exact destination authority, resulting-owner eligibility, reason, and optimistic timestamp |
 | `/api/v1/tickets/{number}/transition/` | POST | Scoped ticket, active actor, active transition from the current state, and any transition `required_role`; admin scope bypasses the transition role but not persisted scope dimensions |
 | `/api/v1/tickets/{number}/activity/` | GET | Scoped ticket; returns the internal chronological timeline (public reply, internal note, workflow, custody, attachment, and relationship categories). Relationship identifiers are included only when the counterpart is also visible. |
 | `/api/v1/tickets/{number}/messages/` | GET, POST | Scoped ticket; POST requires active domain mutation authority and revalidates scope on the locked ticket |
@@ -108,6 +111,45 @@ Work-state and transition mutations require the caller's observed
 timestamp and no mutation. Ticket detail and list responses expose only
 server-derived capabilities and available transitions; the frontend does not
 grant lifecycle authority.
+
+## Internal assignment and queue-routing matrix
+
+Assignment and queue-routing authority is always checked by the server. A
+non-null queue change requires an active destination in the ticket's office
+and an effective scope covering the resulting domain, office, service, queue,
+and Restricted visibility. Clearing a queue performs no destination lookup,
+but requires current-ticket scope, `can_assign`, and a matching effective
+scope without a queue constraint. A paired owner change must also leave the
+resulting owner eligible, including eligibility for the queue-less result.
+
+| Actor / target | Actor permission | Target eligible | Domain | Office | Service | Queue | Restricted | Reason | Custody actor |
+|---|---|---|---|---|---|---|---|---|---|
+| Operational agent | Work/self-assign only | Yes | Exact Operational | Exact | Exact | Exact/result | Grant required | Reassignment required | User |
+| Operational supervisor | Assign and route | Yes | Exact Operational | Exact | Exact | Destination/unqueue scope | Supervisor grant | Required for routing/reassignment | User |
+| IT agent | Work/self-assign only | Yes | Exact IT | Exact | Exact | Exact/result | Grant required | Reassignment required | User |
+| IT lead | Assign and route | Yes | Exact IT | Exact | Exact | Destination/unqueue scope | Lead grant | Required for routing/reassignment | User |
+| Master | Work/self-assign only | Yes | Exact grant | Exact | Exact | Exact/result | Exact grant | Reassignment required | User |
+| Deputy Master | Work/self-assign only | Yes | Exact grant | Exact | Exact | Exact/result | Exact grant | Reassignment required | User |
+| Assistant Master | Work/self-assign only | Yes | Exact grant | Exact | Exact | Exact/result | Exact grant | Reassignment required | User |
+| Assistant Accountant | Work/self-assign only | Yes | Exact grant | Exact | Exact | Exact/result | Exact grant | Reassignment required | User |
+| Accountant | Work/self-assign only | Yes | Exact grant | Exact | Exact | Exact/result | Exact grant | Reassignment required | User |
+| Senior Accountant | Work/self-assign only | Yes | Exact grant | Exact | Exact | Exact/result | Exact grant | Reassignment required | User |
+| Principal Accountant | Work/self-assign only | Yes | Exact grant | Exact | Exact | Exact/result | Exact grant | Reassignment required | User |
+| Financial Controller | Work/self-assign only | Yes | Exact grant | Exact | Exact | Exact/result | Exact grant | Reassignment required | User |
+| Estate Examiner | Work/self-assign only | Yes | Exact grant | Exact | Exact | Exact/result | Exact grant | Reassignment required | User |
+| Records Clerk | Work/self-assign only | Yes | Exact grant | Exact | Exact | Exact/result | Exact grant | Reassignment required | User |
+| Data Clerk | Work/self-assign only | Yes | Exact grant | Exact | Exact | Exact/result | Exact grant | Reassignment required | User |
+| Admin-only | Assign/route only with active scoped identity | No by admin status alone | Admin scope | Covered | Covered | Destination/unqueue scope | Covered | Required | User |
+| Auditor | Read only | No | Read-only scope | Read only | Read only | Read only | Read only | N/A | None |
+| Inactive user | None | No | None | None | None | None | None | N/A | None |
+| Expired role | None from expired grant | No | None from grant | None | None | None | None | N/A | None |
+| Automation | Named system allocation only | Revalidated | Ticket exact | Ticket exact | Ticket exact | Active same-office result | Target grant | Configured or deterministic fallback | System |
+| Direct API caller | Same checks as service | Revalidated | Exact | Exact | Exact | Exact/result | Exact | Required | User |
+
+`create_ticket` and IT-child creation are initial-state constructors. Every
+post-creation queue mutation goes through `route_ticket` or
+`route_ticket_by_system`; generic work-state, IT-child synchronization, and
+automation do not write ownership or queues directly.
 
 ## Custody and audit evidence
 
@@ -131,10 +173,10 @@ direct SQL ticket deletes fail closed.
 Unresolved legacy owner/queue IDs remain hashed custody snapshots with null
 labels, and unresolved historical human subjects are shown as unverified
 legacy actors rather than system processes.
-The current custody integration covers creation, workflow, approved IT-child
-workflow, and SLA escalation. Assignment/queue integration is explicitly a
-Plan 2 pending change, not an authorization for current assignment writers to
-bypass the future guarded assignment service.
+The custody integration covers creation, assignment, reassignment,
+unassignment, queue routing, workflow, approved IT-child workflow, and SLA
+escalation. Paired routing records `queue_changed` before the owner event with
+one timestamp, one source audit record, and immutable queue/owner snapshots.
 
 The base ticket viewset deliberately exposes list and retrieve only. Collection
 create and inherited detail update/delete methods are not routes; unsupported

@@ -88,17 +88,28 @@ def _apply_action(rule: AutomationRule, ticket: Ticket) -> bool:
             user = User.objects.get(username=username)
         except User.DoesNotExist:
             return False
-        previous_assignee = ticket.assignee.username if ticket.assignee else None
-        ticket.assignee = user
-        ticket.save(update_fields=["assignee", "updated_at"])
-        record_ticket_event(
-            ticket=ticket,
-            actor_subject=actor_subject,
-            action="ticket.assignment.changed",
-            before={"assignee": previous_assignee},
-            after={"assignee": user.username},
-            metadata={"rule": rule.name},
+        from apps.tickets.assignment import assign_ticket_by_system
+        from apps.tickets.services import TicketValidationError
+
+        configured_reason = rule.action_params.get("reason")
+        reason = (
+            configured_reason.strip()
+            if isinstance(configured_reason, str)
+            else ""
         )
+        if not reason:
+            reason = f"Automation rule {rule.id} assigned ticket to {username}."
+        try:
+            assign_ticket_by_system(
+                ticket_id=ticket.id,
+                assignee_id=user.id,
+                actor_subject=f"automation:{rule.id}",
+                actor_display_name=f"Automation rule: {rule.name}",
+                source_process="automation.rule",
+                reason=reason,
+            )
+        except TicketValidationError:
+            return False
         return True
     if rule.action == AutomationRule.Action.SET_PRIORITY:
         p = rule.action_params.get("priority")

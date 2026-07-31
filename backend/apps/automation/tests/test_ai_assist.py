@@ -3,16 +3,16 @@ from __future__ import annotations
 
 import pytest
 
-from apps.automation.ai_assist import AiSuggestion, apply_suggestion, record_suggestion
 from apps.audit.models import AuditEvent
+from apps.automation.ai_assist import AiSuggestion, apply_suggestion, record_suggestion
 
 pytestmark = pytest.mark.django_db
 
 
 def test_record_suggestion_creates_audit_event(basic_world):
-    from apps.catalogue.models import Service, RequestType
-    from apps.organisations.models import Office
+    from apps.catalogue.models import RequestType, Service
     from apps.contacts.models import Contact
+    from apps.organisations.models import Office
     from apps.tickets import services
 
     service = Service.objects.filter(domain="operational").first()
@@ -41,9 +41,9 @@ def test_record_suggestion_creates_audit_event(basic_world):
 
 
 def test_apply_suggestion_requires_kind_payload(basic_world):
-    from apps.catalogue.models import Service, RequestType
-    from apps.organisations.models import Office
+    from apps.catalogue.models import RequestType, Service
     from apps.contacts.models import Contact
+    from apps.organisations.models import Office
     from apps.tickets import services
 
     service = Service.objects.filter(domain="operational").first()
@@ -155,13 +155,6 @@ def test_approved_ai_reply_uses_message_service_and_records_one_pair(basic_world
 @pytest.mark.parametrize(
     ("action", "params", "event_type", "before", "after"),
     [
-        (
-            "assign_user",
-            {"username": "automation-user"},
-            "ticket.assignment.changed",
-            None,
-            "automation-user",
-        ),
         ("set_priority", {"priority": "P1"}, "ticket.priority.changed", "P3", "P1"),
     ],
 )
@@ -177,12 +170,10 @@ def test_automation_ticket_changes_record_before_after_pairs(
     from apps.automation.views import evaluate_rules
     from apps.catalogue.models import RequestType, Service
     from apps.contacts.models import Contact
-    from apps.identity_access.models import User
     from apps.organisations.models import Office
     from apps.tickets import services
     from apps.tickets.models import OutboxEvent
 
-    User.objects.create(username="automation-user", keycloak_subject="automation-user")
     service = Service.objects.filter(domain="operational").first()
     ticket = services.create_ticket(
         domain="operational", title="Automation", description="",
@@ -205,3 +196,124 @@ def test_automation_ticket_changes_record_before_after_pairs(
     assert OutboxEvent.objects.filter(
         aggregate_id=str(ticket.id), event_type=event_type,
     ).count() == 1
+
+
+def test_automation_cannot_assign_an_ineligible_username(basic_world):
+    from apps.automation.models import AutomationRule
+    from apps.automation.views import evaluate_rules
+    from apps.catalogue.models import RequestType, Service
+    from apps.contacts.models import Contact
+    from apps.identity_access.models import User
+    from apps.organisations.models import Office
+    from apps.tickets import services
+    from apps.tickets.models import OutboxEvent, TicketCustodyEvent
+
+    target = User.objects.create(
+        username="ineligible-automation-user",
+        keycloak_subject="ineligible-automation-user",
+        keycloak_groups=["it-agents"],
+    )
+    service = Service.objects.filter(domain="operational").first()
+    ticket = services.create_ticket(
+        domain="operational",
+        title="Automation ineligible assignment",
+        description="",
+        requester=Contact.objects.first(),
+        service=service,
+        request_type=RequestType.objects.filter(service=service).first(),
+        office=Office.objects.filter(is_active=True).first(),
+        channel="web",
+        actor_subject="creator",
+    )
+    initial_audits = AuditEvent.objects.filter(object_id=str(ticket.id)).count()
+    initial_outbox = OutboxEvent.objects.filter(aggregate_id=str(ticket.id)).count()
+    initial_custody = TicketCustodyEvent.objects.filter(ticket=ticket).count()
+    rule = AutomationRule.objects.create(
+        name="Ineligible owner",
+        trigger="ticket.created",
+        action="assign_user",
+        action_params={"username": target.username},
+        is_active=True,
+    )
+
+    assert evaluate_rules(trigger="ticket.created", ticket=ticket) == 0
+
+    ticket.refresh_from_db()
+    assert ticket.assignee_id is None
+    assert AuditEvent.objects.filter(object_id=str(ticket.id)).count() == initial_audits
+    assert OutboxEvent.objects.filter(aggregate_id=str(ticket.id)).count() == initial_outbox
+    assert TicketCustodyEvent.objects.filter(ticket=ticket).count() == initial_custody
+    execution = rule.executions.get()
+    assert execution.success is False
+
+
+@pytest.mark.parametrize(
+    ("configured_reason", "expected_reason"),
+    [
+        (None, None),
+        ("Configured assignment reason", "Configured assignment reason"),
+        (123, None),
+        ("", None),
+        ("   ", None),
+    ],
+)
+def test_automation_assignment_uses_guarded_system_custody_and_reason_fallback(
+    basic_world,
+    configured_reason,
+    expected_reason,
+):
+    from apps.automation.models import AutomationRule
+    from apps.automation.views import evaluate_rules
+    from apps.catalogue.models import RequestType, Service
+    from apps.contacts.models import Contact
+    from apps.identity_access.models import User
+    from apps.organisations.models import Office
+    from apps.tickets import services
+    from apps.tickets.models import TicketCustodyEvent
+
+    username = f"eligible-automation-{User.objects.count()}"
+    target = User.objects.create(
+        username=username,
+        keycloak_subject=f"subject-{username}",
+        display_name="Automated Eligible Owner",
+        keycloak_groups=["ops-agents"],
+    )
+    service = Service.objects.filter(domain="operational").first()
+    ticket = services.create_ticket(
+        domain="operational",
+        title="Automation guarded assignment",
+        description="",
+        requester=Contact.objects.first(),
+        service=service,
+        request_type=RequestType.objects.filter(service=service).first(),
+        office=Office.objects.filter(is_active=True).first(),
+        channel="web",
+        actor_subject="creator",
+    )
+    params: dict[str, object] = {"username": username}
+    if configured_reason is not None:
+        params["reason"] = configured_reason
+    rule = AutomationRule.objects.create(
+        name="Assign guarded owner",
+        trigger="ticket.created",
+        action="assign_user",
+        action_params=params,
+        is_active=True,
+    )
+    fallback = f"Automation rule {rule.id} assigned ticket to {username}."
+
+    assert evaluate_rules(trigger="ticket.created", ticket=ticket) == 1
+
+    ticket.refresh_from_db()
+    assert ticket.assignee_id == target.id
+    event = TicketCustodyEvent.objects.get(ticket=ticket, event_type="assigned")
+    assert event.actor_kind == "system"
+    assert event.actor_subject == f"automation:{rule.id}"
+    assert event.actor_display_name == "Automation rule: Assign guarded owner"
+    assert event.source_process == "automation.rule"
+    assert event.reason == (expected_reason or fallback)
+    audit = AuditEvent.objects.get(
+        object_id=str(ticket.id),
+        action="ticket.assignment.changed",
+    )
+    assert audit.payload["metadata"]["reason"] == (expected_reason or fallback)

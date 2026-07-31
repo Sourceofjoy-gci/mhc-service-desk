@@ -11,6 +11,7 @@ from django.utils import timezone
 from apps.identity_access.models import Role, User, UserRole
 from apps.identity_access.scope import get_authority_snapshot
 from apps.organisations.models import Office, ServiceLocation
+from apps.tickets import permissions as ticket_permissions
 from apps.tickets.models import Ticket
 from apps.tickets.permissions import (
     can_add_ticket_content,
@@ -137,6 +138,105 @@ def test_inactive_elevated_user_has_no_mutating_permissions(basic_world):
     assert can_reassign(user) is False
     assert can_change_confidentiality(user) is False
     assert can_update_work_state(user, ticket) is False
+
+
+def test_queue_routing_requires_assignment_authority_and_exact_destination_scope(
+    basic_world,
+):
+    current_queue = ServiceLocation.objects.create(
+        office=basic_world["office"],
+        name="Current permission queue",
+    )
+    destination = ServiceLocation.objects.create(
+        office=basic_world["office"],
+        name="Destination permission queue",
+    )
+    ticket = Ticket.objects.create(
+        number="OP-202607-900003",
+        domain="operational",
+        title="Routing permissions",
+        status=Status.objects.get(domain="operational", code="new"),
+        channel="internal",
+        requester=basic_world["contact"],
+        service=basic_world["gen_info"],
+        request_type=basic_world["gen_info"].request_types.get(),
+        office=basic_world["office"],
+        queue=current_queue,
+    )
+    actor = _user(groups=[])
+    role = Role.objects.create(
+        keycloak_role="supervisor-operational",
+        name="Scoped routing supervisor",
+        scopes=[
+            {
+                "domain": ticket.domain,
+                "office": str(ticket.office_id),
+                "service": str(ticket.service_id),
+                "queue": str(current_queue.id),
+            },
+            {
+                "domain": ticket.domain,
+                "office": str(ticket.office_id),
+                "service": str(ticket.service_id),
+                "queue": str(destination.id),
+            },
+        ],
+    )
+    UserRole.objects.create(user=actor, role=role, office=ticket.office)
+
+    assert ticket_permissions.can_route_ticket(actor, ticket, destination) is True
+
+    role.scopes = [role.scopes[0]]
+    role.save(update_fields=["scopes"])
+    assert ticket_permissions.can_route_ticket(actor, ticket, destination) is False
+
+
+def test_unqueue_permission_requires_a_matching_non_queue_constrained_grant(basic_world):
+    queue = ServiceLocation.objects.create(
+        office=basic_world["office"],
+        name="Queue constrained permission",
+    )
+    ticket = Ticket.objects.create(
+        number="OP-202607-900004",
+        domain="operational",
+        title="Unqueue permissions",
+        status=Status.objects.get(domain="operational", code="new"),
+        channel="internal",
+        requester=basic_world["contact"],
+        service=basic_world["gen_info"],
+        request_type=basic_world["gen_info"].request_types.get(),
+        office=basic_world["office"],
+        queue=queue,
+    )
+    actor = _user(groups=[])
+    role = Role.objects.create(
+        keycloak_role="supervisor-operational",
+        name="Queue constrained supervisor",
+        scopes=[
+            {
+                "domain": ticket.domain,
+                "office": str(ticket.office_id),
+                "service": str(ticket.service_id),
+                "queue": str(queue.id),
+            }
+        ],
+    )
+    UserRole.objects.create(user=actor, role=role, office=ticket.office)
+
+    assert ticket_permissions.can_unqueue_ticket(actor, ticket) is False
+    assert ticket_permissions.can_route_ticket(actor, ticket, None) is False
+
+    role.scopes = [
+        *role.scopes,
+        {
+            "domain": ticket.domain,
+            "office": str(ticket.office_id),
+            "service": str(ticket.service_id),
+        },
+    ]
+    role.save(update_fields=["scopes"])
+    assert ticket_permissions.can_unqueue_ticket(actor, ticket) is True
+    assert ticket_permissions.can_route_ticket(actor, ticket, None) is True
 
 
 @pytest.mark.parametrize("role_key", DESIGNATION_KEYS)

@@ -1,8 +1,10 @@
 """Regression tests for ticket mutation and API integrity boundaries."""
 from __future__ import annotations
 
+import ast
 from collections.abc import Callable
 from datetime import UTC, datetime
+from pathlib import Path
 from uuid import uuid4
 
 import pytest
@@ -106,7 +108,6 @@ def test_ticket_collection_does_not_advertise_unsupported_create_route(
             "next_action_at": None,
         },
         {
-            "assignee": None,
             "confidentiality": Ticket.Confidentiality.NORMAL,
         },
     ],
@@ -156,6 +157,77 @@ def test_empty_work_state_patch_returns_unchanged_representation(basic_world) ->
     assert ticket.updated_at == previous_updated_at
     assert not AuditEvent.objects.filter(object_id=str(ticket.id)).exists()
     assert not OutboxEvent.objects.filter(aggregate_id=str(ticket.id)).exists()
+
+
+def test_supported_ticket_boundaries_have_no_direct_post_creation_allocation_writes() -> None:
+    """A direct owner/queue mutation would bypass eligibility and custody."""
+    assert services.WORK_STATE_FIELDS.isdisjoint(
+        {"assignee", "assignee_id", "queue", "queue_id"}
+    )
+    apps_root = Path(__file__).resolve().parents[2]
+    module_paths = (
+        apps_root / "tickets" / "services.py",
+        apps_root / "tickets" / "it_child.py",
+        apps_root / "tickets" / "api.py",
+        apps_root / "tickets" / "views.py",
+        apps_root / "automation" / "views.py",
+    )
+    protected_names = {"assignee", "assignee_id", "queue", "queue_id"}
+    violations: list[str] = []
+
+    for module_path in module_paths:
+        tree = ast.parse(module_path.read_text(encoding="utf-8"), filename=str(module_path))
+        for node in ast.walk(tree):
+            targets: list[ast.expr] = []
+            if isinstance(node, ast.Assign):
+                targets.extend(node.targets)
+            elif isinstance(node, ast.AnnAssign):
+                targets.append(node.target)
+            elif isinstance(node, ast.AugAssign):
+                targets.append(node.target)
+            for target in targets:
+                for nested in ast.walk(target):
+                    if isinstance(nested, ast.Attribute) and nested.attr in protected_names:
+                        violations.append(
+                            f"{module_path.relative_to(apps_root)}:{node.lineno}:{nested.attr}"
+                        )
+
+            if not isinstance(node, ast.Call):
+                continue
+            if (
+                isinstance(node.func, ast.Name)
+                and node.func.id == "setattr"
+                and len(node.args) >= 2
+                and isinstance(node.args[1], ast.Constant)
+                and node.args[1].value in protected_names
+            ):
+                violations.append(
+                    f"{module_path.relative_to(apps_root)}:{node.lineno}:setattr"
+                )
+            if isinstance(node.func, ast.Attribute) and node.func.attr == "update":
+                for keyword in node.keywords:
+                    if keyword.arg in protected_names:
+                        violations.append(
+                            f"{module_path.relative_to(apps_root)}:{node.lineno}:update({keyword.arg})"
+                        )
+            if isinstance(node.func, ast.Attribute) and node.func.attr == "save":
+                update_fields = next(
+                    (keyword.value for keyword in node.keywords if keyword.arg == "update_fields"),
+                    None,
+                )
+                if isinstance(update_fields, ast.List | ast.Tuple | ast.Set):
+                    names = {
+                        element.value
+                        for element in update_fields.elts
+                        if isinstance(element, ast.Constant)
+                        and isinstance(element.value, str)
+                    }
+                    for protected in sorted(names & protected_names):
+                        violations.append(
+                            f"{module_path.relative_to(apps_root)}:{node.lineno}:save({protected})"
+                        )
+
+    assert violations == []
 
 
 def test_work_state_revalidates_canonical_scope_when_ticket_moves_after_read(

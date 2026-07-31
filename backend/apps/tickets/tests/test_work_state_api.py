@@ -10,7 +10,7 @@ from rest_framework.test import APIClient
 
 from apps.audit.models import AuditEvent
 from apps.identity_access.models import Role, User, UserRole
-from apps.tickets.models import OutboxEvent, Ticket
+from apps.tickets.models import OutboxEvent, Ticket, TicketCustodyEvent
 from apps.workflow.models import Status
 
 pytestmark = pytest.mark.django_db
@@ -122,7 +122,6 @@ def test_work_state_returns_refreshed_ticket_detail(basic_world):
         ticket,
         {
             "updated_at": ticket.updated_at.isoformat(),
-            "assignee": str(actor.id),
             "team": "Operations",
             "next_action": "Call requester",
         },
@@ -130,11 +129,70 @@ def test_work_state_returns_refreshed_ticket_detail(basic_world):
 
     assert response.status_code == 200
     assert response.data["number"] == ticket.number
-    assert response.data["assignee"] == actor.id
+    assert response.data["assignee"] is None
     assert response.data["team"] == "Operations"
     assert response.data["next_action"] == "Call requester"
     assert response.data["updated_at"] != ticket.updated_at.isoformat()
-    assert response.data["capabilities"]["can_self_assign"] is False
+    assert response.data["capabilities"]["can_self_assign"] is True
+
+
+def test_work_state_rejects_mixed_assignment_payload_with_stable_separation_error(
+    basic_world,
+):
+    actor = _user(["ops-agents"])
+    ticket = _ticket(basic_world)
+    previous_updated_at = ticket.updated_at
+
+    response = _patch(
+        _client(actor),
+        ticket,
+        {
+            "updated_at": ticket.updated_at.isoformat(),
+            "assignee": str(actor.id),
+            "team": "Operations",
+        },
+    )
+
+    assert response.status_code == 400
+    assert response.data == {
+        "code": "assignment_must_be_separate",
+        "detail": "Assignment must be submitted separately.",
+        "fields": {
+            "assignee": ["Use the ticket assignment action for owner changes."],
+        },
+        "correlation_id": CORRELATION_ID,
+    }
+    ticket.refresh_from_db()
+    assert ticket.assignee_id is None
+    assert ticket.team == ""
+    assert ticket.updated_at == previous_updated_at
+    assert not AuditEvent.objects.filter(object_id=str(ticket.id)).exists()
+    assert not OutboxEvent.objects.filter(aggregate_id=str(ticket.id)).exists()
+    assert not TicketCustodyEvent.objects.filter(ticket=ticket).exists()
+
+
+def test_assignment_only_legacy_work_state_delegates_to_atomic_assignment(basic_world):
+    actor = _user(["ops-supervisors"], display_name="Legacy Supervisor")
+    target = _user(["ops-agents"], display_name="Legacy Owner")
+    ticket = _ticket(basic_world)
+
+    response = _patch(
+        _client(actor),
+        ticket,
+        {
+            "updated_at": ticket.updated_at.isoformat(),
+            "assignee": str(target.id),
+        },
+    )
+
+    assert response.status_code == 200
+    assert response.data["assignee"] == target.id
+    ticket.refresh_from_db()
+    assert ticket.assignee_id == target.id
+    event = TicketCustodyEvent.objects.get(ticket=ticket)
+    assert event.event_type == "assigned"
+    assert event.actor_subject == actor.keycloak_subject
+    assert event.source_process == "ticket.assignment"
 
 
 def test_work_state_returns_field_error_for_ineligible_target(basic_world):
@@ -152,7 +210,7 @@ def test_work_state_returns_field_error_for_ineligible_target(basic_world):
     assert response.data == {
         "code": "invalid_work_state",
         "detail": "Work state is invalid.",
-        "fields": {"assignee": ["Select a valid assignee."]},
+        "fields": {"assignee": ["Select an eligible assignee."]},
         "correlation_id": CORRELATION_ID,
     }
 
@@ -382,8 +440,9 @@ def test_capabilities_use_request_local_group_snapshot(basic_world):
         ticket,
         {"updated_at": ticket.updated_at.isoformat(), "assignee": str(user.id)},
     )
-    assert update.status_code == 200
-    assert update.data["assignee"] == user.id
+    assert update.status_code == 404
+    ticket.refresh_from_db()
+    assert ticket.assignee_id is None
 
 
 def test_persisted_auditor_has_no_mutation_capabilities(basic_world):

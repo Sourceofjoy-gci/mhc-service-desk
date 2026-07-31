@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+from copy import copy
 from dataclasses import dataclass
 from datetime import datetime
 from types import SimpleNamespace
@@ -32,6 +33,7 @@ from apps.identity_access.scope import (
 from apps.identity_access.scope import (
     _validated_role_scopes as validated_role_scopes,
 )
+from apps.organisations.models import ServiceLocation
 
 from .custody import CustodyParty
 from .models import Ticket
@@ -608,6 +610,53 @@ def eligible_assignee_candidate(
         user,
         authority=snapshot,
         require_database_scope_check=False,
+    )
+
+
+def _ticket_with_proposed_queue(
+    ticket: Ticket,
+    queue: ServiceLocation | None,
+) -> Ticket:
+    proposed = copy(ticket)
+    proposed.queue_id = queue.id if queue is not None else None
+    proposed._state.fields_cache.pop("queue", None)
+    if queue is not None:
+        proposed._state.fields_cache["queue"] = queue
+    return proposed
+
+
+def eligible_assignee_candidate_for_queue(
+    ticket: Ticket,
+    user: User,
+    queue: ServiceLocation | None,
+    *,
+    snapshot: AuthoritySnapshot,
+) -> AssigneeCandidate | None:
+    """Resolve a locked candidate against the explicit resulting queue."""
+    return _candidate_for_user(
+        _ticket_with_proposed_queue(ticket, queue),
+        user,
+        authority=snapshot,
+        require_database_scope_check=False,
+    )
+
+
+def is_eligible_assignee_for_queue(
+    ticket: Ticket,
+    user: User,
+    queue: ServiceLocation | None,
+) -> bool:
+    """Revalidate one target against an explicit resulting queue."""
+    if is_auditor_identity(user):
+        return False
+    return (
+        eligible_assignee_candidate_for_queue(
+            ticket,
+            user,
+            queue,
+            snapshot=get_authority_snapshot(user),
+        )
+        is not None
     )
 
 

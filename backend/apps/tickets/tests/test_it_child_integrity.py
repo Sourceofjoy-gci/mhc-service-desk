@@ -59,11 +59,11 @@ def _office_actor(office: Office, *, subject: str) -> User:
     actor = User.objects.create(
         username=subject,
         keycloak_subject=subject,
-        keycloak_groups=["ops-agents"],
+        keycloak_groups=[],
     )
-    actor._groups = ["ops-agents"]
+    actor._groups = []
     role = Role.objects.create(
-        keycloak_role=f"agent-operational-{subject}",
+        keycloak_role="agent-operational",
         name=f"Office agent {subject}",
         scopes=[{"domain": "operational"}],
     )

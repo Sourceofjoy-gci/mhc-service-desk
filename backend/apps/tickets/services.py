@@ -39,9 +39,7 @@ from .models import Ticket, TicketLink, TicketMessage, TicketNote, Watcher
 from .permissions import (
     can_add_ticket_content,
     can_change_confidentiality,
-    can_reassign,
     can_update_work_state,
-    eligible_assignee_queryset,
 )
 from .workflow import available_transitions
 
@@ -217,7 +215,6 @@ class TicketValidationError(Exception):
 
 
 WORK_STATE_FIELDS = {
-    "assignee",
     "team",
     "waiting_reason",
     "blocked_reason",
@@ -250,12 +247,6 @@ def _validate_work_state_changes(changes: dict[str, WorkStateValue]) -> None:
             fields[field] = [f"Ensure this field has no more than {limit} characters."]
     if "blocked_reason" in changes and not isinstance(changes["blocked_reason"], str):
         fields["blocked_reason"] = ["Must be a string."]
-    if (
-        "assignee" in changes
-        and changes["assignee"] is not None
-        and not isinstance(changes["assignee"], UUID)
-    ):
-        fields["assignee"] = ["Select a valid assignee."]
     if (
         "next_action_at" in changes
         and changes["next_action_at"] is not None
@@ -305,29 +296,7 @@ def update_work_state(
     after: dict[str, WorkStateValue] = {}
     update_fields: list[str] = []
 
-    if "assignee" in changes:
-        target_value = changes["assignee"]
-        if target_value is not None and not isinstance(target_value, UUID):
-            raise TicketValidationError({"assignee": ["Select a valid assignee."]})
-        target_id = target_value
-        if locked.assignee_id != target_id:
-            if target_id is None:
-                if not can_reassign(actor, ticket=locked, request=request):
-                    raise TicketPermissionError
-            else:
-                is_self_assignment = locked.assignee_id is None and target_id == actor.id
-                if is_self_assignment:
-                    pass
-                elif not can_reassign(actor, ticket=locked, request=request):
-                    raise TicketPermissionError
-                elif not eligible_assignee_queryset(locked).filter(id=target_id).exists():
-                    raise TicketValidationError({"assignee": ["Select a valid assignee."]})
-            before["assignee"] = locked.assignee_id
-            locked.assignee_id = target_id
-            after["assignee"] = locked.assignee_id
-            update_fields.append("assignee")
-
-    for field in WORK_STATE_FIELDS - {"assignee"}:
+    for field in WORK_STATE_FIELDS:
         if field not in changes:
             continue
         current = getattr(locked, field)
