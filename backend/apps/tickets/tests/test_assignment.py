@@ -3,6 +3,7 @@ from __future__ import annotations
 from collections.abc import Callable
 from datetime import UTC, datetime, timedelta
 from threading import Event, Thread
+from types import SimpleNamespace
 from uuid import UUID, uuid4
 
 import pytest
@@ -424,6 +425,69 @@ def test_supplied_authority_snapshot_cannot_bypass_locked_actor_revalidation(
     ticket.refresh_from_db()
     assert ticket.assignee_id is None
     assert _assignment_rows(ticket) == (0, 0, 0)
+
+
+def test_cached_auditor_snapshot_stays_denied_after_operator_grant_remains(
+    basic_world,
+):
+    actor = _user()
+    target = _user(["ops-agents"])
+    ticket = _ticket(basic_world, status="triage")
+    exact_scope = {
+        "domain": ticket.domain,
+        "office": str(ticket.office_id),
+        "service": str(ticket.service_id),
+    }
+    operator_role = Role.objects.create(
+        keycloak_role="supervisor-operational",
+        name="Exact operational supervisor",
+        scopes=[exact_scope],
+    )
+    auditor_role = Role.objects.create(
+        keycloak_role="auditors",
+        name="Auditor",
+        scopes=[exact_scope],
+    )
+    UserRole.objects.create(
+        user=actor,
+        role=operator_role,
+        office=ticket.office,
+    )
+    auditor_assignment = UserRole.objects.create(
+        user=actor,
+        role=auditor_role,
+        office=ticket.office,
+    )
+    request = SimpleNamespace(user=actor)
+    cached_snapshot = get_authority_snapshot(actor, request=request)
+    auditor_assignment.delete()
+    fresh_snapshot = get_authority_snapshot(actor)
+    original_updated_at = ticket.updated_at
+
+    assert cached_snapshot.auditor_identity
+    assert "auditor" in cached_snapshot.capabilities
+    assert not fresh_snapshot.auditor_identity
+    assert "auditor" not in fresh_snapshot.capabilities
+    assert {grant.role_key for grant in fresh_snapshot.role_grants} == {
+        "supervisor-operational"
+    }
+    with pytest.raises(TicketPermissionError):
+        assign_ticket(
+            ticket_id=ticket.id,
+            actor=actor,
+            assignee_id=target.id,
+            expected_updated_at=ticket.updated_at,
+            request=request,
+        )
+
+    ticket.refresh_from_db()
+    assert ticket.assignee_id is None
+    assert ticket.status.code == "triage"
+    assert ticket.updated_at == original_updated_at
+    assert not AuditEvent.objects.filter(object_id=str(ticket.id)).exists()
+    assert not OutboxEvent.objects.filter(aggregate_id=str(ticket.id)).exists()
+    assert not TicketCustodyEvent.objects.filter(ticket=ticket).exists()
+    assert not TransitionHistory.objects.filter(ticket=ticket).exists()
 
 
 def test_target_is_revalidated_after_ticket_lock(basic_world, monkeypatch):

@@ -484,7 +484,9 @@ def assign_ticket(
     locked_actor = locked_actor_authority.user
     locked_actor_snapshot = locked_actor_authority.snapshot
     if (
-        request_local_auditor
+        authority.auditor_identity
+        or "auditor" in authority.capabilities
+        or request_local_auditor
         or locked_actor_snapshot.auditor_identity
         or "auditor" in locked_actor_snapshot.capabilities
     ):

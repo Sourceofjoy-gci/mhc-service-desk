@@ -11,9 +11,10 @@ from rest_framework.test import APIClient
 
 from apps.audit.models import AuditEvent
 from apps.identity_access.models import Role, User, UserRole
+from apps.identity_access.scope import ScopePermission, get_authority_snapshot
 from apps.organisations.models import Office, ServiceLocation
 from apps.tickets.models import OutboxEvent, Ticket, TicketCustodyEvent
-from apps.workflow.models import Status
+from apps.workflow.models import Status, TransitionHistory
 
 pytestmark = pytest.mark.django_db
 
@@ -652,6 +653,69 @@ def test_auditor_cannot_assign_readable_ticket(basic_world):
     ticket.refresh_from_db()
     assert ticket.assignee_id is None
     assert _side_effect_counts(ticket) == (0, 0, 0)
+
+
+def test_assignment_api_preserves_cached_auditor_denial_after_grant_removal(
+    basic_world,
+    monkeypatch,
+):
+    actor = _user()
+    target = _user(["ops-agents"])
+    ticket = _ticket(basic_world)
+    ticket.status = Status.objects.get(domain=ticket.domain, code="triage")
+    ticket.save(update_fields=["status"])
+    _grant(
+        actor,
+        role_key="supervisor-operational",
+        role_name="Exact operational supervisor",
+        scopes=[_scope(ticket)],
+        office=ticket.office,
+    )
+    auditor_assignment = _grant(
+        actor,
+        role_key="auditors",
+        role_name="Auditor",
+        scopes=[_scope(ticket)],
+        office=ticket.office,
+    )
+    original_updated_at = ticket.updated_at
+    cached_snapshots = []
+
+    def allow_after_caching_auditor(_permission, request, view):
+        del view
+        snapshot = get_authority_snapshot(request.user, request=request)
+        cached_snapshots.append(snapshot)
+        auditor_assignment.delete()
+        return True
+
+    monkeypatch.setattr(
+        ScopePermission,
+        "has_permission",
+        allow_after_caching_auditor,
+    )
+
+    response = _post_assignment(
+        _client(actor),
+        ticket,
+        assignee_id=target.id,
+    )
+
+    assert len(cached_snapshots) == 1
+    assert cached_snapshots[0].auditor_identity
+    assert "auditor" in cached_snapshots[0].capabilities
+    assert response.status_code == 403
+    assert response.data == {
+        "code": "ticket_action_forbidden",
+        "detail": "You cannot perform this ticket action.",
+        "fields": {},
+        "correlation_id": CORRELATION_ID,
+    }
+    ticket.refresh_from_db()
+    assert ticket.assignee_id is None
+    assert ticket.status.code == "triage"
+    assert ticket.updated_at == original_updated_at
+    assert _side_effect_counts(ticket) == (0, 0, 0)
+    assert not TransitionHistory.objects.filter(ticket=ticket).exists()
 
 
 @pytest.mark.parametrize(
