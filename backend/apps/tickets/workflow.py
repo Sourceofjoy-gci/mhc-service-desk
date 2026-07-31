@@ -11,6 +11,7 @@ from apps.identity_access.scope import (
 )
 from apps.workflow.models import Transition
 
+from .eligibility import matching_designation_role_keys
 from .models import Ticket
 from .permissions import user_groups
 
@@ -46,6 +47,12 @@ def available_transitions(
     groups = user_groups(actor)
     if any(scope.domain == "admin" for scope in authority.scopes):
         return transitions.order_by("to_status__order", "to_status__code")
+    if matching_designation_role_keys(ticket, actor):
+        groups.update(
+            {"ops-agents", "agent-operational"}
+            if ticket.domain == Ticket.Domain.OPERATIONAL
+            else {"it-agents", "agent-it"}
+        )
     return transitions.filter(
         Q(required_role="") | Q(required_role__in=groups)
     ).order_by("to_status__order", "to_status__code")

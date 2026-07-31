@@ -218,11 +218,6 @@ def test_assignees_are_filtered_by_ticket_domain(basic_world):
     assert response.data == {
         "results": [
             {
-                "id": str(administrator.id),
-                "username": administrator.username,
-                "display_name": "Administrator",
-            },
-            {
                 "id": str(eligible.id),
                 "username": eligible.username,
                 "display_name": "Eligible Agent",
@@ -234,6 +229,9 @@ def test_assignees_are_filtered_by_ticket_domain(basic_world):
             },
         ]
     }
+    assert str(administrator.id) not in {
+        result["id"] for result in response.data["results"]
+    }
 
 
 @pytest.mark.parametrize(
@@ -244,6 +242,7 @@ def test_assignees_are_filtered_by_ticket_domain(basic_world):
             {
                 "can_update_work_state": True,
                 "can_self_assign": True,
+                "can_assign": False,
                 "can_reassign": False,
                 "can_change_confidentiality": False,
                 "can_add_message": True,
@@ -256,6 +255,7 @@ def test_assignees_are_filtered_by_ticket_domain(basic_world):
             {
                 "can_update_work_state": True,
                 "can_self_assign": True,
+                "can_assign": True,
                 "can_reassign": True,
                 "can_change_confidentiality": True,
                 "can_add_message": True,
@@ -268,11 +268,25 @@ def test_assignees_are_filtered_by_ticket_domain(basic_world):
             {
                 "can_update_work_state": False,
                 "can_self_assign": False,
+                "can_assign": False,
                 "can_reassign": False,
                 "can_change_confidentiality": False,
                 "can_add_message": False,
                 "can_add_note": False,
                 "can_upload_attachment": False,
+            },
+        ),
+        (
+            ["system-admins"],
+            {
+                "can_update_work_state": True,
+                "can_self_assign": False,
+                "can_assign": True,
+                "can_reassign": True,
+                "can_change_confidentiality": True,
+                "can_add_message": True,
+                "can_add_note": True,
+                "can_upload_attachment": True,
             },
         ),
     ],
@@ -289,6 +303,61 @@ def test_ticket_detail_exposes_request_derived_capabilities(basic_world, groups,
     assert capabilities["self_assignee_id"] == (
         str(user.id) if expected["can_self_assign"] else None
     )
+    assert capabilities["self_assignee_detail"] == (
+        {
+            "id": str(user.id),
+            "username": user.username,
+            "display_name": user.username,
+            "designations": [
+                "Operational Agent"
+                if groups == ["ops-agents"]
+                else "Operational Supervisor"
+            ],
+            "team_labels": ["Operational"],
+        }
+        if expected["can_self_assign"]
+        else None
+    )
+    assert capabilities["can_assign"] is capabilities["can_reassign"]
+
+
+def test_exact_scope_designation_gets_self_assignment_confirmation_detail(basic_world):
+    user = _user([], display_name="Estate User")
+    role = Role.objects.create(
+        keycloak_role="estate-examiner",
+        name="Estate Examiner",
+        scopes=[
+            {
+                "domain": "operational",
+                "office": str(basic_world["office"].id),
+                "service": str(basic_world["gen_info"].id),
+            }
+        ],
+    )
+    UserRole.objects.create(user=user, role=role, office=basic_world["office"])
+    ticket = _ticket(basic_world)
+
+    response = _client(user).get(reverse("tickets-detail", args=[ticket.number]))
+
+    assert response.status_code == 200
+    assert response.data["capabilities"] == {
+        "can_update_work_state": True,
+        "can_self_assign": True,
+        "self_assignee_id": str(user.id),
+        "self_assignee_detail": {
+            "id": str(user.id),
+            "username": user.username,
+            "display_name": "Estate User",
+            "designations": ["Estate Examiner"],
+            "team_labels": ["Estate Administration"],
+        },
+        "can_assign": False,
+        "can_reassign": False,
+        "can_change_confidentiality": False,
+        "can_add_message": True,
+        "can_add_note": True,
+        "can_upload_attachment": True,
+    }
 
 
 def test_capabilities_use_request_local_group_snapshot(basic_world):
@@ -302,6 +371,7 @@ def test_capabilities_use_request_local_group_snapshot(basic_world):
     assert response.data["capabilities"]["can_update_work_state"] is True
     assert response.data["capabilities"]["can_self_assign"] is True
     assert response.data["capabilities"]["self_assignee_id"] == str(user.id)
+    assert response.data["capabilities"]["self_assignee_detail"]["id"] == str(user.id)
 
     update = _patch(
         _client(user),
@@ -325,6 +395,8 @@ def test_persisted_auditor_has_no_mutation_capabilities(basic_world):
         "can_update_work_state": False,
         "can_self_assign": False,
         "self_assignee_id": None,
+        "self_assignee_detail": None,
+        "can_assign": False,
         "can_reassign": False,
         "can_change_confidentiality": False,
         "can_add_message": False,

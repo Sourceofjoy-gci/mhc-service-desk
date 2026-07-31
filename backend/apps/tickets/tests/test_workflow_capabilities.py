@@ -17,6 +17,20 @@ from apps.workflow.models import Status, Transition, TransitionHistory
 
 pytestmark = pytest.mark.django_db
 
+DESIGNATION_KEYS = (
+    "master",
+    "deputy-master",
+    "assistant-master",
+    "assistant-accountant",
+    "accountant",
+    "senior-accountant",
+    "principal-accountant",
+    "financial-controller",
+    "estate-examiner",
+    "records-clerk",
+    "data-clerk",
+)
+
 
 def _user(groups: list[str]) -> User:
     user = User.objects.create(
@@ -105,6 +119,100 @@ def test_required_role_hides_transition_but_administrators_bypass_it(basic_world
     assert not available_transitions(ticket, _user(["ops-agents"])).exists()
     assert available_transitions(ticket, _user(["ops-supervisors"])).get() == transition
     assert available_transitions(ticket, _user(["system-admins"])).get() == transition
+
+
+@pytest.mark.parametrize("role_key", DESIGNATION_KEYS)
+def test_exact_scope_designation_executes_ordinary_agent_transition_and_note(
+    basic_world,
+    role_key,
+):
+    actor = _user([])
+    role = Role.objects.create(
+        keycloak_role=role_key,
+        name=role_key.replace("-", " ").title(),
+        scopes=[
+            {
+                "domain": "operational",
+                "office": str(basic_world["office"].id),
+                "service": str(basic_world["gen_info"].id),
+            }
+        ],
+    )
+    UserRole.objects.create(user=actor, role=role, office=basic_world["office"])
+    ticket = _ticket(basic_world)
+    transition = Transition.objects.get(
+        domain=ticket.domain,
+        from_status=ticket.status,
+        to_status__code="triage",
+    )
+    transition.required_role = "ops-agents"
+    transition.save(update_fields=["required_role"])
+
+    assert available_transitions(ticket, actor).get() == transition
+    note = services.add_internal_note(
+        ticket=ticket,
+        body="Internal designation note",
+        author_subject=actor.keycloak_subject,
+        actor=actor,
+    )
+    assert note.ticket_id == ticket.id
+    updated = services.transition_ticket(
+        ticket_id=ticket.id,
+        actor=actor,
+        expected_updated_at=ticket.updated_at,
+        to_status_code="triage",
+    )
+    assert updated.status.code == "triage"
+
+
+@pytest.mark.parametrize("dimension", ["domain", "office", "service", "queue"])
+def test_designation_workflow_is_denied_for_mismatched_exact_scope(
+    basic_world,
+    dimension,
+):
+    ticket = _ticket(basic_world)
+    queue = ServiceLocation.objects.create(
+        office=ticket.office,
+        name=f"Ticket queue {uuid4().hex}",
+    )
+    ticket.queue = queue
+    ticket.save(update_fields=["queue"])
+    scope = {
+        "domain": ticket.domain,
+        "office": str(ticket.office_id),
+        "service": str(ticket.service_id),
+        "queue": str(ticket.queue_id),
+    }
+    if dimension == "domain":
+        scope["domain"] = "it"
+    else:
+        scope[dimension] = str(uuid4())
+    actor = _user([])
+    role = Role.objects.create(
+        keycloak_role="estate-examiner",
+        name="Estate Examiner",
+        scopes=[scope],
+    )
+    UserRole.objects.create(user=actor, role=role)
+
+    assert not available_transitions(ticket, actor).exists()
+    _assert_denied_without_side_effects(ticket, actor)
+
+
+def test_designation_requires_matching_restricted_visibility_for_workflow(basic_world):
+    ticket = _ticket(basic_world)
+    ticket.confidentiality = Ticket.Confidentiality.RESTRICTED
+    ticket.save(update_fields=["confidentiality"])
+    actor = _user([])
+    role = Role.objects.create(
+        keycloak_role="estate-examiner",
+        name="Estate Examiner",
+        scopes=[{"domain": "operational"}],
+    )
+    UserRole.objects.create(user=actor, role=role)
+
+    assert not available_transitions(ticket, actor).exists()
+    _assert_denied_without_side_effects(ticket, actor)
 
 
 def test_persisted_auditor_has_no_transitions_despite_mutable_group_snapshot(basic_world):

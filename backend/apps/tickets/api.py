@@ -14,11 +14,12 @@ from apps.sla.serializers import serialize_sla_clocks
 from apps.workflow.models import Status
 
 from .activity import scoped_ticket_relationships
+from .eligibility import custody_party_for_user, is_eligible_assignee
 from .models import Ticket, TicketLink, TicketMessage, TicketNote
 from .permissions import (
     can_add_ticket_content,
+    can_assign,
     can_change_confidentiality,
-    can_reassign,
     can_update_work_state,
 )
 from .workflow import available_transitions
@@ -199,7 +200,7 @@ class TicketDetailSerializer(TicketListSerializer):
     def get_attachments(self, obj: Ticket) -> list[dict[str, object]]:
         return [attachment_metadata(item) for item in obj.attachments.all()]
 
-    def get_capabilities(self, obj: Ticket) -> dict[str, bool | str | None]:
+    def get_capabilities(self, obj: Ticket) -> dict[str, object]:
         request = self.context.get("request")
         user = getattr(request, "user", None)
         if user is None or not user.is_authenticated:
@@ -207,6 +208,8 @@ class TicketDetailSerializer(TicketListSerializer):
                 "can_update_work_state": False,
                 "can_self_assign": False,
                 "self_assignee_id": None,
+                "self_assignee_detail": None,
+                "can_assign": False,
                 "can_reassign": False,
                 "can_change_confidentiality": False,
                 "can_add_message": False,
@@ -216,12 +219,29 @@ class TicketDetailSerializer(TicketListSerializer):
 
         can_update = can_update_work_state(user, obj, request=request)
         can_add_content = can_add_ticket_content(user, obj, request=request)
-        can_self_assign = can_update and obj.assignee_id is None
+        can_self_assign = (
+            can_update
+            and obj.assignee_id is None
+            and is_eligible_assignee(obj, user)
+        )
+        self_assignee_detail = None
+        if can_self_assign:
+            party = custody_party_for_user(obj, user)
+            self_assignee_detail = {
+                "id": party.id,
+                "username": user.username,
+                "display_name": party.display_name,
+                "designations": list(party.designations),
+                "team_labels": list(party.team_labels),
+            }
+        can_assign_ticket = can_assign(user, ticket=obj, request=request)
         return {
             "can_update_work_state": can_update,
             "can_self_assign": can_self_assign,
             "self_assignee_id": str(user.id) if can_self_assign else None,
-            "can_reassign": can_reassign(user, ticket=obj, request=request),
+            "self_assignee_detail": self_assignee_detail,
+            "can_assign": can_assign_ticket,
+            "can_reassign": can_assign_ticket,
             "can_change_confidentiality": can_change_confidentiality(
                 user,
                 ticket=obj,
