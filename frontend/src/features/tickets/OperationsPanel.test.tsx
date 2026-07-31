@@ -1,5 +1,6 @@
 import { fireEvent, screen, waitFor } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
+import { useState } from "react";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import {
   ApiError,
@@ -169,6 +170,33 @@ function renderPanel(
   return { onUpdated, onReload };
 }
 
+function StatefulPanel({
+  initialTicket,
+  onUpdated,
+}: {
+  initialTicket: TicketDetail;
+  onUpdated: (ticket: TicketDetail) => void;
+}) {
+  const [ticket, setTicket] = useState(initialTicket);
+  return (
+    <OperationsPanel
+      ticket={ticket}
+      onUpdated={(updated) => {
+        setTicket(updated);
+        onUpdated(updated);
+      }}
+      onReload={vi.fn()}
+    />
+  );
+}
+
+function renderStatefulPanel(ticket: TicketDetail, onUpdated = vi.fn()) {
+  renderWithProviders(
+    <StatefulPanel initialTicket={ticket} onUpdated={onUpdated} />,
+  );
+  return { onUpdated };
+}
+
 beforeEach(() => {
   harness.assignees.mockReset();
   harness.assign.mockReset();
@@ -252,6 +280,219 @@ describe("server-driven ticket operations", () => {
       }),
     );
     expect(harness.updateWorkState).not.toHaveBeenCalled();
+  });
+
+  it("preserves pending work state and validation after an assignment-only refresh", async () => {
+    const editableSupervisor = {
+      ...TICKET,
+      capabilities: {
+        ...TICKET.capabilities,
+        can_assign: true,
+        can_reassign: true,
+        can_change_confidentiality: true,
+      },
+    };
+    const assignmentOnlyRefresh = {
+      ...editableSupervisor,
+      assignee: SECOND_AGENT.id,
+      assignee_detail: {
+        id: SECOND_AGENT.id,
+        display_name: SECOND_AGENT.display_name,
+      },
+      updated_at: "2026-07-27T09:20:00Z",
+    };
+    harness.assignees.mockResolvedValue({ results: [SECOND_AGENT] });
+    harness.updateWorkState.mockRejectedValue(
+      new ApiError(400, {
+        code: "invalid_work_state",
+        detail: "Review the highlighted values.",
+        fields: { next_action: ["Next action needs more detail."] },
+        correlation_id: "corr-pending-work-400",
+      }),
+    );
+    harness.assign.mockResolvedValue(assignmentResponse(assignmentOnlyRefresh));
+    const onUpdated = vi.fn();
+    const user = userEvent.setup();
+    renderStatefulPanel(editableSupervisor, onUpdated);
+
+    const team = screen.getByRole("textbox", { name: "Team" });
+    const nextAction = screen.getByRole("textbox", { name: "Next action" });
+    const confidentiality = screen.getByRole("combobox", {
+      name: "Confidentiality",
+    });
+    await user.clear(team);
+    await user.type(team, "Pending finance review");
+    await user.clear(nextAction);
+    await user.type(nextAction, "Call the accountant with the signed file");
+    await user.selectOptions(confidentiality, "sensitive");
+    await user.click(screen.getByRole("button", { name: "Save" }));
+
+    expect(
+      await screen.findByText("Next action needs more detail."),
+    ).toBeVisible();
+    await user.click(
+      screen.getByRole("combobox", { name: "Eligible team member" }),
+    );
+    fireEvent.click(
+      await screen.findByRole("option", { name: /Second Agent/ }),
+    );
+    await user.type(
+      screen.getByRole("textbox", { name: "Reason for transfer" }),
+      "Move to finance review",
+    );
+    await user.click(screen.getByRole("button", { name: "Transfer" }));
+
+    await waitFor(() =>
+      expect(screen.getByText("Current owner").parentElement).toHaveTextContent(
+        SECOND_AGENT.display_name,
+      ),
+    );
+    expect(team).toHaveValue("Pending finance review");
+    expect(nextAction).toHaveValue("Call the accountant with the signed file");
+    expect(confidentiality).toHaveValue("sensitive");
+    expect(screen.getByText("Next action needs more detail.")).toBeVisible();
+    expect(screen.getByRole("button", { name: "Save" })).toBeEnabled();
+    expect(onUpdated).toHaveBeenCalledWith(assignmentOnlyRefresh);
+  });
+
+  it("rebases untouched fields from a same-ticket authoritative refresh", async () => {
+    const editableTicket = {
+      ...TICKET,
+      capabilities: {
+        ...TICKET.capabilities,
+        can_change_confidentiality: true,
+      },
+    };
+    const refreshed = {
+      ...editableTicket,
+      waiting_reason: "internal",
+      blocked_reason: "Server-side records check",
+      updated_at: "2026-07-27T09:20:00Z",
+    };
+    const onUpdated = vi.fn();
+    const onReload = vi.fn();
+    const user = userEvent.setup();
+    const result = renderWithProviders(
+      <OperationsPanel
+        ticket={editableTicket}
+        onUpdated={onUpdated}
+        onReload={onReload}
+      />,
+    );
+
+    await user.clear(screen.getByRole("textbox", { name: "Team" }));
+    await user.type(
+      screen.getByRole("textbox", { name: "Team" }),
+      "Pending finance review",
+    );
+    await user.selectOptions(
+      screen.getByRole("combobox", { name: "Confidentiality" }),
+      "sensitive",
+    );
+
+    result.rerender(
+      <OperationsPanel
+        ticket={refreshed}
+        onUpdated={onUpdated}
+        onReload={onReload}
+      />,
+    );
+
+    await waitFor(() =>
+      expect(
+        screen.getByRole("combobox", { name: "Waiting reason" }),
+      ).toHaveValue("internal"),
+    );
+    expect(screen.getByRole("textbox", { name: "Blocked reason" })).toHaveValue(
+      "Server-side records check",
+    );
+    expect(screen.getByRole("textbox", { name: "Team" })).toHaveValue(
+      "Pending finance review",
+    );
+    expect(
+      screen.getByRole("combobox", { name: "Confidentiality" }),
+    ).toHaveValue("sensitive");
+    expect(screen.getByRole("button", { name: "Save" })).toBeEnabled();
+  });
+
+  it("resets pending values and validation when the ticket identity changes", async () => {
+    const editableTicket = {
+      ...TICKET,
+      capabilities: {
+        ...TICKET.capabilities,
+        can_change_confidentiality: true,
+      },
+    };
+    const nextTicket = {
+      ...editableTicket,
+      id: "ticket-2",
+      number: "MHC-2026-000002",
+      team: "Records",
+      next_action: "Index the new file",
+      confidentiality: "restricted",
+      updated_at: "2026-07-27T11:00:00Z",
+    };
+    harness.updateWorkState.mockRejectedValue(
+      new ApiError(400, {
+        code: "invalid_work_state",
+        detail: "Review the highlighted values.",
+        fields: { next_action: ["Next action needs more detail."] },
+        correlation_id: "corr-old-ticket-400",
+      }),
+    );
+    const onUpdated = vi.fn();
+    const onReload = vi.fn();
+    const user = userEvent.setup();
+    const result = renderWithProviders(
+      <OperationsPanel
+        ticket={editableTicket}
+        onUpdated={onUpdated}
+        onReload={onReload}
+      />,
+    );
+
+    await user.clear(screen.getByRole("textbox", { name: "Team" }));
+    await user.type(
+      screen.getByRole("textbox", { name: "Team" }),
+      "Pending old-ticket edit",
+    );
+    await user.clear(screen.getByRole("textbox", { name: "Next action" }));
+    await user.type(
+      screen.getByRole("textbox", { name: "Next action" }),
+      "Invalid old-ticket action",
+    );
+    await user.selectOptions(
+      screen.getByRole("combobox", { name: "Confidentiality" }),
+      "sensitive",
+    );
+    await user.click(screen.getByRole("button", { name: "Save" }));
+    expect(
+      await screen.findByText("Next action needs more detail."),
+    ).toBeVisible();
+
+    result.rerender(
+      <OperationsPanel
+        ticket={nextTicket}
+        onUpdated={onUpdated}
+        onReload={onReload}
+      />,
+    );
+
+    await waitFor(() =>
+      expect(screen.getByRole("textbox", { name: "Team" })).toHaveValue(
+        nextTicket.team,
+      ),
+    );
+    expect(screen.getByRole("textbox", { name: "Next action" })).toHaveValue(
+      nextTicket.next_action,
+    );
+    expect(
+      screen.getByRole("combobox", { name: "Confidentiality" }),
+    ).toHaveValue(nextTicket.confidentiality);
+    expect(
+      screen.queryByText("Next action needs more detail."),
+    ).not.toBeInTheDocument();
+    expect(screen.getByRole("button", { name: "Save" })).toBeDisabled();
   });
 
   it("does not infer elevated controls when capability flags deny them", () => {
@@ -390,16 +631,23 @@ describe("server-driven ticket operations", () => {
   });
 
   it("preserves typed values and shows field and correlation details after a 400", async () => {
-    harness.updateWorkState.mockRejectedValue(
-      new ApiError(400, {
-        code: "invalid_work_state",
-        detail: "Review the highlighted values.",
-        fields: { next_action: ["Next action is too long."] },
-        correlation_id: "corr-work-400",
-      }),
-    );
+    const authoritative = {
+      ...TICKET,
+      next_action: "Review accepted action",
+      updated_at: "2026-07-27T09:21:00Z",
+    };
+    harness.updateWorkState
+      .mockRejectedValueOnce(
+        new ApiError(400, {
+          code: "invalid_work_state",
+          detail: "Review the highlighted values.",
+          fields: { next_action: ["Next action is too long."] },
+          correlation_id: "corr-work-400",
+        }),
+      )
+      .mockResolvedValueOnce(authoritative);
     const user = userEvent.setup();
-    renderPanel();
+    const { onUpdated } = renderPanel();
 
     const nextAction = screen.getByRole("textbox", { name: "Next action" });
     await user.clear(nextAction);
@@ -409,6 +657,18 @@ describe("server-driven ticket operations", () => {
     expect(await screen.findByText("Next action is too long.")).toBeVisible();
     expect(screen.getByText(/corr-work-400/)).toBeVisible();
     expect(nextAction).toHaveValue("A deliberately invalid action");
+
+    await user.click(screen.getByRole("button", { name: "Save" }));
+
+    await waitFor(() =>
+      expect(harness.updateWorkState).toHaveBeenCalledTimes(2),
+    );
+    expect(nextAction).toHaveValue(authoritative.next_action);
+    expect(
+      screen.queryByText("Next action is too long."),
+    ).not.toBeInTheDocument();
+    expect(screen.getByRole("button", { name: "Save" })).toBeDisabled();
+    expect(onUpdated).toHaveBeenCalledWith(authoritative);
   });
 
   it("reloads a stale ticket only after the operator chooses Reload", async () => {

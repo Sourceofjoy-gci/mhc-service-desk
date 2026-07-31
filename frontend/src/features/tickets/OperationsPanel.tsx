@@ -1,6 +1,6 @@
 import { useMutation } from "@tanstack/react-query";
 import { AlertCircle } from "lucide-react";
-import { useEffect, useRef, useState, type FormEvent } from "react";
+import { useEffect, useReducer, useRef, type FormEvent } from "react";
 import { Alert, AlertDescription, AlertTitle } from "@/components/ui/alert";
 import { Button } from "@/components/ui/button";
 import {
@@ -37,6 +37,27 @@ interface FormValues {
 
 type EditableField = keyof FormValues;
 type DirtyFields = Partial<Record<EditableField, true>>;
+
+interface FormState {
+  ticketNumber: string;
+  values: FormValues;
+  baseline: FormValues;
+  dirty: DirtyFields;
+}
+
+type FormAction =
+  | { type: "change"; field: EditableField; value: string }
+  | { type: "rebase"; ticketNumber: string; values: FormValues }
+  | { type: "replace"; ticketNumber: string; values: FormValues };
+
+const EDITABLE_FIELDS: EditableField[] = [
+  "team",
+  "waiting_reason",
+  "blocked_reason",
+  "next_action",
+  "next_action_at",
+  "confidentiality",
+];
 
 const WAITING_REASONS = [
   { value: "", label: "None" },
@@ -84,6 +105,50 @@ function valuesFromTicket(ticket: TicketDetail): FormValues {
   };
 }
 
+function cleanFormState(ticketNumber: string, values: FormValues): FormState {
+  return {
+    ticketNumber,
+    values,
+    baseline: values,
+    dirty: {},
+  };
+}
+
+function formReducer(state: FormState, action: FormAction): FormState {
+  if (action.type === "change") {
+    const dirty = { ...state.dirty };
+    if (action.value === state.baseline[action.field]) {
+      delete dirty[action.field];
+    } else {
+      dirty[action.field] = true;
+    }
+    return {
+      ...state,
+      values: { ...state.values, [action.field]: action.value },
+      dirty,
+    };
+  }
+
+  if (action.type === "replace" || action.ticketNumber !== state.ticketNumber) {
+    return cleanFormState(action.ticketNumber, action.values);
+  }
+
+  const values = { ...action.values };
+  const dirty: DirtyFields = {};
+  for (const field of EDITABLE_FIELDS) {
+    if (state.dirty[field] && state.values[field] !== action.values[field]) {
+      values[field] = state.values[field];
+      dirty[field] = true;
+    }
+  }
+  return {
+    ticketNumber: action.ticketNumber,
+    values,
+    baseline: action.values,
+    dirty,
+  };
+}
+
 function ReadOnlyValue({
   label,
   children,
@@ -105,20 +170,26 @@ export function OperationsPanel({
   onReload,
   onActivityChanged,
 }: OperationsPanelProps) {
-  const initialValues = valuesFromTicket(ticket);
-  const [values, setValues] = useState<FormValues>(initialValues);
-  const [baseline, setBaseline] = useState<FormValues>(initialValues);
-  const [dirty, setDirty] = useState<DirtyFields>({});
+  const [form, dispatch] = useReducer(formReducer, ticket, (initialTicket) =>
+    cleanFormState(initialTicket.number, valuesFromTicket(initialTicket)),
+  );
+  const { values, dirty } = form;
   const inFlight = useRef(false);
+  const observedTicket = useRef({
+    number: ticket.number,
+    updatedAt: ticket.updated_at,
+  });
 
   const update = useMutation({
     mutationFn: (payload: TicketWorkStateUpdate) =>
       ticketsApi.updateWorkState(ticket.number, payload),
     onSuccess: async (refreshedTicket) => {
       const refreshedValues = valuesFromTicket(refreshedTicket);
-      setValues(refreshedValues);
-      setBaseline(refreshedValues);
-      setDirty({});
+      dispatch({
+        type: "replace",
+        ticketNumber: refreshedTicket.number,
+        values: refreshedValues,
+      });
       onUpdated(refreshedTicket);
       await onActivityChanged?.();
     },
@@ -126,14 +197,31 @@ export function OperationsPanel({
       inFlight.current = false;
     },
   });
+  const updateError = useRef(update.error);
+  updateError.current = update.error;
   const resetUpdate = update.reset;
 
   useEffect(() => {
+    const previous = observedTicket.current;
+    const identityChanged = previous.number !== ticket.number;
+    const timestampChanged = previous.updatedAt !== ticket.updated_at;
+    observedTicket.current = {
+      number: ticket.number,
+      updatedAt: ticket.updated_at,
+    };
     const refreshedValues = valuesFromTicket(ticket);
-    setValues(refreshedValues);
-    setBaseline(refreshedValues);
-    setDirty({});
-    resetUpdate();
+    dispatch({
+      type: "rebase",
+      ticketNumber: ticket.number,
+      values: refreshedValues,
+    });
+    if (
+      identityChanged ||
+      (timestampChanged &&
+        apiProblem(updateError.current)?.code === "stale_ticket")
+    ) {
+      resetUpdate();
+    }
   }, [resetUpdate, ticket]);
 
   const mutate = (payload: TicketWorkStateUpdate) => {
@@ -144,13 +232,7 @@ export function OperationsPanel({
 
   const change = (field: EditableField, value: string) => {
     update.reset();
-    setValues((current) => ({ ...current, [field]: value }));
-    setDirty((current) => {
-      const next = { ...current };
-      if (value === baseline[field]) delete next[field];
-      else next[field] = true;
-      return next;
-    });
+    dispatch({ type: "change", field, value });
   };
 
   const submit = (event: FormEvent<HTMLFormElement>) => {
