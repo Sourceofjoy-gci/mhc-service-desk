@@ -1,5 +1,10 @@
+from typing import TYPE_CHECKING
+
 from django.contrib import admin
+from django.db.models import QuerySet
 from django.http import HttpRequest
+
+from apps.identity_access.scope import scope_ticket_queryset
 
 from .models import (
     OutboxEvent,
@@ -19,16 +24,52 @@ admin.site.register(Watcher)
 admin.site.register(OutboxEvent)
 
 
+if TYPE_CHECKING:
+
+    class _TicketCustodyEventAdminBase(admin.ModelAdmin[TicketCustodyEvent]):
+        pass
+
+else:
+    _TicketCustodyEventAdminBase = admin.ModelAdmin
+
+
 @admin.register(TicketCustodyEvent)
-class TicketCustodyEventAdmin(admin.ModelAdmin):
+class TicketCustodyEventAdmin(_TicketCustodyEventAdminBase):
     list_display = (
-        "ticket",
+        "ticket_reference",
         "sequence",
         "event_type",
         "occurred_at",
         "actor_display_name",
     )
-    readonly_fields = tuple(field.name for field in TicketCustodyEvent._meta.fields)
+    list_display_links = None
+    readonly_fields = (
+        "ticket_reference",
+        *(field.name for field in TicketCustodyEvent._meta.fields if field.name != "ticket"),
+    )
+    fields = readonly_fields
+
+    @admin.display(description="ticket")
+    def ticket_reference(self, obj: TicketCustodyEvent) -> str:
+        return obj.ticket.number
+
+    def get_queryset(self, request: HttpRequest) -> QuerySet[TicketCustodyEvent]:
+        queryset = super().get_queryset(request)
+        visible_tickets = scope_ticket_queryset(request.user, Ticket.objects.all(), request=request)
+        return queryset.filter(ticket__in=visible_tickets).select_related("ticket")
+
+    def has_view_permission(
+        self, request: HttpRequest, obj: TicketCustodyEvent | None = None
+    ) -> bool:
+        if not super().has_view_permission(request, obj):
+            return False
+        if obj is None:
+            return True
+        return scope_ticket_queryset(
+            request.user,
+            Ticket.objects.filter(pk=obj.ticket_id),
+            request=request,
+        ).exists()
 
     def has_add_permission(self, request: HttpRequest) -> bool:
         return False
