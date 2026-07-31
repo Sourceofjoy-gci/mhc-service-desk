@@ -58,13 +58,19 @@ def _ticket(
     queue: ServiceLocation | None = None,
     assignee: User | None = None,
     confidentiality: str = Ticket.Confidentiality.NORMAL,
+    domain: str = Ticket.Domain.OPERATIONAL,
 ) -> Ticket:
-    service = basic_world["gen_info"]
+    service = (
+        basic_world["gen_info"]
+        if domain == Ticket.Domain.OPERATIONAL
+        else basic_world["it_inc"]
+    )
+    prefix = "OP" if domain == Ticket.Domain.OPERATIONAL else "IT"
     return Ticket.objects.create(
-        number=f"OP-202607-{Ticket.objects.count() + 990001:06d}",
-        domain=Ticket.Domain.OPERATIONAL,
+        number=f"{prefix}-202607-{Ticket.objects.count() + 990001:06d}",
+        domain=domain,
         title="Guarded ticket routing",
-        status=Status.objects.get(domain="operational", code="new"),
+        status=Status.objects.get(domain=domain, code="new"),
         channel=Ticket.Channel.INTERNAL,
         requester=basic_world["contact"],
         service=service,
@@ -288,6 +294,46 @@ def test_unauthorised_actor_cannot_route(basic_world, actor_factory):
 
     ticket.refresh_from_db()
     assert ticket.queue_id is None
+    assert _counts(ticket) == (0, 0, 0)
+
+
+@pytest.mark.parametrize(
+    ("ticket_domain", "actor_role"),
+    [
+        (Ticket.Domain.OPERATIONAL, "lead-it"),
+        (Ticket.Domain.IT, "supervisor-operational"),
+    ],
+)
+def test_legacy_routing_actor_role_family_cannot_cross_configured_domain(
+    basic_world,
+    ticket_domain,
+    actor_role,
+):
+    current = _queue(basic_world, f"Cross-domain current {actor_role}")
+    destination = _queue(basic_world, f"Cross-domain destination {actor_role}")
+    ticket = _ticket(basic_world, queue=current, domain=ticket_domain)
+    actor = _user()
+    _grant(
+        actor,
+        ticket,
+        role_key=actor_role,
+        queues=(current, destination),
+    )
+    previous_updated_at = ticket.updated_at
+
+    with pytest.raises(TicketPermissionError):
+        _route(
+            ticket,
+            actor,
+            queue_id=destination.id,
+            assignee_id=None,
+        )
+
+    ticket.refresh_from_db()
+    assert ticket.queue_id == current.id
+    assert ticket.assignee_id is None
+    assert ticket.status.code == "new"
+    assert ticket.updated_at == previous_updated_at
     assert _counts(ticket) == (0, 0, 0)
 
 

@@ -21,6 +21,7 @@ from apps.tickets.assignment import (
     assign_ticket,
     assign_ticket_by_system,
 )
+from apps.tickets.eligibility import eligible_assignees
 from apps.tickets.models import OutboxEvent, Ticket, TicketCustodyEvent
 from apps.tickets.services import (
     TicketConflictError,
@@ -28,7 +29,7 @@ from apps.tickets.services import (
     TicketScopeError,
     TicketValidationError,
 )
-from apps.workflow.models import Status, TransitionHistory
+from apps.workflow.models import Status, Transition, TransitionHistory
 
 pytestmark = pytest.mark.django_db
 
@@ -268,6 +269,40 @@ def test_actor_without_assignment_authority_cannot_assign_another_user(basic_wor
     assert _assignment_rows(ticket) == (0, 0, 0)
 
 
+@pytest.mark.parametrize(
+    ("ticket_domain", "actor_role", "target_group"),
+    [
+        (Ticket.Domain.OPERATIONAL, "lead-it", "ops-agents"),
+        (Ticket.Domain.IT, "supervisor-operational", "it-agents"),
+    ],
+)
+def test_legacy_assignment_actor_role_family_cannot_cross_configured_domain(
+    basic_world,
+    ticket_domain,
+    actor_role,
+    target_group,
+):
+    actor = _user()
+    target = _user([target_group])
+    ticket = _ticket(basic_world, domain=ticket_domain)
+    role = Role.objects.create(
+        keycloak_role=actor_role,
+        name=f"Mis-scoped {actor_role}",
+        scopes=[{"domain": ticket.domain}],
+    )
+    UserRole.objects.create(user=actor, role=role, office=ticket.office)
+    previous_updated_at = ticket.updated_at
+
+    with pytest.raises(TicketPermissionError):
+        _assign(ticket, actor, target.id)
+
+    ticket.refresh_from_db()
+    assert ticket.assignee_id is None
+    assert ticket.status.code == "new"
+    assert ticket.updated_at == previous_updated_at
+    assert _assignment_rows(ticket) == (0, 0, 0)
+
+
 def test_eligible_self_assignment_is_the_only_non_assigner_exception(basic_world):
     eligible_actor = _user(["ops-agents"], display_name="Self Assignee")
     ticket = _ticket(basic_world)
@@ -396,6 +431,71 @@ def test_assignment_and_automatic_status_transition_are_distinct_chronological_e
     assert _assignment_rows(ticket) == (1, 1, 2)
     assert AuditEvent.objects.filter(object_id=str(ticket.id)).count() == 2
     assert OutboxEvent.objects.filter(aggregate_id=str(ticket.id)).count() == 2
+
+
+def test_first_assignment_does_not_auto_transition_when_locked_actor_lacks_transition_role(
+    basic_world,
+):
+    actor = _user(["ops-supervisors"], display_name="Assignment-only Supervisor")
+    target = _user(["ops-agents"], display_name="Assigned Officer")
+    ticket = _ticket(basic_world, status="triage")
+    transition = Transition.objects.get(
+        domain=ticket.domain,
+        from_status=ticket.status,
+        to_status__code="assigned",
+    )
+    transition.required_role = "it-leads"
+    transition.save(update_fields=["required_role"])
+
+    result = _assign(ticket, actor, target.id)
+
+    ticket.refresh_from_db()
+    assert result.changed is True
+    assert ticket.assignee_id == target.id
+    assert ticket.status.code == "triage"
+    assert not TransitionHistory.objects.filter(ticket=ticket).exists()
+    event = TicketCustodyEvent.objects.get(ticket=ticket)
+    assert event.event_type == "assigned"
+    assert event.new_status is None
+    assert _assignment_rows(ticket) == (1, 1, 1)
+    assert AuditEvent.objects.filter(object_id=str(ticket.id)).count() == 1
+    assert OutboxEvent.objects.filter(aggregate_id=str(ticket.id)).count() == 1
+
+
+def test_primary_role_names_flow_lexically_from_candidate_to_receipt_and_custody(
+    basic_world,
+):
+    actor = _user(["ops-supervisors"])
+    target = _user(display_name="Custom Designation Officer")
+    ticket = _ticket(basic_world)
+    role_specs = (
+        ("estate-examiner", "Zulu Estate Specialist"),
+        ("master", "Alpha Office Lead"),
+        ("data-clerk", "   "),
+    )
+    for role_key, role_name in role_specs:
+        role = Role.objects.create(
+            keycloak_role=role_key,
+            name=role_name,
+            scopes=[{"domain": ticket.domain}],
+        )
+        UserRole.objects.create(user=target, role=role, office=ticket.office)
+
+    candidate = next(
+        candidate for candidate in eligible_assignees(ticket) if candidate.id == target.id
+    )
+    assert candidate.designations == (
+        "Alpha Office Lead",
+        "Data Clerk",
+        "Zulu Estate Specialist",
+    )
+
+    result = _assign(ticket, actor, target.id)
+
+    assert result.receipt.new_assignee is not None
+    assert result.receipt.new_assignee.designations == candidate.designations
+    event = TicketCustodyEvent.objects.get(ticket=ticket)
+    assert event.new_designations == list(candidate.designations)
 
 
 def test_custody_failure_rolls_back_ticket_transition_audit_and_outbox(

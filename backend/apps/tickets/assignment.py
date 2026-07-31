@@ -21,7 +21,6 @@ from apps.identity_access.scope import (
     scope_ticket_queryset,
 )
 from apps.organisations.models import ServiceLocation
-from apps.workflow.models import Transition
 
 from .custody import (
     CustodyActor,
@@ -47,6 +46,7 @@ from .services import (
     TicketValidationError,
     transition_ticket,
 )
+from .workflow import available_transitions
 
 
 @dataclass(frozen=True)
@@ -424,13 +424,19 @@ def _write_locked_assignment(
     )
 
 
-def _has_active_assigned_transition(ticket: Ticket) -> bool:
-    return Transition.objects.filter(
-        domain=ticket.domain,
-        from_status=ticket.status,
-        to_status__code="assigned",
-        is_active=True,
-    ).exists()
+def _actor_can_transition_to_assigned(
+    ticket: Ticket,
+    actor: User,
+    *,
+    request: Request | None,
+    snapshot: AuthoritySnapshot,
+) -> bool:
+    return available_transitions(
+        ticket,
+        actor,
+        request=request,
+        snapshot=snapshot,
+    ).filter(to_status__code="assigned").exists()
 
 
 @transaction.atomic
@@ -520,7 +526,12 @@ def assign_ticket(
     should_transition = (
         locked.assignee_id is None
         and target is not None
-        and _has_active_assigned_transition(locked)
+        and _actor_can_transition_to_assigned(
+            locked,
+            locked_actor,
+            request=request,
+            snapshot=locked_actor_snapshot,
+        )
     )
     previous_snapshots, new_snapshots = _assignment_party_snapshots(
         ticket=locked,

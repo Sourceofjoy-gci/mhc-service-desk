@@ -461,6 +461,58 @@ def test_assignment_api_revalidates_forged_target_ids_without_mutation(
     assert _side_effect_counts(ticket) == (0, 0, 0)
 
 
+@pytest.mark.parametrize(
+    ("ticket_domain", "target_role", "actor_group"),
+    [
+        (Ticket.Domain.OPERATIONAL, "agent-it", "ops-supervisors"),
+        (Ticket.Domain.IT, "agent-operational", "it-leads"),
+    ],
+)
+def test_assignment_api_excludes_and_rejects_cross_domain_legacy_role_targets(
+    basic_world,
+    ticket_domain,
+    target_role,
+    actor_group,
+):
+    ticket = _ticket(basic_world, domain=ticket_domain)
+    actor = _user([actor_group])
+    target = _user(display_name="Cross-domain Target")
+    _grant(
+        target,
+        role_key=target_role,
+        role_name=f"Mis-scoped {target_role}",
+        scopes=[_scope(ticket)],
+        office=ticket.office,
+    )
+    original_updated_at = ticket.updated_at
+
+    directory = _client(actor).get(
+        _candidate_url(ticket),
+        HTTP_X_CORRELATION_ID=CORRELATION_ID,
+    )
+    assert directory.status_code == 200
+    assert str(target.id) not in {item["id"] for item in directory.data["results"]}
+
+    response = _post_assignment(
+        _client(actor),
+        ticket,
+        assignee_id=target.id,
+    )
+
+    assert response.status_code == 400
+    assert response.data == {
+        "code": "invalid_assignment",
+        "detail": "Assignment is invalid.",
+        "fields": {"assignee_id": ["Select an eligible assignee."]},
+        "correlation_id": CORRELATION_ID,
+    }
+    ticket.refresh_from_db()
+    assert ticket.assignee_id is None
+    assert ticket.status.code == "new"
+    assert ticket.updated_at == original_updated_at
+    assert _side_effect_counts(ticket) == (0, 0, 0)
+
+
 @pytest.mark.parametrize("new_assignee", ["replacement", "unassigned"])
 def test_reassignment_and_unassignment_require_reason(basic_world, new_assignee):
     actor = _user(["ops-supervisors"])

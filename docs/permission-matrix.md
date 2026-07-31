@@ -93,7 +93,7 @@ apply before an object action runs.
 | `/api/v1/tickets/` | GET | Scoped rows only; `domain`, `status`, `priority`, `assignee`, `office`, `channel`, `search`, `sort`, and opaque `cursor` are server-side inputs |
 | `/api/v1/tickets/{number}/` | GET | Object must be in the caller's scoped queryset |
 | `/api/v1/tickets/kanban/` | GET | Same scoped ticket queryset; terminal tickets excluded |
-| `/api/v1/tickets/{number}/assignees/` | GET | Scoped ticket; returns active non-auditors eligible for that ticket's domain |
+| `/api/v1/tickets/{number}/assignees/` | GET | Scoped ticket plus `can_assign`; returns only active non-auditors with a matching functional role/team, role-family domain, office, service, queue, and exact Restricted-visibility grant |
 | `/api/v1/tickets/{number}/work-state/` | PATCH | Scoped ticket plus active Operational/IT agent or lead group for the ticket domain, or `system-admins`; auditor and inactive users are denied |
 | `/api/v1/tickets/{number}/work-state/` legacy assignment | PATCH | Assignment-only payloads delegate to the guarded assignment service for one compatibility release; mixed assignment/work-state payloads fail with `assignment_must_be_separate` |
 | `/api/v1/tickets/{number}/assignment/` | POST | Scoped ticket plus server-side assignment authority and exact active target eligibility; reassignment and unassignment require a reason |

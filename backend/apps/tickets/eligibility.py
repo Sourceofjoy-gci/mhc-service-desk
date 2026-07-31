@@ -80,23 +80,31 @@ _RESTRICTED_ROLE_KEYS = {
     "system-admins",
     "security-responders",
 }
-_LEGACY_ROLE_DETAILS: dict[str, tuple[str, str, str]] = {
-    "agent-operational": ("Operational Agent", "Operational", "operational"),
-    "ops-agents": ("Operational Agent", "Operational", "operational"),
+_LEGACY_ROLE_DETAILS: dict[str, tuple[str, str]] = {
+    "agent-operational": ("Operational Agent", "Operational"),
+    "ops-agents": ("Operational Agent", "Operational"),
     "supervisor-operational": (
         "Operational Supervisor",
         "Operational",
-        "operational",
     ),
     "ops-supervisors": (
         "Operational Supervisor",
         "Operational",
-        "operational",
     ),
-    "agent-it": ("IT Agent", "IT", "it"),
-    "it-agents": ("IT Agent", "IT", "it"),
-    "lead-it": ("IT Lead", "IT", "it"),
-    "it-leads": ("IT Lead", "IT", "it"),
+    "agent-it": ("IT Agent", "IT"),
+    "it-agents": ("IT Agent", "IT"),
+    "lead-it": ("IT Lead", "IT"),
+    "it-leads": ("IT Lead", "IT"),
+}
+_ROLE_FAMILY_DOMAIN: dict[str, str] = {
+    "agent-operational": Ticket.Domain.OPERATIONAL,
+    "ops-agents": Ticket.Domain.OPERATIONAL,
+    "supervisor-operational": Ticket.Domain.OPERATIONAL,
+    "ops-supervisors": Ticket.Domain.OPERATIONAL,
+    "agent-it": Ticket.Domain.IT,
+    "it-agents": Ticket.Domain.IT,
+    "lead-it": Ticket.Domain.IT,
+    "it-leads": Ticket.Domain.IT,
 }
 _ROLE_ALIASES: dict[str, frozenset[str]] = {
     "agent-operational": frozenset({"agent-operational", "ops-agents"}),
@@ -226,7 +234,7 @@ def _functional_matches(
     *,
     active_assignments: list[UserRole],
     groups: set[str],
-    has_active_persisted_assignments: bool,
+    allow_group_fallback: bool,
 ) -> tuple[_FunctionalMatch, ...]:
     matches: list[_FunctionalMatch] = []
     for assignment in active_assignments:
@@ -234,6 +242,8 @@ def _functional_matches(
         designation = _DESIGNATION_BY_KEY.get(role_key)
         legacy = _LEGACY_ROLE_DETAILS.get(role_key)
         if designation is None and legacy is None:
+            continue
+        if legacy is not None and _ROLE_FAMILY_DOMAIN[role_key] != ticket.domain:
             continue
         scopes = validated_role_scopes(
             cast(Any, assignment),
@@ -249,16 +259,17 @@ def _functional_matches(
         ):
             continue
         if designation is not None:
+            persisted_name = assignment.role.name.strip()
             matches.append(
                 _FunctionalMatch(
                     role_key=role_key,
-                    display_name=designation.display_name,
+                    display_name=persisted_name or designation.display_name,
                     team_label=designation.team_label,
                     primary_designation=True,
                 )
             )
         elif legacy is not None:
-            _, team_label, _ = legacy
+            _, team_label = legacy
             matches.append(
                 _FunctionalMatch(
                     role_key=role_key,
@@ -268,9 +279,12 @@ def _functional_matches(
                 )
             )
 
-    if not has_active_persisted_assignments:
-        for role_key, (display_name, team_label, domain) in _LEGACY_ROLE_DETAILS.items():
-            if role_key not in groups or domain != ticket.domain:
+    if allow_group_fallback:
+        for role_key, (display_name, team_label) in _LEGACY_ROLE_DETAILS.items():
+            if (
+                role_key not in groups
+                or _ROLE_FAMILY_DOMAIN[role_key] != ticket.domain
+            ):
                 continue
             matches.append(
                 _FunctionalMatch(
@@ -372,21 +386,24 @@ def _matching_grant_role_aliases(
     aliases: set[str] = set()
     for grant in grants:
         role_key = grant.role_key
-        matching_role_scopes = [
+        matching_dimension_scopes = [
             scope
             for scope in grant.scopes
-            if _role_grant_scope_matches_ticket(
+            if _role_grant_scope_covers_ticket_dimensions(
                 grant,
                 scope,
                 ticket,
             )
         ]
+        matching_role_scopes = [
+            scope
+            for scope in matching_dimension_scopes
+            if _role_grant_scope_matches_ticket(grant, scope, ticket)
+        ]
         if any(scope.domain == "admin" for scope in matching_role_scopes):
             aliases.add("admin-scope")
         if role_key in _DESIGNATION_BY_KEY:
-            if _ticket_visible_in_authority(ticket, authority) and any(
-                _role_grant_scope_matches_ticket(grant, scope, ticket) for scope in grant.scopes
-            ):
+            if matching_dimension_scopes and _ticket_visible_in_authority(ticket, authority):
                 aliases.update(
                     _ROLE_ALIASES[
                         "agent-operational"
@@ -396,12 +413,19 @@ def _matching_grant_role_aliases(
                 )
             continue
         role_aliases = _ROLE_ALIASES.get(role_key)
-        if role_aliases and matching_role_scopes:
+        family_domain = _ROLE_FAMILY_DOMAIN.get(role_key)
+        if family_domain is not None and family_domain != ticket.domain:
+            continue
+        if (
+            role_aliases
+            and matching_dimension_scopes
+            and _ticket_visible_in_authority(ticket, authority)
+        ):
             aliases.update(role_aliases)
     return aliases
 
 
-def _role_grant_scope_matches_ticket(
+def _role_grant_scope_covers_ticket_dimensions(
     grant: EffectiveRoleGrant,
     scope: Scope,
     ticket: Ticket,
@@ -418,6 +442,16 @@ def _role_grant_scope_matches_ticket(
     if any(
         configured is not None and configured != str(actual) for configured, actual in dimensions
     ):
+        return False
+    return True
+
+
+def _role_grant_scope_matches_ticket(
+    grant: EffectiveRoleGrant,
+    scope: Scope,
+    ticket: Ticket,
+) -> bool:
+    if not _role_grant_scope_covers_ticket_dimensions(grant, scope, ticket):
         return False
     if scope.restricted_only:
         return ticket.confidentiality == Ticket.Confidentiality.RESTRICTED
@@ -459,8 +493,7 @@ def matching_actor_role_aliases(
         if role_key == "system-admins":
             aliases.update(_ROLE_ALIASES[role_key])
             continue
-        details = _LEGACY_ROLE_DETAILS[role_key]
-        if details[2] == ticket.domain:
+        if _ROLE_FAMILY_DOMAIN[role_key] == ticket.domain:
             aliases.update(_ROLE_ALIASES[role_key])
     return frozenset(aliases)
 
@@ -515,16 +548,19 @@ def _candidate_for_user(
         ticket,
         active_assignments=active_assignments,
         groups=groups,
-        has_active_persisted_assignments=bool(active_assignments),
+        allow_group_fallback=(
+            not active_assignments
+            and not user.is_superuser
+            and not ({"admin", "system-admins"} & groups)
+        ),
     )
     if not matches:
         return None
 
-    designation_order = {item.display_name: index for index, item in enumerate(DESIGNATIONS)}
     designations = tuple(
         sorted(
             {match.display_name for match in matches},
-            key=lambda value: (designation_order.get(value, len(DESIGNATIONS)), value),
+            key=lambda value: (value.casefold(), value),
         )
     )
     team_labels = tuple(sorted({match.team_label for match in matches}))
@@ -678,7 +714,11 @@ def matching_designation_role_keys(ticket: Ticket, user: User) -> frozenset[str]
             ticket,
             active_assignments=active_assignments,
             groups=groups,
-            has_active_persisted_assignments=bool(active_assignments),
+            allow_group_fallback=(
+                not active_assignments
+                and not user.is_superuser
+                and not ({"admin", "system-admins"} & groups)
+            ),
         )
         if match.primary_designation
     )

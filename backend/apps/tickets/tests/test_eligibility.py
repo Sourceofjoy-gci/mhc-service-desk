@@ -505,6 +505,34 @@ def test_active_persisted_legacy_roles_remain_candidates(
 
 
 @pytest.mark.parametrize(
+    ("role_key", "ticket_domain"),
+    [
+        ("agent-it", Ticket.Domain.OPERATIONAL),
+        ("lead-it", Ticket.Domain.OPERATIONAL),
+        ("agent-operational", Ticket.Domain.IT),
+        ("supervisor-operational", Ticket.Domain.IT),
+    ],
+)
+def test_persisted_legacy_role_family_cannot_cross_domains_through_configured_scope(
+    basic_world,
+    role_key,
+    ticket_domain,
+):
+    ticket = _ticket(basic_world, domain=ticket_domain)
+    user = _user()
+    _grant(
+        user,
+        role_key=role_key,
+        role_name=f"Mis-scoped {role_key}",
+        scopes=[{"domain": ticket.domain}],
+        office=ticket.office,
+    )
+
+    assert is_eligible_assignee(ticket, user) is False
+    assert user.id not in {candidate.id for candidate in eligible_assignees(ticket)}
+
+
+@pytest.mark.parametrize(
     ("group_name", "domain", "display_name", "team_label"),
     [
         ("ops-agents", "operational", "Operational Agent", "Operational"),
@@ -529,6 +557,36 @@ def test_group_fallback_legacy_roles_remain_candidates(
     assert candidate.team_labels == (team_label,)
     reloaded = User.objects.get(pk=user.pk)
     assert is_eligible_assignee(ticket, reloaded) is True
+
+
+@pytest.mark.parametrize("privilege", ["superuser", "system-admins"])
+def test_privileged_identity_requires_persisted_functional_grant_for_target_eligibility(
+    basic_world,
+    privilege,
+):
+    ticket = _ticket(basic_world)
+    groups = ["ops-agents"]
+    if privilege == "system-admins":
+        groups.append("system-admins")
+    user = _user(groups=groups)
+    if privilege == "superuser":
+        user.is_superuser = True
+        user.save(update_fields=["is_superuser"])
+
+    assert is_eligible_assignee(ticket, user) is False
+    assert user.id not in {candidate.id for candidate in eligible_assignees(ticket)}
+
+    _grant(
+        user,
+        role_key="estate-examiner",
+        role_name="Persisted Estate Examiner",
+        scopes=[{"domain": ticket.domain}],
+        office=ticket.office,
+    )
+
+    candidate = _candidate(ticket, user)
+    assert candidate.designations == ("Persisted Estate Examiner",)
+    assert is_eligible_assignee(ticket, user) is True
 
 
 def test_search_matches_name_username_designation_and_team_case_insensitively(

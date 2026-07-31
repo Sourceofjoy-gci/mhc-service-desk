@@ -227,6 +227,102 @@ def test_designation_requires_matching_restricted_visibility_for_workflow(basic_
     _assert_denied_without_side_effects(ticket, actor)
 
 
+def test_functional_designation_with_separate_restricted_visibility_can_act(
+    basic_world,
+):
+    ticket = _ticket(basic_world)
+    ticket.confidentiality = Ticket.Confidentiality.RESTRICTED
+    ticket.save(update_fields=["confidentiality"])
+    actor = _user([])
+    functional_role = Role.objects.create(
+        keycloak_role="estate-examiner",
+        name="Custom Estate Specialist",
+        scopes=[
+            {
+                "domain": ticket.domain,
+                "office": str(ticket.office_id),
+                "service": str(ticket.service_id),
+            }
+        ],
+    )
+    restricted_role = Role.objects.create(
+        keycloak_role="security-responders",
+        name="Restricted Visibility",
+        scopes=[
+            {
+                "domain": ticket.domain,
+                "office": str(ticket.office_id),
+                "service": str(ticket.service_id),
+                "restricted_only": True,
+            }
+        ],
+    )
+    UserRole.objects.create(user=actor, role=functional_role, office=ticket.office)
+    UserRole.objects.create(user=actor, role=restricted_role, office=ticket.office)
+    transition = Transition.objects.get(
+        domain=ticket.domain,
+        from_status=ticket.status,
+        to_status__code="triage",
+    )
+    transition.required_role = "ops-agents"
+    transition.save(update_fields=["required_role"])
+
+    assert available_transitions(ticket, actor).get() == transition
+    note = services.add_internal_note(
+        ticket=ticket,
+        body="Restricted functional work note",
+        author_subject=actor.keycloak_subject,
+        actor=actor,
+    )
+    assert note.ticket_id == ticket.id
+    updated = services.transition_ticket(
+        ticket_id=ticket.id,
+        actor=actor,
+        expected_updated_at=ticket.updated_at,
+        to_status_code="triage",
+    )
+    assert updated.status.code == "triage"
+
+
+@pytest.mark.parametrize(
+    ("ticket_domain", "role_key", "required_role"),
+    [
+        (Ticket.Domain.OPERATIONAL, "lead-it", "it-leads"),
+        (Ticket.Domain.IT, "supervisor-operational", "ops-supervisors"),
+    ],
+)
+def test_legacy_actor_role_family_cannot_cross_domains_through_configured_scope(
+    basic_world,
+    ticket_domain,
+    role_key,
+    required_role,
+):
+    ticket = _ticket(basic_world, domain=ticket_domain)
+    actor = _user([])
+    role = Role.objects.create(
+        keycloak_role=role_key,
+        name=f"Mis-scoped {role_key}",
+        scopes=[
+            {
+                "domain": ticket.domain,
+                "office": str(ticket.office_id),
+                "service": str(ticket.service_id),
+            }
+        ],
+    )
+    UserRole.objects.create(user=actor, role=role, office=ticket.office)
+    transition = Transition.objects.get(
+        domain=ticket.domain,
+        from_status=ticket.status,
+        to_status__code="triage",
+    )
+    transition.required_role = required_role
+    transition.save(update_fields=["required_role"])
+
+    assert not available_transitions(ticket, actor).exists()
+    _assert_denied_without_side_effects(ticket, actor)
+
+
 @pytest.mark.parametrize(
     ("authority_role", "domain", "required_role"),
     [
@@ -534,7 +630,8 @@ def test_matching_persisted_scope_and_restricted_boundaries_are_enforced(basic_w
     UserRole.objects.create(user=responder, role=responder_role)
     normal = _ticket(basic_world)
     assert not available_transitions(normal, responder).exists()
-    assert available_transitions(restricted, responder).exists()
+    assert not available_transitions(restricted, responder).exists()
+    _assert_denied_without_side_effects(restricted, responder)
 
 
 def test_explicit_immutable_snapshot_can_be_shared_by_capability_and_execution(

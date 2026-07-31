@@ -54,6 +54,8 @@ def available_transitions(
         actor,
         snapshot=authority,
     )
+    if not groups:
+        return transitions.none()
     if groups & {"admin", "admin-scope", "system-admins"}:
         return transitions.order_by("to_status__order", "to_status__code")
     return transitions.filter(
