@@ -46,7 +46,7 @@ The Finance family is supported inside currently configured ticket domains and s
 - `backend/apps/identity_access/tests/test_scope.py`: covers grant expiry, persisted-role precedence, and designation-only group rejection.
 - `backend/apps/tickets/eligibility.py`: owns designation metadata, exact scope matching, candidate search, and owner snapshots.
 - `backend/apps/tickets/assignment.py`: owns atomic human/system owner and post-creation queue mutations, their shared write boundary, and immutable receipts.
-- `backend/apps/tickets/permissions.py`: exposes actor assignment capability and compatibility alias.
+- `backend/apps/tickets/permissions.py`: exposes actor assignment, routing, and explicit queue-clearing capabilities plus the assignment compatibility alias.
 - `backend/apps/tickets/workflow.py`: maps an exact-scope designation actor to ordinary domain staff workflow roles without granting supervisor/lead authority.
 - `backend/apps/tickets/api.py`: validates assignment and routing requests and serialises receipts.
 - `backend/apps/tickets/views.py`: exposes guarded candidate, assignment, and routing actions.
@@ -460,7 +460,7 @@ return Response(
 
 ```powershell
 Set-Location backend
-pytest apps/tickets/tests/test_assignment_api.py apps/tickets/tests/test_work_state_api.py apps/tickets/tests/test_permissions.py apps/tickets/tests/test_scope_authorization.py -q
+pytest apps/tickets/tests/test_assignment_api.py apps/tickets/tests/test_work_state_api.py apps/tickets/tests/test_permissions.py apps/tickets/tests/test_scope_api.py -q
 ruff check apps/tickets/api.py apps/tickets/views.py apps/tickets/tests/test_assignment_api.py apps/tickets/tests/test_work_state_api.py
 mypy apps/tickets/api.py apps/tickets/views.py
 ```
@@ -505,6 +505,7 @@ git commit -m "feat(tickets): expose guarded assignment API"
 - Preserves `assign_ticket` and `assign_ticket_by_system` as the only public owner-only writers defined in Task 3.
 - Produces `is_eligible_assignee_for_queue(ticket: Ticket, user: User, queue: ServiceLocation | None) -> bool`.
 - Produces `can_route_ticket(user: User, ticket: Ticket, queue: ServiceLocation | None, *, request: Request | None = None, snapshot: AuthoritySnapshot | None = None) -> bool`.
+- Produces `can_unqueue_ticket(user: User, ticket: Ticket, *, request: Request | None = None, snapshot: AuthoritySnapshot | None = None) -> bool`.
 - Produces frozen `RoutingReceipt` and `RoutingResult` dataclasses.
 - Produces `route_ticket(*, ticket_id: UUID, actor: User, queue_id: UUID | None, assignee_id: UUID | None, expected_updated_at: datetime, reason: str, request: Request | None = None, snapshot: AuthoritySnapshot | None = None) -> RoutingResult`.
 - Produces `route_ticket_by_system(*, ticket_id: UUID, queue_id: UUID | None, assignee_id: UUID | None, actor_subject: str, actor_display_name: str, source_process: str, reason: str) -> RoutingResult`.
@@ -539,7 +540,8 @@ In `test_services.py`, `test_work_state_api.py`, `test_assignment_api.py`, `test
 2. an assignment-only legacy work-state request delegates to the same eligibility and custody enforcement as the dedicated action;
 3. automation cannot assign an ineligible target even when a rule contains its username;
 4. an eligible automation assignment records a system actor and immutable custody event; and
-5. supported ticket APIs, ticket services, IT-child handling, and automation contain no direct post-creation `queue` or `assignee` write outside `assignment.py`.
+5. an existing `assign_user` rule whose `action_params` contains only `username` remains successful and records the exact deterministic fallback reason `Automation rule {rule.id} assigned ticket to {username}.`; a non-blank configured `reason` is preserved, while missing, non-string, blank, or whitespace-only reasons use the fallback; and
+6. supported ticket APIs, ticket services, IT-child handling, and automation contain no direct post-creation `queue` or `assignee` write outside `assignment.py`.
 
 In `test_routing.py`, use real `ServiceLocation` rows and assert:
 
@@ -548,12 +550,14 @@ In `test_routing.py`, use real `ServiceLocation` rows and assert:
 3. an auditor, inactive actor, ordinary designation actor without `can_assign`, and a direct API caller outside ticket scope cannot route;
 4. queue-only routing succeeds only when the existing owner remains eligible for the resulting queue;
 5. a queue change that would make the current owner ineligible must explicitly provide `assignee_id=None` or another eligible owner;
-6. paired queue change plus assignment, reassignment, or unassignment writes separate consecutive custody inputs in `queue_changed` then owner-event order with the same `occurred_at`, `source_process="ticket.routing"`, and source audit ID;
-7. snapshots contain stable queue IDs/labels and owner IDs/display/designation/team values captured before the save;
-8. no-op routing creates no audit, outbox, custody, or receipt timestamp change;
-9. stale `updated_at` has one winner and returns the canonical conflict;
-10. injected audit, outbox, or custody failure rolls back both queue and owner; and
-11. `POST /routing/` enforces the same service rules and returns only the immutable routing receipt plus refreshed ticket.
+6. an authorised supervisor/lead/admin with ticket scope and a matching non-queue-constrained effective scope can clear the queue with `queue_id=None`; a queue-constrained actor, an actor lacking `can_assign`, or an actor outside ticket scope cannot clear it, and clearing performs no active-destination lookup;
+7. clearing a queue succeeds with the current owner only when that owner remains eligible for a queue-less ticket; otherwise the request must explicitly unassign or supply another owner eligible for the queue-less result;
+8. paired queue change plus assignment, reassignment, or unassignment writes separate consecutive custody inputs in `queue_changed` then owner-event order with the same `occurred_at`, `source_process="ticket.routing"`, and source audit ID;
+9. snapshots contain stable queue IDs/labels and owner IDs/display/designation/team values captured before the save;
+10. an unchanged queue/owner pair is rejected with `TicketValidationError({"routing": ["Queue and assignee must change."]})`; the API returns HTTP 400 with code `invalid_routing` and the same `fields.routing`, with no ticket, audit, outbox, custody, or receipt side effect;
+11. stale `updated_at` has one winner and returns the canonical conflict;
+12. injected audit, outbox, or custody failure rolls back both queue and owner; and
+13. `POST /routing/` enforces the same service rules, maps request `updated_at` to service `expected_updated_at`, and returns only the immutable routing receipt plus refreshed ticket.
 
 Create a parameterised role-matrix test covering the eleven canonical designation keys plus `agent-operational`, `ops-agents`, `supervisor-operational`, `ops-supervisors`, `agent-it`, `it-agents`, `lead-it`, and `it-leads`. For each role, construct an exact-scope eligible target and exercise a creation-to-closure scenario that assigns the parameterised target, transfers to a backup eligible target, unassigns, assigns again, routes to an active same-office queue through `route_ticket`, crosses one SLA escalation threshold, and executes the domain's valid workflow path through ordinary status change, resolution, reopening, resolution again, and closure. Assert `created`, `assigned`, `reassigned`, `unassigned`, `queue_changed`, `escalated`, `status_changed`, `reopened`, and `closed` each appear in chronological order with no visible workflow duplicate and a valid hash chain. Add a wrong-scope owner and destination queue and assert each is rejected with no extra audit, outbox, or custody row.
 
@@ -572,15 +576,17 @@ Remove `assignee` from `WORK_STATE_FIELDS` and ordinary mutation loops. In the w
 
 In `eligibility.py`, implement `is_eligible_assignee_for_queue` by applying the existing exact designation/domain/office/service/confidentiality checks against the proposed queue instead of the ticket's current queue. A queue-scoped grant matches only the same stable queue ID; it never matches a null or different destination.
 
-In `permissions.py`, implement `can_route_ticket` as existing `can_assign` authority plus exact destination authority. An active destination must belong to the ticket office. An actor constrained to the current queue cannot route to another queue unless a separate active grant covers the destination; admin/auditor-only authority does not qualify.
+In `permissions.py`, implement `can_route_ticket` as existing `can_assign` authority plus exact destination authority. For a non-null destination, the queue must be active, belong to the ticket office, and be covered by a separate effective scope when the actor's current-ticket grant is queue-constrained. Admin/auditor-only authority does not qualify.
+
+Implement `can_unqueue_ticket` as a separate, explicit authority predicate for `queue=None`. It must require `can_assign(user, ticket=...)`, canonical scope to the current ticket, and at least one effective non-auditor scope that covers the ticket's domain, office, service, and Restricted visibility without a queue constraint (`scope.queue_id is None`; admin scope qualifies only when the actor also satisfies `can_assign`). A grant constrained to the current queue is not unqueue authority because clearing would move the ticket outside that grant. `can_route_ticket(..., queue=None)` must delegate to `can_unqueue_ticket`. Queue clearing performs no destination lookup and therefore has no active-destination requirement.
 
 In `assignment.py`, preserve owner-only behavior in `assign_ticket` and `assign_ticket_by_system`. Extract one private locked allocation writer reused by those functions and the two routing functions. `route_ticket` must:
 
 1. scope and `select_for_update` the ticket before checking `expected_updated_at`;
-2. resolve `queue_id` to an active `ServiceLocation` in `ticket.office`, or accept null to clear the queue;
+2. when `queue_id` is non-null, resolve it to an active `ServiceLocation` in `ticket.office`; when it is null, represent an explicit queue clear without querying for a destination;
 3. require `can_route_ticket` and a non-blank reason;
 4. treat `assignee_id` as the explicit resulting owner, reload it under the transaction, and validate it with `is_eligible_assignee_for_queue`;
-5. reject an unchanged queue/owner pair without writing;
+5. reject an unchanged queue/owner pair with `TicketValidationError({"routing": ["Queue and assignee must change."]})` before creating a receipt, audit, outbox, or custody record;
 6. capture previous and new owner/queue snapshots before saving;
 7. capture one `occurred_at = timezone.now()` and save queue and owner once;
 8. call `record_ticket_event` once with action `ticket.routing.changed`, before/after stable queue and owner IDs, and `source_process="ticket.routing"`; and
@@ -612,7 +618,7 @@ class RoutingResult:
 
 Add `QueueRoutingRequestSerializer` to `api.py` with required `updated_at`, nullable required `queue_id`, nullable required `assignee_id`, and a non-blank `reason` capped at 1000 characters. Add plain serializers for `RoutingReceipt`; serialise its stored snapshots without reloading mutable users or queues.
 
-Add `POST /api/v1/tickets/{number}/routing/` in `views.py`. Resolve the ticket through `self.get_object()`, validate the request, call `route_ticket`, and map scope, permission, eligibility/validation, and conflict exceptions to the existing structured 404/403/400/409 ticket-action responses. Return:
+Add `POST /api/v1/tickets/{number}/routing/` in `views.py`. Resolve the ticket through `self.get_object()`, validate the request, and call `route_ticket` with serializer `updated_at` passed explicitly as `expected_updated_at`. Map scope, permission, eligibility/validation, and conflict exceptions to the existing structured 404/403/400/409 ticket-action responses. Routing validation failures, including an unchanged queue/owner pair, use HTTP 400 code `invalid_routing` and preserve the service field map. Return:
 
 ```python
 Response(
@@ -626,13 +632,13 @@ Response(
 )
 ```
 
-Replace the direct assignee assignment in `_apply_action` with `assign_ticket_by_system`, using actor subject `automation:{rule.id}`, display name `Automation rule: {rule.name}`, source process `automation.rule`, and the rule action's configured reason. Treat an ineligible target as an unsuccessful action and leave the ticket unchanged.
+Replace the direct assignee assignment in `_apply_action` with `assign_ticket_by_system`, using actor subject `automation:{rule.id}`, display name `Automation rule: {rule.name}`, and source process `automation.rule`. Normalise `action_params["reason"]` only when it is a string; strip it and preserve the resulting non-blank value. For backward compatibility with existing rules whose parameters contain only `username` (and for missing, non-string, blank, or whitespace-only values), pass the deterministic non-blank fallback `Automation rule {rule.id} assigned ticket to {username}.`. Cover both the configured and fallback branches in `backend/apps/automation/tests/test_ai_assist.py`, including the exact reason stored in custody. Treat an ineligible target as an unsuccessful action and leave the ticket unchanged.
 
 - [ ] **Step 6: Document the assignment and queue-routing permission matrix**
 
 Extend `docs/permission-matrix.md` with rows for operational agent, operational supervisor, IT agent, IT lead, each of the eleven designations, admin-only, auditor, inactive user, expired role, automation, and direct API caller. Columns must cover actor permission, target eligibility, domain, office, service, queue, Restricted, reassignment reason, and custody actor kind.
 
-Document that assignment authority and queue-routing authority are server-side checks; queue changes require an active same-office destination plus destination scope, and paired owner changes also require resulting-owner eligibility. Record that `create_ticket` and IT-child creation are initial-state constructors, while all post-creation queue mutations go through `route_ticket` or `route_ticket_by_system`.
+Document that assignment authority and queue-routing authority are server-side checks. Non-null queue changes require an active same-office destination plus destination scope. Queue clearing has no destination-active check but requires current-ticket scope, `can_assign`, and an effective matching scope with no queue constraint. Paired owner changes also require resulting-owner eligibility, including queue-less eligibility after clearing. Record that `create_ticket` and IT-child creation are initial-state constructors, while all post-creation queue mutations go through `route_ticket` or `route_ticket_by_system`.
 
 - [ ] **Step 7: Run Plan 2 verification**
 
