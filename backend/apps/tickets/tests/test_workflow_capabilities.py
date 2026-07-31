@@ -5,6 +5,7 @@ from types import SimpleNamespace
 from uuid import uuid4
 
 import pytest
+from django.contrib.auth.models import Group
 from django.utils import timezone
 
 from apps.audit.models import AuditEvent
@@ -13,7 +14,8 @@ from apps.identity_access.scope import get_authority_snapshot
 from apps.organisations.models import Office, ServiceLocation
 from apps.tickets import services
 from apps.tickets.api import TicketDetailSerializer, TicketListSerializer
-from apps.tickets.models import OutboxEvent, Ticket
+from apps.tickets.eligibility import matching_actor_role_aliases
+from apps.tickets.models import OutboxEvent, Ticket, TicketCustodyEvent
 from apps.tickets.workflow import available_transitions
 from apps.workflow.models import Status, Transition, TransitionHistory
 
@@ -64,16 +66,23 @@ def _context(user: User):
     return {"request": SimpleNamespace(user=user)}
 
 
-def _assert_denied_without_side_effects(ticket: Ticket, actor: User) -> None:
+def _assert_denied_without_side_effects(
+    ticket: Ticket,
+    actor: User,
+    *,
+    snapshot=None,
+) -> None:
     previous_updated_at = ticket.updated_at
     history_count = TransitionHistory.objects.filter(ticket=ticket).count()
     audit_count = AuditEvent.objects.filter(object_id=str(ticket.id)).count()
     outbox_count = OutboxEvent.objects.filter(aggregate_id=str(ticket.id)).count()
+    custody_count = TicketCustodyEvent.objects.filter(ticket=ticket).count()
 
     with pytest.raises(services.TicketPermissionError):
         services.transition_ticket(
             ticket_id=ticket.id,
             actor=actor,
+            snapshot=snapshot,
             expected_updated_at=ticket.updated_at,
             to_status_code="triage",
         )
@@ -84,6 +93,7 @@ def _assert_denied_without_side_effects(ticket: Ticket, actor: User) -> None:
     assert TransitionHistory.objects.filter(ticket=ticket).count() == history_count
     assert AuditEvent.objects.filter(object_id=str(ticket.id)).count() == audit_count
     assert OutboxEvent.objects.filter(aggregate_id=str(ticket.id)).count() == outbox_count
+    assert TicketCustodyEvent.objects.filter(ticket=ticket).count() == custody_count
 
 
 @pytest.mark.parametrize("domain", ["operational", "it"])
@@ -587,6 +597,58 @@ def test_new_auditor_identity_denies_even_when_operator_scope_snapshot_is_cached
     assert listing["available_transition_codes"] == []
     assert detail["available_transitions"] == []
     _assert_denied_without_side_effects(ticket, actor)
+
+
+@pytest.mark.parametrize(
+    "auditor_source",
+    ["persisted-role", "django-group", "keycloak-group"],
+)
+def test_old_operator_snapshot_cannot_bypass_fresh_auditor_deny(
+    basic_world,
+    auditor_source,
+):
+    actor = _user(["ops-agents"])
+    ticket = _ticket(basic_world)
+    snapshot = get_authority_snapshot(actor)
+
+    if auditor_source == "persisted-role":
+        auditor_role = Role.objects.create(keycloak_role="auditors", name="Auditor")
+        UserRole.objects.create(user=actor, role=auditor_role)
+    elif auditor_source == "django-group":
+        actor.groups.add(Group.objects.create(name="auditors"))
+    else:
+        User.objects.filter(pk=actor.pk).update(
+            keycloak_groups=["ops-agents", "auditors"]
+        )
+
+    assert not available_transitions(ticket, actor, snapshot=snapshot).exists()
+    assert not matching_actor_role_aliases(ticket, actor, snapshot=snapshot)
+    _assert_denied_without_side_effects(ticket, actor, snapshot=snapshot)
+
+
+def test_old_snapshot_remains_invariant_for_non_auditor_authority_changes(
+    basic_world,
+):
+    actor = _user(["ops-agents"])
+    ticket = _ticket(basic_world)
+    snapshot = get_authority_snapshot(actor)
+    it_role = Role.objects.create(
+        keycloak_role="lead-it",
+        name="IT lead",
+        scopes=[{"domain": "it"}],
+    )
+    UserRole.objects.create(user=actor, role=it_role)
+
+    assert available_transitions(ticket, actor, snapshot=snapshot).exists()
+    updated = services.transition_ticket(
+        ticket_id=ticket.id,
+        actor=actor,
+        snapshot=snapshot,
+        expected_updated_at=ticket.updated_at,
+        to_status_code="triage",
+    )
+
+    assert updated.status.code == "triage"
 
 
 @pytest.mark.parametrize("dimension", ["office", "service", "queue"])

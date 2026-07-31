@@ -281,48 +281,54 @@ def _functional_matches(
     return tuple(matches)
 
 
-def is_auditor_identity(
-    user: User,
+def _resolved_sources_include_auditor(
     *,
-    active_assignments: list[UserRole] | None = None,
-    groups: set[str] | None = None,
+    active_assignments: list[UserRole],
+    groups: set[str],
 ) -> bool:
-    """Apply the read-only auditor boundary across every identity source."""
-    if active_assignments is None and groups is None:
-        claim_groups = {group for group in (user.keycloak_groups or []) if isinstance(group, str)}
-        raw_request_groups = getattr(user, "_groups", ())
-        if isinstance(raw_request_groups, list | tuple | set | frozenset):
-            claim_groups.update(group for group in raw_request_groups if isinstance(group, str))
-        if _AUDITOR_ROLE_KEYS & claim_groups:
-            return True
-        if not user.pk:
-            return False
-        now = timezone.now()
-        has_persisted_auditor = (
-            UserRole.objects.filter(
-                user_id=user.pk,
-                role__keycloak_role__in=_AUDITOR_ROLE_KEYS,
-            )
-            .filter(Q(expires_at__isnull=True) | Q(expires_at__gt=now))
-            .exists()
-        )
-        if has_persisted_auditor:
-            return True
-        return user.groups.filter(name__in=_AUDITOR_ROLE_KEYS).exists()
-
-    resolved_assignments = (
-        active_assignments
-        if active_assignments is not None
-        else _active_assignments(_prefetched_assignments(user), now=timezone.now())
-    )
-    resolved_groups = groups if groups is not None else _effective_groups(user)
     return bool(
-        _AUDITOR_ROLE_KEYS & resolved_groups
+        _AUDITOR_ROLE_KEYS & groups
         or any(
-            assignment.role.keycloak_role in _AUDITOR_ROLE_KEYS
-            for assignment in resolved_assignments
+            assignment.role.keycloak_role in _AUDITOR_ROLE_KEYS for assignment in active_assignments
         )
     )
+
+
+def is_auditor_identity(user: User) -> bool:
+    """Apply a fresh, complete read-only auditor boundary."""
+    claim_groups = {group for group in (user.keycloak_groups or []) if isinstance(group, str)}
+    raw_request_groups = getattr(user, "_groups", ())
+    if isinstance(raw_request_groups, list | tuple | set | frozenset):
+        claim_groups.update(group for group in raw_request_groups if isinstance(group, str))
+    if not user.pk:
+        return bool(_AUDITOR_ROLE_KEYS & claim_groups)
+    persisted_groups = (
+        User.objects.filter(pk=user.pk)
+        .values_list(
+            "keycloak_groups",
+            flat=True,
+        )
+        .first()
+    )
+    if isinstance(persisted_groups, list | tuple | set | frozenset):
+        claim_groups.update(group for group in persisted_groups if isinstance(group, str))
+    if _AUDITOR_ROLE_KEYS & claim_groups:
+        return True
+    now = timezone.now()
+    has_persisted_auditor = (
+        UserRole.objects.filter(
+            user_id=user.pk,
+            role__keycloak_role__in=_AUDITOR_ROLE_KEYS,
+        )
+        .filter(Q(expires_at__isnull=True) | Q(expires_at__gt=now))
+        .exists()
+    )
+    if has_persisted_auditor:
+        return True
+    return User.groups.through.objects.filter(
+        user_id=user.pk,
+        group__name__in=_AUDITOR_ROLE_KEYS,
+    ).exists()
 
 
 def has_active_persisted_assignments(user: User) -> bool:
@@ -404,7 +410,7 @@ def matching_actor_role_aliases(
     authority = snapshot or get_authority_snapshot(user)
     if authority.auditor_identity or "auditor" in authority.capabilities:
         return frozenset()
-    if snapshot is None and is_auditor_identity(user):
+    if is_auditor_identity(user):
         return frozenset()
     if user.is_superuser:
         return _ROLE_ALIASES["admin"]
@@ -446,8 +452,7 @@ def _candidate_for_user(
     current_auditor = (
         is_auditor_identity(user)
         if require_database_scope_check
-        else is_auditor_identity(
-            user,
+        else _resolved_sources_include_auditor(
             active_assignments=active_assignments,
             groups=groups,
         )

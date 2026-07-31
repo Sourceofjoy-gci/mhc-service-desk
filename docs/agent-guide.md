@@ -168,6 +168,8 @@ support message. The correlation reference is the safe diagnostic handle.
 - A ticket is not a formal filing; tell the requester when that distinction
   matters.
 - MFA and individual accounts are mandatory. Never share passwords or tokens.
+- Staff accounts are deactivated by authorized administrators rather than
+  deleted; this preserves ownership and custody history.
 - Audit/activity history is the source of truth for actions that the server
   accepted.
 - A clean automated component test is not a substitute for current UAT or

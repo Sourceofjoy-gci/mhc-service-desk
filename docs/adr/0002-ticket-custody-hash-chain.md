@@ -64,6 +64,23 @@ transition supplies a ticket's creation status when present, even if the
 configured initial status changed later. Only that consumed transition is
 suppressed from separate timeline output.
 
+Identity accounts use deactivation, not hard deletion, as their normal
+lifecycle. Django admin does not expose User object deletion. Migration `0009`
+changes `Ticket.assignee` from `SET_NULL` to `PROTECT`: Django's collector
+raises `ProtectedError` for an assigned user, and the database foreign-key
+constraint also rejects a direct or concurrent delete that would leave an
+assigned ticket without its owner. A failed programmatic delete rolls back its
+transaction; it does not null the assignee or append a fabricated custody
+event. Assignment retains the canonical ticket-then-sorted-users lock order,
+so deletion protection does not introduce a User-to-Ticket lock reversal.
+
+Migration `0009` has no data rewrite and keeps the assignee column nullable for
+explicit, custody-recorded unassignment. Rolling it back restores Django's
+`SET_NULL` collector behavior and therefore restores the possibility that a
+User deletion changes current ownership without passing through the guarded
+assignment/custody writer. Operational rollback must consequently disable User
+deletion and preserve the deactivation-only policy until `0009` is reapplied.
+
 The `0006` rollback removes the PostgreSQL trigger and restores the original
 non-cascading foreign key while deliberately retaining rows backfilled by that
 migration, because they cannot safely be separated from rows created after
@@ -88,6 +105,9 @@ the PRD records policy; this ledger is evidence, not an exemption from it.
 - The authorised activity endpoint remains the read boundary: scope and
   Restricted-ticket rules apply before custody data is returned, and auditors
   are read-only.
+- Staff identities remain available as stable custody references after
+  deactivation. Assigned identities cannot be hard-deleted, so account
+  lifecycle operations cannot silently bypass unassignment custody evidence.
 
 ## Alternatives considered
 

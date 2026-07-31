@@ -36,6 +36,12 @@ inactive local user has no canonical authority, including when marked as a
 superuser, and matter validation conceals denied records without provider or
 outbox side effects.
 
+Staff accounts are deactivated rather than hard-deleted. User deletion is
+disabled in Django admin, and `Ticket.assignee` uses `PROTECT`; assigned-user
+deletion through application code fails and rolls back instead of silently
+setting the ticket owner to null. Explicit assignment and unassignment remain
+the only supported ownership paths and record their custody evidence.
+
 Out-of-scope ticket lookups, including attachment lookups, return `404` so a
 caller cannot use the response to enumerate another domain.
 

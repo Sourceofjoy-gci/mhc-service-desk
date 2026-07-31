@@ -36,11 +36,15 @@ def available_transitions(
         Ticket.objects.filter(pk=ticket.pk),
         snapshot=authority,
     ).exists()
+    # Auditor authority only tightens access and is always read afresh. The
+    # assignment service reaches this check while holding the same transaction's
+    # actor-authority locks, so these non-locking reads observe the proven facts
+    # without adding a competing lock order.
     if (
         not actor.is_active
         or authority.auditor_identity
         or "auditor" in authority.capabilities
-        or (snapshot is None and is_auditor_identity(actor))
+        or is_auditor_identity(actor)
         or not ticket_is_in_scope
     ):
         return transitions.none()
