@@ -14,6 +14,7 @@ from apps.sla.serializers import serialize_sla_clocks
 from apps.workflow.models import Status
 
 from .activity import scoped_ticket_relationships
+from .assignment import AssignmentActor, AssignmentParty, AssignmentReceipt
 from .eligibility import custody_party_for_user, is_eligible_assignee
 from .models import Ticket, TicketLink, TicketMessage, TicketNote
 from .permissions import (
@@ -309,6 +310,53 @@ class WorkStateRequestSerializer(serializers.Serializer[dict[str, object]]):
         required=False,
         choices=Ticket.Confidentiality.choices,
     )
+
+
+class AssigneeSearchSerializer(serializers.Serializer[dict[str, object]]):
+    search = serializers.CharField(
+        required=False,
+        allow_blank=True,
+        default="",
+        max_length=100,
+    )
+
+
+class AssignmentRequestSerializer(serializers.Serializer[dict[str, object]]):
+    assignee_id = serializers.UUIDField(allow_null=True)
+    expected_updated_at = serializers.DateTimeField()
+    reason = serializers.CharField(
+        required=False,
+        allow_blank=True,
+        max_length=1000,
+    )
+
+
+class AssignmentPartySerializer(serializers.Serializer[AssignmentParty]):
+    id = serializers.CharField(read_only=True)
+    display_name = serializers.CharField(read_only=True)
+    designations = serializers.ListField(
+        child=serializers.CharField(),
+        read_only=True,
+    )
+    team_labels = serializers.ListField(
+        child=serializers.CharField(),
+        read_only=True,
+    )
+
+
+class AssignmentActorSerializer(serializers.Serializer[AssignmentActor]):
+    kind = serializers.CharField(read_only=True)
+    subject = serializers.CharField(read_only=True)
+    display_name = serializers.CharField(read_only=True)
+
+
+class AssignmentReceiptSerializer(serializers.Serializer[AssignmentReceipt]):
+    ticket_number = serializers.CharField(read_only=True)
+    action = serializers.CharField(read_only=True)
+    previous_assignee = AssignmentPartySerializer(read_only=True, allow_null=True)
+    new_assignee = AssignmentPartySerializer(read_only=True, allow_null=True)
+    occurred_at = serializers.DateTimeField(read_only=True)
+    performed_by = AssignmentActorSerializer(read_only=True)
 
 
 class PublicIntakeSerializer(serializers.Serializer[dict[str, object]]):

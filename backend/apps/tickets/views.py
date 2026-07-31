@@ -36,6 +36,9 @@ from apps.sla.services import instantiate_slas
 from . import services
 from .activity import build_ticket_activity
 from .api import (
+    AssigneeSearchSerializer,
+    AssignmentReceiptSerializer,
+    AssignmentRequestSerializer,
     MessageCreateSerializer,
     NoteCreateSerializer,
     PublicIntakeSerializer,
@@ -44,8 +47,10 @@ from .api import (
     TransitionRequestSerializer,
     WorkStateRequestSerializer,
 )
+from .assignment import assign_ticket
+from .eligibility import eligible_assignees
 from .models import Ticket
-from .permissions import can_add_ticket_content, eligible_assignee_queryset
+from .permissions import can_add_ticket_content, can_assign
 
 logger = logging.getLogger(__name__)
 
@@ -128,7 +133,10 @@ class TicketViewSet(
         message: str | None = None,
         code: str | None = None,
     ) -> Never:
-        if self.action in {"transition", "work_state"} and request.user.is_authenticated:
+        if (
+            self.action in {"transition", "work_state", "assignment"}
+            and request.user.is_authenticated
+        ):
             raise PermissionDenied(
                 detail="You cannot perform this ticket action.",
                 code="ticket_action_forbidden",
@@ -144,6 +152,7 @@ class TicketViewSet(
             "links",
             "work_state",
             "assignees",
+            "assignment",
             "activity",
         ):
             return TicketDetailSerializer
@@ -176,7 +185,7 @@ class TicketViewSet(
             qs = qs.filter(office__code=params["office"])
         if "channel" in params:
             qs = qs.filter(channel=params["channel"])
-        if "search" in params:
+        if "search" in params and self.action != "assignees":
             qs = qs.filter(
                 Q(number__icontains=params["search"])
                 | Q(title__icontains=params["search"])
@@ -319,10 +328,27 @@ class TicketViewSet(
         number: str | None = None,
     ) -> Response:
         ticket = self.get_object()
-        candidates = eligible_assignee_queryset(ticket).order_by(
-            "display_name",
-            "username",
-            "id",
+        actor = _authenticated_user(request)
+        if not can_assign(actor, ticket=ticket, request=request):
+            return _ticket_action_error(
+                request,
+                code="ticket_action_forbidden",
+                detail="You cannot perform this ticket action.",
+                fields={},
+                response_status=status.HTTP_403_FORBIDDEN,
+            )
+        search_serializer = AssigneeSearchSerializer(data=request.query_params)
+        if not search_serializer.is_valid():
+            return _ticket_action_error(
+                request,
+                code="invalid_assignee_search",
+                detail="Assignee search is invalid.",
+                fields=_serializer_error_fields(search_serializer.errors),
+                response_status=status.HTTP_400_BAD_REQUEST,
+            )
+        candidates = eligible_assignees(
+            ticket,
+            search=search_serializer.validated_data["search"],
         )
         return Response(
             {
@@ -331,9 +357,78 @@ class TicketViewSet(
                         "id": str(candidate.id),
                         "username": candidate.username,
                         "display_name": candidate.display_name,
+                        "designations": list(candidate.designations),
+                        "team_labels": list(candidate.team_labels),
                     }
                     for candidate in candidates
                 ]
+            }
+        )
+
+    @action(detail=True, methods=["post"], url_path="assignment")
+    def assignment(
+        self,
+        request: Request,
+        number: str | None = None,
+    ) -> Response:
+        ticket = self.get_object()
+        serializer = AssignmentRequestSerializer(data=request.data)
+        if not serializer.is_valid():
+            return _ticket_action_error(
+                request,
+                code="invalid_assignment",
+                detail="Assignment is invalid.",
+                fields=_serializer_error_fields(serializer.errors),
+                response_status=status.HTTP_400_BAD_REQUEST,
+            )
+        actor = _authenticated_user(request)
+        try:
+            result = assign_ticket(
+                ticket_id=ticket.id,
+                actor=actor,
+                assignee_id=serializer.validated_data["assignee_id"],
+                expected_updated_at=serializer.validated_data[
+                    "expected_updated_at"
+                ],
+                reason=serializer.validated_data.get("reason", ""),
+                request=request,
+            )
+        except services.TicketScopeError as exc:
+            raise NotFound from exc
+        except services.TicketValidationError as exc:
+            return _ticket_action_error(
+                request,
+                code="invalid_assignment",
+                detail="Assignment is invalid.",
+                fields=exc.fields,
+                response_status=status.HTTP_400_BAD_REQUEST,
+            )
+        except services.TicketPermissionError:
+            return _ticket_action_error(
+                request,
+                code="ticket_action_forbidden",
+                detail="You cannot perform this ticket action.",
+                fields={},
+                response_status=status.HTTP_403_FORBIDDEN,
+            )
+        except services.TicketConflictError as exc:
+            current = serializers.DateTimeField().to_representation(
+                exc.current_updated_at
+            )
+            return _ticket_action_error(
+                request,
+                code="stale_ticket",
+                detail="The ticket was updated by another user.",
+                fields={"updated_at": [current]},
+                response_status=status.HTTP_409_CONFLICT,
+            )
+        return Response(
+            {
+                "ticket": TicketDetailSerializer(
+                    result.ticket,
+                    context=self.get_serializer_context(),
+                ).data,
+                "receipt": AssignmentReceiptSerializer(result.receipt).data,
             }
         )
 
