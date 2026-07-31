@@ -1,11 +1,16 @@
 from __future__ import annotations
 
+from datetime import timedelta
+from types import SimpleNamespace
 from uuid import uuid4
 
 import pytest
 from django.contrib.auth.models import Group
+from django.utils import timezone
 
 from apps.identity_access.models import Role, User, UserRole
+from apps.identity_access.scope import get_authority_snapshot
+from apps.organisations.models import Office
 from apps.tickets.models import Ticket
 from apps.tickets.permissions import (
     can_add_ticket_content,
@@ -205,3 +210,166 @@ def test_persisted_leadership_role_can_assign_without_keycloak_groups(
 
     assert can_assign(user, ticket=ticket) is True
     assert can_reassign(user, ticket=ticket) is True
+
+
+@pytest.mark.parametrize(
+    ("authority_role", "domain"),
+    [
+        ("supervisor-operational", "operational"),
+        ("lead-it", "it"),
+        ("admin", "operational"),
+    ],
+)
+def test_assignment_authority_cannot_borrow_scope_from_matching_designation(
+    basic_world,
+    authority_role,
+    domain,
+):
+    user = _user(groups=[])
+    other_office = Office.objects.create(
+        region=basic_world["region"],
+        code=f"OTHER-{uuid4().hex[:8]}",
+        name="Other office",
+    )
+    service = basic_world["gen_info"] if domain == "operational" else basic_world["it_inc"]
+    designation = Role.objects.create(
+        keycloak_role="estate-examiner",
+        name="Estate Examiner",
+        scopes=[
+            {
+                "domain": domain,
+                "office": str(basic_world["office"].id),
+                "service": str(service.id),
+            }
+        ],
+    )
+    authority = Role.objects.create(
+        keycloak_role=authority_role,
+        name=authority_role,
+        scopes=[
+            {
+                "domain": "admin" if authority_role == "admin" else domain,
+                "office": str(other_office.id),
+            }
+        ],
+    )
+    UserRole.objects.create(user=user, role=designation, office=basic_world["office"])
+    UserRole.objects.create(user=user, role=authority, office=other_office)
+    ticket = Ticket.objects.create(
+        number=f"{'OP' if domain == 'operational' else 'IT'}-202607-900400",
+        domain=domain,
+        title="No scope borrowing",
+        status=Status.objects.get(domain=domain, code="new"),
+        channel="internal",
+        requester=basic_world["contact"],
+        service=service,
+        request_type=service.request_types.get(),
+        office=basic_world["office"],
+    )
+
+    assert can_update_work_state(user, ticket) is True
+    assert can_assign(user, ticket=ticket) is False
+
+
+def test_persisted_designation_suppresses_stale_supervisor_group_authority(
+    basic_world,
+):
+    user = _user(groups=["ops-supervisors"])
+    designation = Role.objects.create(
+        keycloak_role="estate-examiner",
+        name="Estate Examiner",
+        scopes=[{"domain": "operational"}],
+    )
+    UserRole.objects.create(user=user, role=designation)
+    ticket = Ticket.objects.create(
+        number="OP-202607-900500",
+        domain="operational",
+        title="Persisted precedence",
+        status=Status.objects.get(domain="operational", code="new"),
+        channel="internal",
+        requester=basic_world["contact"],
+        service=basic_world["gen_info"],
+        request_type=basic_world["gen_info"].request_types.get(),
+        office=basic_world["office"],
+    )
+
+    assert can_update_work_state(user, ticket) is True
+    assert can_assign(user, ticket=ticket) is False
+
+
+def test_expired_role_restores_legacy_supervisor_actor_fallback(basic_world):
+    user = _user(groups=["ops-supervisors"])
+    expired = Role.objects.create(
+        keycloak_role="estate-examiner",
+        name="Estate Examiner",
+        scopes=[{"domain": "it"}],
+    )
+    UserRole.objects.create(
+        user=user,
+        role=expired,
+        expires_at=timezone.now() - timedelta(seconds=1),
+    )
+    ticket = Ticket.objects.create(
+        number="OP-202607-900600",
+        domain="operational",
+        title="Expired persisted role",
+        status=Status.objects.get(domain="operational", code="new"),
+        channel="internal",
+        requester=basic_world["contact"],
+        service=basic_world["gen_info"],
+        request_type=basic_world["gen_info"].request_types.get(),
+        office=basic_world["office"],
+    )
+
+    assert can_assign(user, ticket=ticket) is True
+
+
+def test_active_invalid_role_suppresses_legacy_supervisor_actor_fallback(basic_world):
+    user = _user(groups=["ops-supervisors"])
+    invalid = Role.objects.create(
+        keycloak_role="invalid-role",
+        name="Invalid role",
+        scopes={"domain": "operational"},
+    )
+    UserRole.objects.create(user=user, role=invalid)
+    ticket = Ticket.objects.create(
+        number="OP-202607-900700",
+        domain="operational",
+        title="Invalid persisted role",
+        status=Status.objects.get(domain="operational", code="new"),
+        channel="internal",
+        requester=basic_world["contact"],
+        service=basic_world["gen_info"],
+        request_type=basic_world["gen_info"].request_types.get(),
+        office=basic_world["office"],
+    )
+
+    assert can_assign(user, ticket=ticket) is False
+
+
+def test_cached_auditor_snapshot_remains_a_permission_denial_after_role_removal(
+    basic_world,
+):
+    user = _user(groups=["ops-agents"])
+    auditor = Role.objects.create(
+        keycloak_role="auditor",
+        name="Auditor",
+        scopes=[{"domain": "operational"}],
+    )
+    assignment = UserRole.objects.create(user=user, role=auditor)
+    request = SimpleNamespace(user=user)
+    get_authority_snapshot(user, request=request)
+    assignment.delete()
+    ticket = Ticket.objects.create(
+        number="OP-202607-900800",
+        domain="operational",
+        title="Cached auditor boundary",
+        status=Status.objects.get(domain="operational", code="new"),
+        channel="internal",
+        requester=basic_world["contact"],
+        service=basic_world["gen_info"],
+        request_type=basic_world["gen_info"].request_types.get(),
+        office=basic_world["office"],
+    )
+
+    assert can_update_work_state(user, ticket, request=request) is False

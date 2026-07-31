@@ -272,11 +272,12 @@ def _active_persisted_assignments(
         return None
 
     now = timezone.now()
-    return [
+    active = [
         assignment
         for assignment in persisted
         if assignment.expires_at is None or assignment.expires_at > now
     ]
+    return active or None
 
 
 def get_effective_role_grants(user: User) -> tuple[EffectiveRoleGrant, ...]:

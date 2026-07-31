@@ -4,6 +4,7 @@ from datetime import timedelta
 from uuid import UUID, uuid4
 
 import pytest
+from django.contrib.auth.models import Group
 from django.db import connection
 from django.test.utils import CaptureQueriesContext
 from django.utils import timezone
@@ -293,6 +294,77 @@ def test_admin_auditor_and_unpersisted_designation_are_not_ownership_roles(basic
     assert auditor.id not in candidate_ids
     assert designation_group_only.id not in candidate_ids
     assert mixed_auditor.id not in candidate_ids
+
+
+@pytest.mark.parametrize(
+    "auditor_source",
+    ["persisted", "keycloak", "request", "django"],
+)
+def test_every_auditor_identity_source_excludes_a_functional_designation_target(
+    basic_world,
+    auditor_source,
+):
+    ticket = _ticket(basic_world)
+    user = _user()
+    designation = Role.objects.create(
+        keycloak_role="estate-examiner",
+        name="Estate Examiner",
+        scopes=[{"domain": "operational"}],
+    )
+    UserRole.objects.create(user=user, role=designation)
+    if auditor_source == "persisted":
+        auditor = Role.objects.create(
+            keycloak_role="auditor",
+            name="Auditor",
+            scopes=[{"domain": "operational"}],
+        )
+        UserRole.objects.create(user=user, role=auditor)
+    elif auditor_source == "keycloak":
+        user.keycloak_groups = ["auditors"]
+        user.save(update_fields=["keycloak_groups"])
+        user._groups = []
+    elif auditor_source == "request":
+        user._groups = ["auditors"]
+    else:
+        auditors = Group.objects.create(name="auditors")
+        user.groups.add(auditors)
+
+    assert is_eligible_assignee(ticket, user) is False
+    if auditor_source != "request":
+        assert user.id not in {
+            candidate.id for candidate in eligible_assignees(ticket)
+        }
+
+
+def test_only_expired_persisted_rows_allow_legacy_target_fallback(basic_world):
+    ticket = _ticket(basic_world)
+    user = _user(groups=["ops-agents"])
+    expired_role = Role.objects.create(
+        keycloak_role="estate-examiner",
+        name="Estate Examiner",
+        scopes=[{"domain": "it"}],
+    )
+    UserRole.objects.create(
+        user=user,
+        role=expired_role,
+        expires_at=timezone.now() - timedelta(seconds=1),
+    )
+
+    assert is_eligible_assignee(ticket, User.objects.get(pk=user.pk)) is True
+
+
+def test_active_invalid_persisted_row_suppresses_legacy_target_fallback(basic_world):
+    ticket = _ticket(basic_world)
+    user = _user(groups=["ops-agents"])
+    invalid_role = Role.objects.create(
+        keycloak_role="invalid-functional-role",
+        name="Invalid functional role",
+        scopes={"domain": "operational"},
+    )
+    UserRole.objects.create(user=user, role=invalid_role)
+
+    assert is_eligible_assignee(ticket, user) is False
+    assert user.id not in {candidate.id for candidate in eligible_assignees(ticket)}
 
 
 @pytest.mark.parametrize(

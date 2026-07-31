@@ -8,7 +8,7 @@ import pytest
 from apps.audit.models import AuditEvent
 from apps.identity_access.models import Role, User, UserRole
 from apps.identity_access.scope import get_authority_snapshot
-from apps.organisations.models import ServiceLocation
+from apps.organisations.models import Office, ServiceLocation
 from apps.tickets import services
 from apps.tickets.api import TicketDetailSerializer, TicketListSerializer
 from apps.tickets.models import OutboxEvent, Ticket
@@ -215,6 +215,83 @@ def test_designation_requires_matching_restricted_visibility_for_workflow(basic_
     _assert_denied_without_side_effects(ticket, actor)
 
 
+@pytest.mark.parametrize(
+    ("authority_role", "domain", "required_role"),
+    [
+        ("supervisor-operational", "operational", "ops-supervisors"),
+        ("lead-it", "it", "it-leads"),
+        ("admin", "operational", "private-required-role"),
+    ],
+)
+def test_privileged_transition_cannot_borrow_scope_from_designation(
+    basic_world,
+    authority_role,
+    domain,
+    required_role,
+):
+    actor = _user([])
+    ticket = _ticket(basic_world, domain=domain)
+    other_office = Office.objects.create(
+        region=basic_world["region"],
+        code=f"OTHER-{uuid4().hex[:8]}",
+        name="Other workflow office",
+    )
+    designation = Role.objects.create(
+        keycloak_role="estate-examiner",
+        name="Estate Examiner",
+        scopes=[
+            {
+                "domain": domain,
+                "office": str(ticket.office_id),
+                "service": str(ticket.service_id),
+            }
+        ],
+    )
+    authority = Role.objects.create(
+        keycloak_role=authority_role,
+        name=authority_role,
+        scopes=[
+            {
+                "domain": "admin" if authority_role == "admin" else domain,
+                "office": str(other_office.id),
+            }
+        ],
+    )
+    UserRole.objects.create(user=actor, role=designation, office=ticket.office)
+    UserRole.objects.create(user=actor, role=authority, office=other_office)
+    transition = Transition.objects.get(
+        domain=domain,
+        from_status=ticket.status,
+        to_status__code="triage",
+    )
+    transition.required_role = required_role
+    transition.save(update_fields=["required_role"])
+
+    assert not available_transitions(ticket, actor).exists()
+
+
+def test_persisted_designation_suppresses_stale_supervisor_transition_group(
+    basic_world,
+):
+    actor = _user(["ops-supervisors"])
+    ticket = _ticket(basic_world)
+    designation = Role.objects.create(
+        keycloak_role="estate-examiner",
+        name="Estate Examiner",
+        scopes=[{"domain": "operational"}],
+    )
+    UserRole.objects.create(user=actor, role=designation)
+    transition = Transition.objects.get(
+        domain=ticket.domain,
+        from_status=ticket.status,
+        to_status__code="triage",
+    )
+    transition.required_role = "ops-supervisors"
+    transition.save(update_fields=["required_role"])
+
+    assert not available_transitions(ticket, actor).exists()
+
+
 def test_persisted_auditor_has_no_transitions_despite_mutable_group_snapshot(basic_world):
     ticket = _ticket(basic_world)
     actor = _user(["ops-supervisors"])
@@ -410,7 +487,7 @@ def test_cached_auditor_snapshot_stays_denied_after_assignment_is_removed(basic_
         )
 
 
-def test_cached_operator_snapshot_stays_allowed_after_auditor_assignment_is_added(
+def test_new_auditor_identity_denies_even_when_operator_scope_snapshot_is_cached(
     basic_world,
 ):
     actor = _user(["ops-agents"])
@@ -424,18 +501,9 @@ def test_cached_operator_snapshot_stays_allowed_after_auditor_assignment_is_adde
     detail = TicketDetailSerializer(ticket, context={"request": request}).data
 
     assert "auditor" not in snapshot.capabilities
-    assert listing["available_transition_codes"] == ["triage"]
-    assert [item["to_status"] for item in detail["available_transitions"]] == [
-        "triage"
-    ]
-    updated = services.transition_ticket(
-        ticket_id=ticket.id,
-        actor=actor,
-        request=request,
-        expected_updated_at=ticket.updated_at,
-        to_status_code="triage",
-    )
-    assert updated.status.code == "triage"
+    assert listing["available_transition_codes"] == []
+    assert detail["available_transitions"] == []
+    _assert_denied_without_side_effects(ticket, actor)
 
 
 @pytest.mark.parametrize("dimension", ["office", "service", "queue"])

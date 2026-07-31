@@ -727,19 +727,13 @@ def test_persisted_privileged_role_has_exact_restricted_visibility(
     assert set(visible.values_list("title", flat=True)) == expected_titles
 
 
-@pytest.mark.parametrize("assignment_kind", ["expired", "malformed", "unknown"])
+@pytest.mark.parametrize("assignment_kind", ["malformed", "unknown"])
 @pytest.mark.usefixtures("_confidentiality_tickets")
 def test_invalid_persisted_assignment_fails_closed_without_group_capability_fallback(
     assignment_kind,
 ):
     user = _persisted_user(groups=["auditors", "ops-supervisors"])
-    if assignment_kind == "expired":
-        _assign_persisted_role(
-            user,
-            keycloak_role="auditor",
-            expires_at=timezone.now() - timedelta(seconds=1),
-        )
-    elif assignment_kind == "malformed":
+    if assignment_kind == "malformed":
         _assign_persisted_role(
             user,
             keycloak_role="malformed-role",
@@ -754,6 +748,22 @@ def test_invalid_persisted_assignment_fails_closed_without_group_capability_fall
     assert not is_auditor(user)
     assert not can_view_restricted(user)
     assert not visible.exists()
+
+
+@pytest.mark.usefixtures("_confidentiality_tickets")
+def test_only_expired_persisted_assignments_restore_legacy_group_fallback():
+    user = _persisted_user(groups=["ops-agents"])
+    _assign_persisted_role(
+        user,
+        keycloak_role="estate-examiner",
+        scopes=[{"domain": "it"}],
+        expires_at=timezone.now() - timedelta(seconds=1),
+    )
+
+    visible = scope_ticket_queryset(user, Ticket.objects.all())
+
+    assert get_user_scopes(user) == [Scope(domain="operational")]
+    assert set(visible.values_list("title", flat=True)) == {"Operational normal"}
 
 
 @pytest.mark.parametrize(

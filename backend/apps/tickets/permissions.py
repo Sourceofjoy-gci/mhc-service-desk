@@ -7,11 +7,14 @@ from apps.identity_access.models import User
 from apps.identity_access.scope import (
     get_authority_snapshot,
     get_effective_role_grants,
-    is_auditor,
-    scope_ticket_queryset,
 )
 
-from .eligibility import eligible_assignees, is_eligible_assignee
+from .eligibility import (
+    eligible_assignees,
+    has_active_persisted_assignments,
+    is_auditor_identity,
+    matching_actor_role_aliases,
+)
 from .models import Ticket
 
 DOMAIN_GROUPS = {
@@ -44,12 +47,8 @@ def user_groups(user: User) -> set[str]:
 
 
 def _cannot_mutate(user: User, *, request: object | None = None) -> bool:
-    groups = user_groups(user)
-    return (
-        not user.is_active
-        or is_auditor(user, request=request)
-        or "auditors" in groups
-    )
+    del request
+    return not user.is_active or is_auditor_identity(user)
 
 
 def can_assign(
@@ -61,13 +60,29 @@ def can_assign(
     if _cannot_mutate(user, request=request):
         return False
     if ticket is not None:
-        authority = get_authority_snapshot(user, request=request)
-        if not scope_ticket_queryset(
-            user,
-            Ticket.objects.filter(pk=ticket.pk),
-            snapshot=authority,
-        ).exists():
-            return False
+        authority = (
+            get_authority_snapshot(user, request=request)
+            if request is not None
+            else None
+        )
+        return bool(
+            matching_actor_role_aliases(
+                ticket,
+                user,
+                snapshot=authority,
+            )
+            & REASSIGN_GROUPS
+        )
+    if user.is_superuser:
+        return True
+    if has_active_persisted_assignments(user):
+        return bool(
+            {
+                grant.role_key
+                for grant in get_effective_role_grants(user)
+            }
+            & REASSIGN_GROUPS
+        )
     return bool(user_groups(user) & REASSIGN_GROUPS)
 
 
@@ -97,20 +112,22 @@ def can_update_work_state(
 ) -> bool:
     if _cannot_mutate(user, request=request):
         return False
-    authority = get_authority_snapshot(user, request=request)
-    if not scope_ticket_queryset(
+    authority = (
+        get_authority_snapshot(user, request=request)
+        if request is not None
+        else None
+    )
+    aliases = matching_actor_role_aliases(
+        ticket,
         user,
-        Ticket.objects.filter(pk=ticket.pk),
         snapshot=authority,
-    ).exists():
-        return False
-    groups = user_groups(user)
-    if any(scope.domain == "admin" for scope in authority.scopes):
-        return True
-    allowed = DOMAIN_GROUPS.get(ticket.domain, set()) | {"system-admins"}
-    if groups & allowed:
-        return True
-    return is_eligible_assignee(ticket, user)
+    )
+    allowed = DOMAIN_GROUPS.get(ticket.domain, set()) | {
+        "admin",
+        "admin-scope",
+        "system-admins",
+    }
+    return bool(aliases & allowed)
 
 
 def can_add_ticket_content(
