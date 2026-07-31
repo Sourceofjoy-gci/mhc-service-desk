@@ -767,7 +767,7 @@ def test_old_operator_snapshot_cannot_bypass_fresh_auditor_deny(
     _assert_denied_without_side_effects(ticket, actor, snapshot=snapshot)
 
 
-def test_old_snapshot_remains_invariant_for_non_auditor_authority_changes(
+def test_old_snapshot_cannot_authorize_after_non_auditor_authority_changes(
     basic_world,
 ):
     actor = _user(["ops-agents"])
@@ -781,15 +781,7 @@ def test_old_snapshot_remains_invariant_for_non_auditor_authority_changes(
     UserRole.objects.create(user=actor, role=it_role)
 
     assert available_transitions(ticket, actor, snapshot=snapshot).exists()
-    updated = services.transition_ticket(
-        ticket_id=ticket.id,
-        actor=actor,
-        snapshot=snapshot,
-        expected_updated_at=ticket.updated_at,
-        to_status_code="triage",
-    )
-
-    assert updated.status.code == "triage"
+    _assert_denied_without_side_effects(ticket, actor, snapshot=snapshot)
 
 
 @pytest.mark.parametrize("dimension", ["office", "service", "queue"])

@@ -62,15 +62,12 @@ def can_assign(
     *,
     ticket: Ticket | None = None,
     request: object | None = None,
+    snapshot: AuthoritySnapshot | None = None,
 ) -> bool:
     if _cannot_mutate(user, request=request):
         return False
     if ticket is not None:
-        authority = (
-            get_authority_snapshot(user, request=request)
-            if request is not None
-            else None
-        )
+        authority = snapshot or get_authority_snapshot(user, request=request)
         return bool(
             matching_actor_role_aliases(
                 ticket,
@@ -97,8 +94,14 @@ def can_reassign(
     *,
     ticket: Ticket | None = None,
     request: object | None = None,
+    snapshot: AuthoritySnapshot | None = None,
 ) -> bool:
-    return can_assign(user, ticket=ticket, request=request)
+    return can_assign(
+        user,
+        ticket=ticket,
+        request=request,
+        snapshot=snapshot,
+    )
 
 
 def _scope_covers_routing_result(
@@ -272,8 +275,14 @@ def can_change_confidentiality(
     *,
     ticket: Ticket | None = None,
     request: object | None = None,
+    snapshot: AuthoritySnapshot | None = None,
 ) -> bool:
-    return can_assign(user, ticket=ticket, request=request)
+    return can_assign(
+        user,
+        ticket=ticket,
+        request=request,
+        snapshot=snapshot,
+    )
 
 
 def can_update_work_state(
@@ -281,14 +290,11 @@ def can_update_work_state(
     ticket: Ticket,
     *,
     request: object | None = None,
+    snapshot: AuthoritySnapshot | None = None,
 ) -> bool:
     if _cannot_mutate(user, request=request):
         return False
-    authority = (
-        get_authority_snapshot(user, request=request)
-        if request is not None
-        else None
-    )
+    authority = snapshot or get_authority_snapshot(user, request=request)
     aliases = matching_actor_role_aliases(
         ticket,
         user,
@@ -307,9 +313,15 @@ def can_add_ticket_content(
     ticket: Ticket,
     *,
     request: object | None = None,
+    snapshot: AuthoritySnapshot | None = None,
 ) -> bool:
     """Return whether the actor may add mutable content to this ticket."""
-    return can_update_work_state(user, ticket, request=request)
+    return can_update_work_state(
+        user,
+        ticket,
+        request=request,
+        snapshot=snapshot,
+    )
 
 
 def eligible_assignee_queryset(ticket: Ticket) -> QuerySet[User]:

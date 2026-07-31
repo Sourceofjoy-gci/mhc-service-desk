@@ -17,6 +17,7 @@ from rest_framework.request import Request
 
 from apps.catalogue.models import RequestType, Service
 from apps.contacts.models import Contact, VerificationToken
+from apps.identity_access.authority_lock import lock_user_authorities
 from apps.identity_access.models import User
 from apps.identity_access.scope import (
     AuthoritySnapshot,
@@ -34,6 +35,7 @@ from .custody import (
     status_snapshot,
     user_actor,
 )
+from .eligibility import _has_request_local_auditor_claim, is_auditor_identity
 from .events import record_ticket_event
 from .models import Ticket, TicketLink, TicketMessage, TicketNote, Watcher
 from .permissions import (
@@ -214,6 +216,53 @@ class TicketValidationError(Exception):
         self.fields = fields
 
 
+@dataclass(frozen=True)
+class _LockedMutationAuthority:
+    actor: User
+    snapshot: AuthoritySnapshot
+
+
+def _lock_and_revalidate_mutation_actor(
+    *,
+    ticket: Ticket,
+    actor: User,
+    request: Request | None,
+    initial_snapshot: AuthoritySnapshot,
+    scope_failure_is_permission: bool = False,
+) -> _LockedMutationAuthority:
+    """Lock current actor facts after the ticket and re-prove ticket scope."""
+    request_local_auditor = _has_request_local_auditor_claim(
+        actor,
+        request=request,
+    )
+    locked_authority = lock_user_authorities((actor.id,)).get(actor.id)
+    if locked_authority is None or not locked_authority.user.is_active:
+        raise TicketPermissionError
+    locked_actor = locked_authority.user
+    locked_snapshot = locked_authority.snapshot
+    if (
+        initial_snapshot.auditor_identity
+        or "auditor" in initial_snapshot.capabilities
+        or request_local_auditor
+        or locked_snapshot.auditor_identity
+        or "auditor" in locked_snapshot.capabilities
+        or is_auditor_identity(locked_actor)
+    ):
+        raise TicketPermissionError
+    if not scope_ticket_queryset(
+        locked_actor,
+        Ticket.objects.filter(pk=ticket.pk),
+        snapshot=locked_snapshot,
+    ).exists():
+        if scope_failure_is_permission:
+            raise TicketPermissionError
+        raise TicketScopeError
+    return _LockedMutationAuthority(
+        actor=locked_actor,
+        snapshot=locked_snapshot,
+    )
+
+
 WORK_STATE_FIELDS = {
     "team",
     "waiting_reason",
@@ -288,7 +337,20 @@ def update_work_state(
         raise TicketScopeError from exc
     if expected_updated_at != locked.updated_at:
         raise TicketConflictError(locked.updated_at)
-    if not can_update_work_state(actor, locked, request=request):
+    locked_authority = _lock_and_revalidate_mutation_actor(
+        ticket=locked,
+        actor=actor,
+        request=request,
+        initial_snapshot=authority,
+    )
+    locked_actor = locked_authority.actor
+    locked_snapshot = locked_authority.snapshot
+    if not can_update_work_state(
+        locked_actor,
+        locked,
+        request=request,
+        snapshot=locked_snapshot,
+    ):
         raise TicketPermissionError
 
     _validate_work_state_changes(changes)
@@ -302,9 +364,10 @@ def update_work_state(
         current = getattr(locked, field)
         if current != changes[field]:
             if field == "confidentiality" and not can_change_confidentiality(
-                actor,
+                locked_actor,
                 ticket=locked,
                 request=request,
+                snapshot=locked_snapshot,
             ):
                 raise TicketPermissionError
             before[field] = current
@@ -317,7 +380,7 @@ def update_work_state(
     locked.save(update_fields=[*update_fields, "updated_at"])
     record_ticket_event(
         ticket=locked,
-        actor_subject=actor.keycloak_subject,
+        actor_subject=locked_actor.keycloak_subject,
         action="ticket.work_state.changed",
         before=before,
         after=after,
@@ -339,6 +402,7 @@ def transition_ticket(
     snapshot: AuthoritySnapshot | None = None,
 ) -> Ticket:
     """Atomically validate and apply an optimistic workflow transition."""
+    authority = snapshot or get_authority_snapshot(actor, request=request)
     locked = (
         Ticket.objects.select_for_update(of=("self",))
         .select_related("status")
@@ -346,6 +410,16 @@ def transition_ticket(
     )
     if expected_updated_at != locked.updated_at:
         raise TicketConflictError(locked.updated_at)
+
+    locked_authority = _lock_and_revalidate_mutation_actor(
+        ticket=locked,
+        actor=actor,
+        request=request,
+        initial_snapshot=authority,
+        scope_failure_is_permission=True,
+    )
+    locked_actor = locked_authority.actor
+    locked_snapshot = locked_authority.snapshot
 
     workflow_transition = Transition.objects.select_related("to_status").filter(
         domain=locked.domain,
@@ -357,9 +431,9 @@ def transition_ticket(
         raise TransitionError
     if not available_transitions(
         locked,
-        actor,
+        locked_actor,
         request=request,
-        snapshot=snapshot,
+        snapshot=locked_snapshot,
     ).filter(
         id=workflow_transition.id
     ).exists():
@@ -450,24 +524,24 @@ def transition_ticket(
         ticket=locked,
         from_code=previous.code,
         to_code=target.code,
-        actor_subject=actor.keycloak_subject,
+        actor_subject=locked_actor.keycloak_subject,
     )
 
     history = TransitionHistory.objects.create(
         ticket=locked,
         from_status=previous,
         to_status=target,
-        actor_subject=actor.keycloak_subject,
+        actor_subject=locked_actor.keycloak_subject,
         reason=reason,
     )
     record_ticket_event(
         ticket=locked,
-        actor_subject=actor.keycloak_subject,
+        actor_subject=locked_actor.keycloak_subject,
         action="ticket.transitioned",
         before=before,
         after=after,
         metadata={"reason": reason},
-        custody_actor=user_actor(actor),
+        custody_actor=user_actor(locked_actor),
         custody_events=(
             CustodyEventInput(
                 event_type=custody_event_type_for_transition(target.code),
@@ -486,7 +560,7 @@ def transition_ticket(
 
         sync_child_status_to_parent(
             child=locked,
-            actor_subject=actor.keycloak_subject,
+            actor_subject=locked_actor.keycloak_subject,
         )
     return locked
 
@@ -502,10 +576,10 @@ def _lock_ticket_for_content(
     actor: User | None,
     request: Request | None,
     snapshot: AuthoritySnapshot | None,
-) -> Ticket:
+) -> tuple[Ticket, User | None]:
     query = Ticket.objects.select_for_update(of=("self",))
     if actor is None:
-        return query.get(id=ticket_id)
+        return query.get(id=ticket_id), None
 
     authority = snapshot or get_authority_snapshot(actor, request=request)
     try:
@@ -516,9 +590,21 @@ def _lock_ticket_for_content(
         ).get(id=ticket_id)
     except Ticket.DoesNotExist as exc:
         raise TicketScopeError from exc
-    if not can_add_ticket_content(actor, locked, request=request):
+    locked_authority = _lock_and_revalidate_mutation_actor(
+        ticket=locked,
+        actor=actor,
+        request=request,
+        initial_snapshot=authority,
+    )
+    locked_actor = locked_authority.actor
+    if not can_add_ticket_content(
+        locked_actor,
+        locked,
+        request=request,
+        snapshot=locked_authority.snapshot,
+    ):
         raise TicketPermissionError
-    return locked
+    return locked, locked_actor
 
 
 @transaction.atomic
@@ -541,13 +627,15 @@ def add_message(
     request: Request | None = None,
     snapshot: AuthoritySnapshot | None = None,
 ) -> TicketMessage:
-    locked_ticket = _lock_ticket_for_content(
+    locked_ticket, locked_actor = _lock_ticket_for_content(
         ticket_id=ticket.id,
         actor=actor,
         request=request,
         snapshot=snapshot,
     )
-    event_actor = actor.keycloak_subject if actor is not None else actor_subject
+    event_actor = (
+        locked_actor.keycloak_subject if locked_actor is not None else actor_subject
+    )
     message = TicketMessage.objects.create(
         ticket=locked_ticket,
         direction=direction,
@@ -600,13 +688,15 @@ def add_internal_note(
     request: Request | None = None,
     snapshot: AuthoritySnapshot | None = None,
 ) -> TicketNote:
-    locked_ticket = _lock_ticket_for_content(
+    locked_ticket, locked_actor = _lock_ticket_for_content(
         ticket_id=ticket.id,
         actor=actor,
         request=request,
         snapshot=snapshot,
     )
-    event_actor = actor.keycloak_subject if actor is not None else author_subject
+    event_actor = (
+        locked_actor.keycloak_subject if locked_actor is not None else author_subject
+    )
     note = TicketNote.objects.create(
         ticket=locked_ticket,
         body=body,
