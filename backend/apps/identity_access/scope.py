@@ -280,7 +280,7 @@ def _active_persisted_assignments(
 
 
 def get_effective_role_grants(user: User) -> tuple[EffectiveRoleGrant, ...]:
-    """Return active, strictly validated persisted role grants."""
+    """Return validated active grants, ordered by role then office (None first)."""
     if not _has_active_identity(user):
         return ()
 
@@ -302,7 +302,16 @@ def get_effective_role_grants(user: User) -> tuple[EffectiveRoleGrant, ...]:
                 expires_at=assignment.expires_at,
             )
         )
-    return tuple(grants)
+    return tuple(
+        sorted(
+            grants,
+            key=lambda grant: (
+                grant.role_key,
+                grant.office_id is not None,
+                str(grant.office_id or ""),
+            ),
+        )
+    )
 
 
 def _snapshot_from_persisted(

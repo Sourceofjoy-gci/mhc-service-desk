@@ -250,6 +250,40 @@ def test_active_persisted_role_produces_exact_effective_grant(basic_world):
     )
 
 
+def test_effective_grants_have_stable_role_and_office_order(basic_world):
+    user = _persisted_user(groups=[])
+    records_role = Role.objects.create(
+        keycloak_role="records-clerk",
+        name="Records Clerk",
+        scopes=[{"domain": "operational"}],
+    )
+    examiner_role = Role.objects.create(
+        keycloak_role="estate-examiner",
+        name="Estate Examiner",
+        scopes=[{"domain": "operational"}],
+    )
+    UserRole.objects.create(
+        user=user,
+        role=records_role,
+        office=basic_world["office"],
+    )
+    UserRole.objects.create(
+        user=user,
+        role=examiner_role,
+        office=basic_world["office"],
+    )
+    UserRole.objects.create(user=user, role=records_role, office=None)
+
+    assert [
+        (grant.role_key, grant.office_id)
+        for grant in get_effective_role_grants(user)
+    ] == [
+        ("estate-examiner", basic_world["office"].id),
+        ("records-clerk", None),
+        ("records-clerk", basic_world["office"].id),
+    ]
+
+
 def test_expired_persisted_role_produces_no_effective_grant():
     user = _persisted_user(groups=["ops-agents"])
     _assign_persisted_role(
