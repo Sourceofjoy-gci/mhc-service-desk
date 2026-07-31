@@ -197,24 +197,9 @@ def _assignment_scope_matches_ticket(
     assignment: UserRole,
     scope: Scope,
     ticket: Ticket,
-    *,
-    scope_index: int,
 ) -> bool:
     if assignment.office_id is not None and assignment.office_id != ticket.office_id:
         return False
-    configured_scopes = assignment.role.scopes
-    if isinstance(configured_scopes, list) and configured_scopes:
-        raw_scope = configured_scopes[scope_index]
-        if isinstance(raw_scope, dict):
-            configured_office = raw_scope.get(
-                "office",
-                raw_scope.get("office_id"),
-            )
-            if (
-                configured_office is not None
-                and str(configured_office) != str(ticket.office_id)
-            ):
-                return False
     return _scope_matches_ticket(scope, ticket)
 
 
@@ -261,15 +246,17 @@ def _functional_matches(
         legacy = _LEGACY_ROLE_DETAILS.get(role_key)
         if designation is None and legacy is None:
             continue
-        scopes = validated_role_scopes(cast(Any, assignment))
+        scopes = validated_role_scopes(
+            cast(Any, assignment),
+            preserve_configured_office=True,
+        )
         if not scopes or not any(
             _assignment_scope_matches_ticket(
                 assignment,
                 scope,
                 ticket,
-                scope_index=index,
             )
-            for index, scope in enumerate(scopes)
+            for scope in scopes
         ):
             continue
         if designation is not None:

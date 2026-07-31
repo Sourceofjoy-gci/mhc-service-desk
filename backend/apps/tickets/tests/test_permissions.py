@@ -10,7 +10,7 @@ from django.utils import timezone
 
 from apps.identity_access.models import Role, User, UserRole
 from apps.identity_access.scope import get_authority_snapshot
-from apps.organisations.models import Office
+from apps.organisations.models import Office, ServiceLocation
 from apps.tickets.models import Ticket
 from apps.tickets.permissions import (
     can_add_ticket_content,
@@ -552,6 +552,48 @@ def test_reloaded_expired_role_actor_uses_durable_legacy_group_fallback(
 
     assert can_assign(reloaded, ticket=ticket) is True
     assert can_update_work_state(reloaded, ticket) is True
+
+
+def test_elevated_role_accepts_canonical_uuid_text_variants_for_exact_scope(
+    basic_world,
+):
+    queue = ServiceLocation.objects.create(
+        office=basic_world["office"],
+        name="Canonical elevated queue",
+    )
+    user = _user(groups=[])
+    role = Role.objects.create(
+        keycloak_role="supervisor-operational",
+        name="Operational Supervisor",
+        scopes=[
+            {
+                "domain": "operational",
+                "office": f"{{{str(basic_world['office'].id).upper()}}}",
+                "service": str(basic_world["gen_info"].id).upper(),
+                "queue": f"{{{str(queue.id).upper()}}}",
+            }
+        ],
+    )
+    UserRole.objects.create(
+        user=user,
+        role=role,
+        office=basic_world["office"],
+    )
+    ticket = Ticket.objects.create(
+        number="OP-202607-901400",
+        domain="operational",
+        title="Canonical elevated UUID scope",
+        status=Status.objects.get(domain="operational", code="new"),
+        channel="internal",
+        requester=basic_world["contact"],
+        service=basic_world["gen_info"],
+        request_type=basic_world["gen_info"].request_types.get(),
+        office=basic_world["office"],
+        queue=queue,
+    )
+
+    assert can_assign(user, ticket=ticket) is True
+    assert can_update_work_state(user, ticket) is True
 
 
 @pytest.mark.parametrize(

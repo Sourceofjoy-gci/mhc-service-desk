@@ -112,6 +112,68 @@ def _candidate(ticket: Ticket, user: User) -> AssigneeCandidate:
     return next(item for item in eligible_assignees(ticket) if item.id == user.id)
 
 
+def _braced_upper_uuid(value: object) -> str:
+    return f"{{{str(value).upper()}}}"
+
+
+def test_designation_accepts_canonical_uuid_text_variants_for_exact_scope(
+    basic_world,
+):
+    queue = ServiceLocation.objects.create(
+        office=basic_world["office"],
+        name="Canonical UUID queue",
+    )
+    ticket = _ticket(basic_world, queue=queue)
+    user = _user()
+    _grant(
+        user,
+        role_key="estate-examiner",
+        role_name="Estate Examiner",
+        scopes=[
+            {
+                "domain": ticket.domain,
+                "office": _braced_upper_uuid(ticket.office_id),
+                "service": str(ticket.service_id).upper(),
+                "queue": _braced_upper_uuid(ticket.queue_id),
+            }
+        ],
+        office=ticket.office,
+    )
+
+    assert is_eligible_assignee(ticket, user) is True
+    assert user.id in {candidate.id for candidate in eligible_assignees(ticket)}
+
+
+@pytest.mark.parametrize("mismatched_dimension", ["office", "service", "queue"])
+def test_canonical_uuid_text_variants_do_not_weaken_exact_scope_mismatches(
+    basic_world,
+    mismatched_dimension,
+):
+    queue = ServiceLocation.objects.create(
+        office=basic_world["office"],
+        name=f"Mismatch {mismatched_dimension}",
+    )
+    ticket = _ticket(basic_world, queue=queue)
+    scope = {
+        "domain": ticket.domain,
+        "office": _braced_upper_uuid(ticket.office_id),
+        "service": _braced_upper_uuid(ticket.service_id),
+        "queue": _braced_upper_uuid(ticket.queue_id),
+    }
+    scope[mismatched_dimension] = _braced_upper_uuid(uuid4())
+    user = _user()
+    _grant(
+        user,
+        role_key="estate-examiner",
+        role_name="Estate Examiner",
+        scopes=[scope],
+        office=ticket.office,
+    )
+
+    assert is_eligible_assignee(ticket, user) is False
+    assert user.id not in {candidate.id for candidate in eligible_assignees(ticket)}
+
+
 @pytest.mark.parametrize("ticket_office_source", ["role", "assignment"])
 def test_designation_requires_role_and_assignment_offices_to_both_match(
     basic_world,
