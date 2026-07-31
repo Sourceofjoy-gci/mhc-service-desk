@@ -12,7 +12,10 @@ def require_retention_gate(apps, schema_editor):
         RETURNS trigger AS $$
         BEGIN
           IF TG_OP = 'DELETE'
-             AND current_setting('mhc.allow_ticket_custody_delete', true) = 'on' THEN
+             AND current_setting('mhc.allow_ticket_custody_delete', true) = 'on'
+             AND NOT EXISTS (
+               SELECT 1 FROM ticket WHERE id = OLD.ticket_id
+             ) THEN
             RETURN OLD;
           END IF;
           RAISE EXCEPTION 'ticket custody events are immutable';

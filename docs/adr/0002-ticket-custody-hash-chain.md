@@ -45,11 +45,13 @@ state-only: Django's collector sees `DO_NOTHING` for the custody foreign key,
 while the physical database foreign key remains `ON DELETE CASCADE`. The
 `0008` migration makes that cascade fail closed unless the approved retention
 command has enabled `mhc.allow_ticket_custody_delete` with `SET LOCAL` inside
-the same atomic disposal transaction. Normal ORM deletion and direct SQL
-ticket deletion therefore cannot use the physical cascade. The setting is not
-exposed as an application helper and expires at transaction end. The retention
-path remains responsible for legal-hold and candidate checks before enabling
-an authorised whole-ticket disposal.
+the same atomic disposal transaction and the parent ticket is absent as part
+of that deletion. The conjunction prevents the setting from authorising a
+selective custody-row delete. Normal ORM deletion and direct SQL ticket
+deletion therefore cannot use the physical cascade. The setting is not exposed
+as an application helper and expires at transaction end. The retention path
+remains responsible for legal-hold and candidate checks before enabling an
+authorised whole-ticket disposal.
 
 Legacy backfill stores unresolved owner and queue references inside the hashed
 custody JSON using their original stable value, a null label/identity, and an

@@ -329,15 +329,13 @@ def test_0006_rollback_restores_trigger_fk_index_and_legacy_data(basic_world):
                 "SELECT count(*) FROM ticket_custody_event WHERE ticket_id = %s", [ticket.pk]
             )
             assert cursor.fetchone()[0] == 1
-        with pytest.raises(DatabaseError, match="immutable"):
-            with transaction.atomic(), connection.cursor() as cursor:
-                cursor.execute("DELETE FROM ticket WHERE id = %s", [cascade_ticket.pk])
         with connection.cursor() as cursor:
+            cursor.execute("DELETE FROM ticket WHERE id = %s", [cascade_ticket.pk])
             cursor.execute(
                 "SELECT count(*) FROM ticket_custody_event WHERE ticket_id = %s",
                 [cascade_ticket.pk],
             )
-            assert cursor.fetchone()[0] == 1
+            assert cursor.fetchone()[0] == 0
         executor = MigrationExecutor(connection)
         executor.migrate([("tickets", "0005_ticketcustodyevent")])
         with connection.cursor() as cursor:
@@ -416,6 +414,75 @@ def test_0007_keeps_database_cascade_while_collector_skips_custody():
                 "AND confrelid = 'ticket'::regclass AND contype = 'f'"
             )
             assert cursor.fetchone() == ("c",)
+    finally:
+        MigrationExecutor(connection).migrate(
+            [("tickets", "0008_harden_ticket_custody_contract")]
+        )
+
+
+def test_0007_0008_and_rollback_enforce_their_distinct_delete_contracts(basic_world):
+    """Only 0008 may require the approved gate, and it must reject child deletes."""
+    if connection.vendor != "postgresql":
+        pytest.skip("PostgreSQL migration coverage")
+    from django.db.migrations.executor import MigrationExecutor
+
+    def ticket_with_custody(number: str):
+        from apps.tickets.models import TicketCustodyEvent
+
+        ticket = _ticket(basic_world, number=number)
+        TicketCustodyEvent.objects.create(
+            ticket=ticket,
+            sequence=1,
+            event_type="created",
+            actor_kind="system",
+            actor_subject="migration-test",
+            actor_display_name="Migration test",
+            source_process="test.migration",
+            event_hash="a" * 64,
+        )
+        return ticket
+
+    def raw_parent_delete(ticket_id) -> None:
+        with transaction.atomic(), connection.cursor() as cursor:
+            cursor.execute("DELETE FROM ticket WHERE id = %s", [ticket_id])
+
+    def raw_child_delete_with_gate(event_id) -> None:
+        with transaction.atomic(), connection.cursor() as cursor:
+            cursor.execute("SET LOCAL mhc.allow_ticket_custody_delete = 'on'")
+            cursor.execute(
+                "DELETE FROM ticket_custody_event WHERE id = %s",
+                [event_id],
+            )
+
+    try:
+        MigrationExecutor(connection).migrate([("tickets", "0005_ticketcustodyevent")])
+        MigrationExecutor(connection).migrate(
+            [("tickets", "0007_ticket_custody_collector_state")]
+        )
+        fresh_0007 = ticket_with_custody("OP-MIGRATION-0007-FRESH")
+        raw_parent_delete(fresh_0007.pk)
+        assert not Ticket._base_manager.filter(pk=fresh_0007.pk).exists()
+
+        MigrationExecutor(connection).migrate(
+            [("tickets", "0008_harden_ticket_custody_contract")]
+        )
+        upgraded_0008 = ticket_with_custody("OP-MIGRATION-0008-GUARDED")
+        upgraded_event = upgraded_0008.custody_events.get()
+        with pytest.raises(DatabaseError, match="immutable"):
+            raw_parent_delete(upgraded_0008.pk)
+        with pytest.raises(DatabaseError, match="immutable"):
+            raw_child_delete_with_gate(upgraded_event.pk)
+        with transaction.atomic(), connection.cursor() as cursor:
+            cursor.execute("SET LOCAL mhc.allow_ticket_custody_delete = 'on'")
+            cursor.execute("DELETE FROM ticket WHERE id = %s", [upgraded_0008.pk])
+        assert not Ticket._base_manager.filter(pk=upgraded_0008.pk).exists()
+
+        MigrationExecutor(connection).migrate(
+            [("tickets", "0007_ticket_custody_collector_state")]
+        )
+        rolled_back_0007 = ticket_with_custody("OP-MIGRATION-0007-ROLLBACK")
+        raw_parent_delete(rolled_back_0007.pk)
+        assert not Ticket._base_manager.filter(pk=rolled_back_0007.pk).exists()
     finally:
         MigrationExecutor(connection).migrate(
             [("tickets", "0008_harden_ticket_custody_contract")]
@@ -583,6 +650,49 @@ def test_backfilled_unresolved_facts_do_not_depend_on_the_linked_audit(basic_wor
     assert next(
         item for item in after_delete if item["payload"].get("action") == "queue_changed"
     )["payload"]["previous_queue"]["id"] == "deleted-queue"
+
+
+def test_blank_actors_on_real_legacy_sources_are_not_claimed_as_system(basic_world):
+    """A blank source actor is unknown evidence, not a named system process."""
+    backfill_ticket_custody = import_module(
+        "apps.tickets.migrations.0006_backfill_ticket_custody"
+    ).backfill_ticket_custody
+    ticket = _ticket(basic_world, number="OP-LEGACY-BLANK-ACTOR")
+    created_at = datetime(2025, 1, 4, 10, 0, tzinfo=UTC)
+    Ticket.objects.filter(pk=ticket.pk).update(created_at=created_at)
+    _audit(
+        ticket=ticket,
+        action="ticket.created",
+        actor_subject="",
+        before={},
+        after={},
+        occurred_at=created_at,
+    )
+    closed = Status.objects.get(domain="operational", code="closed")
+    transition = TransitionHistory.objects.create(
+        ticket=ticket,
+        from_status=ticket.status,
+        to_status=closed,
+        actor_subject="",
+        reason="Imported closure",
+    )
+    TransitionHistory.objects.filter(pk=transition.pk).update(
+        occurred_at=created_at + timedelta(minutes=1)
+    )
+
+    from django.apps import apps as django_apps
+
+    backfill_ticket_custody(django_apps, None)
+
+    created, closed_event = ticket.custody_events.all()
+    assert (created.actor_kind, created.actor_subject) == ("legacy_unknown", "")
+    assert (closed_event.actor_kind, closed_event.actor_subject) == (
+        "legacy_unknown",
+        "",
+    )
+    assert created.actor_display_name == "Unknown legacy actor"
+    assert closed_event.actor_display_name == "Unknown legacy actor"
+    assert verify_custody_chain(ticket) is True
 
 
 def test_backfill_resolves_uppercase_uuid_snapshots(basic_world):

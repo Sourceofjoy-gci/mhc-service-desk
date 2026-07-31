@@ -187,16 +187,10 @@ def backfill_ticket_custody(apps, schema_editor):
                 "subject": user.keycloak_subject,
                 "display_name": user.display_name or user.username,
             }
-        if subject:
-            return {
-                "kind": "legacy_unknown",
-                "subject": str(subject),
-                "display_name": str(subject),
-            }
         return {
-            "kind": "system",
-            "subject": "legacy-backfill",
-            "display_name": "Legacy backfill",
+            "kind": "legacy_unknown",
+            "subject": str(subject or ""),
+            "display_name": str(subject) if subject else "Unknown legacy actor",
         }
 
     def owner(value):
@@ -430,7 +424,9 @@ def create_ticket_custody_protection(apps, schema_editor):
         RETURNS trigger AS $$
         BEGIN
           IF TG_OP = 'DELETE'
-             AND current_setting('mhc.allow_ticket_custody_delete', true) = 'on' THEN
+             AND NOT EXISTS (
+               SELECT 1 FROM ticket WHERE id = OLD.ticket_id
+             ) THEN
             RETURN OLD;
           END IF;
           RAISE EXCEPTION 'ticket custody events are immutable';

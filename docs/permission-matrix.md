@@ -119,7 +119,9 @@ the approved retention/disposal process for a whole-ticket disposal after its
 hold and candidate checks; there is no custody edit or selective-delete route.
 The database permits its custody cascade only while that command holds an
 atomic disposal transaction and has enabled the transaction-local retention
-gate. Ordinary ORM deletes and direct SQL ticket deletes fail closed.
+gate; the parent ticket must also be absent as part of that deletion, so the
+gate cannot authorise selective custody deletion. Ordinary ORM deletes and
+direct SQL ticket deletes fail closed.
 Unresolved legacy owner/queue IDs remain hashed custody snapshots with null
 labels, and unresolved historical human subjects are shown as unverified
 legacy actors rather than system processes.
