@@ -92,6 +92,95 @@ describe("StaffCombobox", () => {
     expect(trigger).toHaveAttribute("aria-expanded", "false");
   });
 
+  it("preserves an omitted selected assignee as display-only context", async () => {
+    const user = userEvent.setup();
+    const onValueChange = vi.fn();
+    const onSearchChange = vi.fn();
+    const { rerender } = render(
+      <StaffCombobox
+        id="ticket-assignee"
+        label="Assignee"
+        value={accountant.id}
+        options={options}
+        onValueChange={onValueChange}
+        onSearchChange={onSearchChange}
+        allowUnassigned={false}
+      />,
+    );
+
+    rerender(
+      <StaffCombobox
+        id="ticket-assignee"
+        label="Assignee"
+        value={accountant.id}
+        options={[estateExaminer]}
+        onValueChange={onValueChange}
+        onSearchChange={onSearchChange}
+        allowUnassigned={false}
+      />,
+    );
+
+    const trigger = screen.getByRole("combobox", { name: "Assignee" });
+    expect(trigger).toHaveTextContent("Amina Dlamini");
+    const { search } = await openStaffCombobox(user);
+    expect(
+      screen.queryByRole("option", { name: /Amina Dlamini/ }),
+    ).not.toBeInTheDocument();
+    const eligibleOption = screen.getByRole("option", {
+      name: /Themba Nkosi/,
+    });
+
+    await waitFor(() => expect(search).toHaveFocus());
+    await user.keyboard("{ArrowDown}");
+    await waitFor(() =>
+      expect(eligibleOption).toHaveAttribute("data-highlighted"),
+    );
+    await user.keyboard("{Enter}");
+
+    expect(onValueChange).toHaveBeenCalledWith(estateExaminer.id);
+  });
+
+  it("replaces the display snapshot when the controlled value changes", () => {
+    const props = {
+      id: "ticket-assignee",
+      label: "Assignee",
+      onValueChange: vi.fn(),
+      onSearchChange: vi.fn(),
+      allowUnassigned: false,
+    };
+    const { rerender } = render(
+      <StaffCombobox {...props} value={accountant.id} options={[accountant]} />,
+    );
+
+    rerender(<StaffCombobox {...props} value={accountant.id} options={[]} />);
+    expect(
+      screen.getByRole("combobox", { name: "Assignee" }),
+    ).toHaveTextContent("Amina Dlamini");
+
+    rerender(
+      <StaffCombobox
+        {...props}
+        value={estateExaminer.id}
+        options={[estateExaminer]}
+      />,
+    );
+    expect(
+      screen.getByRole("combobox", { name: "Assignee" }),
+    ).toHaveTextContent("Themba Nkosi");
+
+    rerender(
+      <StaffCombobox {...props} value={estateExaminer.id} options={[]} />,
+    );
+    expect(
+      screen.getByRole("combobox", { name: "Assignee" }),
+    ).toHaveTextContent("Themba Nkosi");
+
+    rerender(<StaffCombobox {...props} value="unknown-staff" options={[]} />);
+    expect(
+      screen.getByRole("combobox", { name: "Assignee" }),
+    ).toHaveTextContent("Select eligible team member");
+  });
+
   it("selects an eligible team member with ArrowDown and Enter", async () => {
     const user = userEvent.setup();
     const onValueChange = vi.fn();
@@ -187,6 +276,34 @@ describe("StaffCombobox", () => {
     await openStaffCombobox(user);
 
     expect(screen.getByText(/No eligible team members found/)).toBeVisible();
+  });
+
+  it("announces no staff while keeping Unassigned selectable", async () => {
+    const user = userEvent.setup();
+    const onValueChange = vi.fn();
+    render(
+      <Harness options={[]} allowUnassigned onValueChange={onValueChange} />,
+    );
+    await openStaffCombobox(user);
+
+    expect(screen.getByText(/No eligible team members found/)).toBeVisible();
+    const unassigned = screen.getByRole("option", { name: "Unassigned" });
+    expect(unassigned).toBeVisible();
+    fireEvent.click(unassigned);
+    expect(onValueChange).toHaveBeenCalledWith(null);
+  });
+
+  it("announces no staff match when search retains only Unassigned", async () => {
+    const user = userEvent.setup();
+    render(<Harness allowUnassigned />);
+    const { search } = await openStaffCombobox(user);
+
+    await user.type(search, "unassigned");
+
+    expect(screen.getByText(/No eligible team members found/)).toBeVisible();
+    expect(screen.getByRole("option", { name: "Unassigned" })).toBeVisible();
+    expect(screen.queryByRole("option", { name: /Amina Dlamini/ })).toBeNull();
+    expect(screen.queryByRole("option", { name: /Themba Nkosi/ })).toBeNull();
   });
 
   it("closes on Escape and returns focus to the trigger", async () => {

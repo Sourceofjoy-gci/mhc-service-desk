@@ -66,6 +66,32 @@ function supportingContext(assignee: TicketAssignee) {
   );
 }
 
+function StaffResultsStatus({
+  loading,
+  error,
+}: Pick<StaffComboboxProps, "loading" | "error">) {
+  const filteredItems = Combobox.useFilteredItems<StaffOption>();
+  const hasStaffResults = filteredItems.some(
+    (option) => option.kind === "staff",
+  );
+
+  return (
+    <Combobox.Status className="text-sm text-muted-foreground">
+      {loading ? (
+        <div className="flex items-center gap-2 px-2.5 py-2">
+          <Loader2Icon
+            aria-hidden="true"
+            className="size-4 animate-spin motion-reduce:animate-none"
+          />
+          <span>Loading eligible team members…</span>
+        </div>
+      ) : !error && !hasStaffResults ? (
+        <div className="px-2.5 py-3">No eligible team members found</div>
+      ) : null}
+    </Combobox.Status>
+  );
+}
+
 export function StaffCombobox({
   id,
   label,
@@ -80,6 +106,7 @@ export function StaffCombobox({
 }: StaffComboboxProps) {
   const triggerRef = useRef<HTMLButtonElement>(null);
   const popupLayerRef = useRef<HTMLDivElement>(null);
+  const selectedSnapshotRef = useRef<StaffMemberOption | null>(null);
   const errorId = `${id}-error`;
   const staffOptions = useMemo<StaffMemberOption[]>(
     () => options.map((assignee) => ({ kind: "staff", assignee })),
@@ -92,12 +119,22 @@ export function StaffCombobox({
         : staffOptions,
     [allowUnassigned, staffOptions],
   );
-  const selectedOption = useMemo<StaffOption | null>(() => {
-    if (value === null) {
-      return allowUnassigned ? unassignedOption : null;
-    }
-    return staffOptions.find((option) => option.assignee.id === value) ?? null;
-  }, [allowUnassigned, staffOptions, value]);
+  const selectedStaffOption = staffOptions.find(
+    (option) => option.assignee.id === value,
+  );
+  if (value === null) {
+    selectedSnapshotRef.current = null;
+  } else if (selectedStaffOption) {
+    selectedSnapshotRef.current = selectedStaffOption;
+  } else if (selectedSnapshotRef.current?.assignee.id !== value) {
+    selectedSnapshotRef.current = null;
+  }
+  const selectedOption: StaffOption | null =
+    value === null
+      ? allowUnassigned
+        ? unassignedOption
+        : null
+      : (selectedStaffOption ?? selectedSnapshotRef.current);
 
   return (
     <Combobox.Root<StaffOption>
@@ -178,24 +215,7 @@ export function StaffCombobox({
                 placeholder="Search by name, username, designation, or team"
                 className="h-8 w-full min-w-0 rounded-t-lg border-b border-input bg-transparent px-2.5 py-1 text-base outline-none placeholder:text-muted-foreground focus-visible:border-ring disabled:pointer-events-none disabled:cursor-not-allowed disabled:bg-input/50 disabled:opacity-50 aria-invalid:border-destructive md:text-sm dark:bg-input/30 dark:disabled:bg-input/80"
               />
-              <Combobox.Status className="text-sm text-muted-foreground">
-                {loading ? (
-                  <div className="flex items-center gap-2 px-2.5 py-2">
-                    <Loader2Icon
-                      aria-hidden="true"
-                      className="size-4 animate-spin motion-reduce:animate-none"
-                    />
-                    <span>Loading eligible team members…</span>
-                  </div>
-                ) : null}
-              </Combobox.Status>
-              <Combobox.Empty className="text-sm text-muted-foreground">
-                {!loading && !error ? (
-                  <div className="px-2.5 py-3">
-                    No eligible team members found
-                  </div>
-                ) : null}
-              </Combobox.Empty>
+              <StaffResultsStatus loading={loading} error={error} />
               <Combobox.List className="max-h-[min(18rem,var(--available-height))] overflow-y-auto overscroll-contain p-1 scroll-py-1 outline-none data-empty:p-0">
                 {(option: StaffOption) => (
                   <Combobox.Item
