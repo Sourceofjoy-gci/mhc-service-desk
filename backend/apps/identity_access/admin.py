@@ -7,6 +7,7 @@ from uuid import UUID
 from django.contrib import admin
 from django.contrib.auth.admin import GroupAdmin
 from django.contrib.auth.models import Group
+from django.db import transaction
 from django.db.models import QuerySet
 from django.http import HttpRequest
 
@@ -20,6 +21,8 @@ def _lock_users(user_ids: Iterable[UUID]) -> None:
 
 @admin.register(User)
 class AuthorityUserAdmin(admin.ModelAdmin):  # type: ignore[type-arg]
+    """Identity accounts are deactivated; hard deletion is intentionally disabled."""
+
     def save_model(
         self,
         request: HttpRequest,
@@ -31,17 +34,13 @@ class AuthorityUserAdmin(admin.ModelAdmin):  # type: ignore[type-arg]
             _lock_users((obj.id,))
         super().save_model(request, obj, form, change)
 
-    def delete_model(self, request: HttpRequest, obj: User) -> None:
-        _lock_users((obj.id,))
-        super().delete_model(request, obj)
-
-    def delete_queryset(
+    def has_delete_permission(
         self,
         request: HttpRequest,
-        queryset: QuerySet[User],
-    ) -> None:
-        _lock_users(queryset.values_list("id", flat=True))
-        super().delete_queryset(request, queryset)
+        obj: User | None = None,
+    ) -> bool:
+        del request, obj
+        return False
 
 
 @admin.register(UserRole)
@@ -70,6 +69,7 @@ class AuthorityUserRoleAdmin(admin.ModelAdmin):  # type: ignore[type-arg]
         _lock_users((obj.user_id,))
         super().delete_model(request, obj)
 
+    @transaction.atomic
     def delete_queryset(
         self,
         request: HttpRequest,
@@ -105,6 +105,7 @@ class AuthorityRoleAdmin(admin.ModelAdmin):  # type: ignore[type-arg]
         _lock_users(self._affected_user_ids(obj))
         super().delete_model(request, obj)
 
+    @transaction.atomic
     def delete_queryset(
         self,
         request: HttpRequest,
@@ -145,6 +146,7 @@ class AuthorityGroupAdmin(GroupAdmin):
         _lock_users(self._affected_user_ids(obj))
         super().delete_model(request, obj)
 
+    @transaction.atomic
     def delete_queryset(
         self,
         request: HttpRequest,

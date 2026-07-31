@@ -92,7 +92,7 @@ class Ticket(models.Model):
 
     assignee = models.ForeignKey(
         "identity_access.User",
-        on_delete=models.SET_NULL,
+        on_delete=models.PROTECT,
         null=True,
         blank=True,
         related_name="assigned_tickets",

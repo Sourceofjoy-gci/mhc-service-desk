@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+from collections.abc import Callable
 from datetime import UTC, datetime, timedelta
 from threading import Event, Thread
 from uuid import UUID, uuid4
@@ -23,6 +24,7 @@ from apps.tickets.models import OutboxEvent, Ticket, TicketCustodyEvent
 from apps.tickets.services import (
     TicketConflictError,
     TicketPermissionError,
+    TicketScopeError,
     TicketValidationError,
 )
 from apps.workflow.models import Status, TransitionHistory
@@ -48,13 +50,21 @@ def _user(
     return user
 
 
-def _ticket(basic_world, *, assignee: User | None = None, status: str = "new") -> Ticket:
-    service = basic_world["gen_info"]
+def _ticket(
+    basic_world,
+    *,
+    assignee: User | None = None,
+    status: str = "new",
+    domain: str = Ticket.Domain.OPERATIONAL,
+) -> Ticket:
+    service = (
+        basic_world["gen_info"] if domain == Ticket.Domain.OPERATIONAL else basic_world["it_inc"]
+    )
     return Ticket.objects.create(
-        number=f"OP-202607-{Ticket.objects.count() + 930001:06d}",
-        domain=Ticket.Domain.OPERATIONAL,
+        number=f"{domain[:2].upper()}-202607-{Ticket.objects.count() + 930001:06d}",
+        domain=domain,
         title="Assignment service",
-        status=Status.objects.get(domain=Ticket.Domain.OPERATIONAL, code=status),
+        status=Status.objects.get(domain=domain, code=status),
         channel=Ticket.Channel.INTERNAL,
         requester=basic_world["contact"],
         service=service,
@@ -309,7 +319,7 @@ def test_ineligible_target_is_rejected_with_stable_field_error(
     assert _assignment_rows(ticket) == (0, 0, 0)
 
 
-def test_supplied_authority_snapshot_is_not_recomputed_after_request_groups_change(
+def test_supplied_authority_snapshot_cannot_bypass_locked_actor_revalidation(
     basic_world,
 ):
     actor = _user()
@@ -319,15 +329,18 @@ def test_supplied_authority_snapshot_is_not_recomputed_after_request_groups_chan
     target = _user(["ops-agents"])
     ticket = _ticket(basic_world)
 
-    result = assign_ticket(
-        ticket_id=ticket.id,
-        actor=actor,
-        assignee_id=target.id,
-        expected_updated_at=ticket.updated_at,
-        snapshot=snapshot,
-    )
+    with pytest.raises(TicketScopeError):
+        assign_ticket(
+            ticket_id=ticket.id,
+            actor=actor,
+            assignee_id=target.id,
+            expected_updated_at=ticket.updated_at,
+            snapshot=snapshot,
+        )
 
-    assert result.ticket.assignee_id == target.id
+    ticket.refresh_from_db()
+    assert ticket.assignee_id is None
+    assert _assignment_rows(ticket) == (0, 0, 0)
 
 
 def test_target_is_revalidated_after_ticket_lock(basic_world, monkeypatch):
@@ -730,3 +743,146 @@ def test_concurrent_precedence_grant_wins_then_assignment_uses_fresh_locked_fact
     ticket.refresh_from_db()
     assert ticket.assignee_id is None
     assert _assignment_rows(ticket) == (0, 0, 0)
+
+
+def _assert_actor_mutation_wins_and_assignment_fails(
+    *,
+    actor: User,
+    target: User,
+    ticket: Ticket,
+    mutate_locked_actor: Callable[[User], None],
+) -> None:
+    if connection.vendor != "postgresql":
+        pytest.skip("Authority lock ordering requires PostgreSQL row locks.")
+    mutation_locked = Event()
+    release_mutation = Event()
+    assignment_finished = Event()
+    mutation_errors: list[BaseException] = []
+    assignment_errors: list[BaseException] = []
+
+    def mutate_actor() -> None:
+        close_old_connections()
+        try:
+            with transaction.atomic():
+                _set_bounded_database_timeouts()
+                locked_actor = lock_user_authorities((actor.id,))[actor.id].user
+                mutate_locked_actor(locked_actor)
+                mutation_locked.set()
+                if not release_mutation.wait(timeout=5):
+                    raise TimeoutError("actor authority mutation was not released")
+        except BaseException as exc:
+            mutation_errors.append(exc)
+        finally:
+            close_old_connections()
+
+    def assign_with_pre_mutation_actor() -> None:
+        close_old_connections()
+        try:
+            with transaction.atomic():
+                _set_bounded_database_timeouts()
+                assign_ticket(
+                    ticket_id=ticket.id,
+                    actor=actor,
+                    assignee_id=target.id,
+                    expected_updated_at=ticket.updated_at,
+                )
+        except BaseException as exc:
+            assignment_errors.append(exc)
+        finally:
+            assignment_finished.set()
+            close_old_connections()
+
+    mutation_thread = Thread(target=mutate_actor, daemon=True)
+    assignment_thread = Thread(target=assign_with_pre_mutation_actor, daemon=True)
+    try:
+        mutation_thread.start()
+        assert mutation_locked.wait(timeout=5)
+        assignment_thread.start()
+        assert not assignment_finished.wait(timeout=0.5)
+    finally:
+        release_mutation.set()
+        _join_threads(mutation_thread, assignment_thread)
+
+    if mutation_errors:
+        raise mutation_errors[0]
+    assert len(assignment_errors) == 1
+    assert isinstance(assignment_errors[0], TicketScopeError | TicketPermissionError)
+    ticket.refresh_from_db()
+    assert ticket.assignee_id is None
+    assert _assignment_rows(ticket) == (0, 0, 0)
+
+
+@pytest.mark.django_db(transaction=True)
+@pytest.mark.parametrize(
+    ("role_key", "domain", "target_groups"),
+    [
+        ("supervisor-operational", Ticket.Domain.OPERATIONAL, ["ops-agents"]),
+        ("lead-it", Ticket.Domain.IT, ["it-agents"]),
+    ],
+)
+def test_concurrent_actor_leadership_revocation_cannot_use_stale_authority(
+    basic_world,
+    role_key,
+    domain,
+    target_groups,
+):
+    actor = _user()
+    role = Role.objects.create(
+        keycloak_role=role_key,
+        name=role_key,
+        scopes=[{"domain": domain}],
+    )
+    grant = UserRole.objects.create(user=actor, role=role)
+    target = _user(target_groups)
+    ticket = _ticket(basic_world, domain=domain)
+
+    _assert_actor_mutation_wins_and_assignment_fails(
+        actor=actor,
+        target=target,
+        ticket=ticket,
+        mutate_locked_actor=lambda _actor: UserRole.objects.filter(pk=grant.pk).delete(),
+    )
+
+
+@pytest.mark.django_db(transaction=True)
+def test_concurrent_actor_precedence_addition_suppresses_stale_group_authority(
+    basic_world,
+):
+    actor = _user(["ops-supervisors"])
+    invalid_role = Role.objects.create(
+        keycloak_role="invalid-actor-role",
+        name="Invalid actor role",
+        scopes={"domain": "operational"},
+    )
+    target = _user(["ops-agents"])
+    ticket = _ticket(basic_world)
+
+    _assert_actor_mutation_wins_and_assignment_fails(
+        actor=actor,
+        target=target,
+        ticket=ticket,
+        mutate_locked_actor=lambda locked_actor: UserRole.objects.create(
+            user=locked_actor,
+            role=invalid_role,
+        ),
+    )
+
+
+@pytest.mark.django_db(transaction=True)
+def test_concurrent_actor_legacy_group_removal_cannot_use_stale_authority(
+    basic_world,
+):
+    actor = _user(["ops-supervisors"])
+    target = _user(["ops-agents"])
+    ticket = _ticket(basic_world)
+
+    def remove_groups(locked_actor: User) -> None:
+        locked_actor.keycloak_groups = []
+        locked_actor.save(update_fields=["keycloak_groups"])
+
+    _assert_actor_mutation_wins_and_assignment_fails(
+        actor=actor,
+        target=target,
+        ticket=ticket,
+        mutate_locked_actor=remove_groups,
+    )

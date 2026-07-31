@@ -300,14 +300,30 @@ def assign_ticket(
     locked_actor_authority = locked_authorities.get(actor.id)
     if locked_actor_authority is None or not locked_actor_authority.user.is_active:
         raise TicketPermissionError
+    locked_actor = locked_actor_authority.user
+    locked_actor_snapshot = locked_actor_authority.snapshot
+    if not scope_ticket_queryset(
+        locked_actor,
+        Ticket.objects.filter(pk=locked.pk),
+        snapshot=locked_actor_snapshot,
+    ).exists():
+        raise TicketScopeError
 
     changing_owner = locked.assignee_id != assignee_id
     self_assignment = locked.assignee_id is None and assignee_id == actor.id
     if changing_owner:
         if self_assignment:
-            if not _can_update_from_snapshot(actor, locked, authority):
+            if not _can_update_from_snapshot(
+                locked_actor,
+                locked,
+                locked_actor_snapshot,
+            ):
                 raise TicketPermissionError
-        elif not _can_assign_from_snapshot(actor, locked, authority):
+        elif not _can_assign_from_snapshot(
+            locked_actor,
+            locked,
+            locked_actor_snapshot,
+        ):
             raise TicketPermissionError
 
     target, target_candidate = _target_for_assignment(
@@ -331,7 +347,6 @@ def assign_ticket(
         target_candidate=target_candidate,
         locked_authorities=locked_authorities,
     )
-    locked_actor = locked_actor_authority.user
     result = _write_locked_assignment(
         locked=locked,
         target=target,
@@ -352,12 +367,12 @@ def assign_ticket(
     if should_transition and result.changed:
         transitioned = transition_ticket(
             ticket_id=locked.id,
-            actor=actor,
+            actor=locked_actor,
             expected_updated_at=locked.updated_at,
             to_status_code="assigned",
             reason=reason,
             request=request,
-            snapshot=authority,
+            snapshot=locked_actor_snapshot,
         )
         return AssignmentResult(
             ticket=transitioned,

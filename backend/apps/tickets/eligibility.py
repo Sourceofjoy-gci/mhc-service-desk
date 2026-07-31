@@ -404,7 +404,7 @@ def matching_actor_role_aliases(
     authority = snapshot or get_authority_snapshot(user)
     if authority.auditor_identity or "auditor" in authority.capabilities:
         return frozenset()
-    if is_auditor_identity(user):
+    if snapshot is None and is_auditor_identity(user):
         return frozenset()
     if user.is_superuser:
         return _ROLE_ALIASES["admin"]
