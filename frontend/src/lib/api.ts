@@ -40,6 +40,8 @@ export interface TicketCapabilities {
   can_update_work_state: boolean;
   can_self_assign: boolean;
   self_assignee_id: string | null;
+  self_assignee_detail: TicketAssignee | null;
+  can_assign: boolean;
   can_reassign: boolean;
   can_change_confidentiality: boolean;
   can_add_message: boolean;
@@ -80,6 +82,14 @@ export interface ActivityItem {
     | "status_transition"
     | "work_state"
     | "attachment"
+    | "relationship"
+    | "custody_event";
+  category:
+    | "public_reply"
+    | "internal_note"
+    | "workflow"
+    | "custody"
+    | "attachment"
     | "relationship";
   occurred_at: string;
   actor: { subject: string; display_name: string } | null;
@@ -91,6 +101,39 @@ export interface TicketAssignee {
   id: string;
   username: string;
   display_name: string;
+  designations: string[];
+  team_labels: string[];
+}
+
+export interface AssignmentParty {
+  id: string;
+  display_name: string;
+  designations: string[];
+  team_labels: string[];
+}
+
+export interface AssignmentReceipt {
+  ticket_number: string;
+  action: "assigned" | "reassigned" | "unassigned" | "unchanged";
+  previous_assignee: AssignmentParty | null;
+  new_assignee: AssignmentParty | null;
+  occurred_at: string;
+  performed_by: {
+    kind: "user" | "system";
+    subject: string;
+    display_name: string;
+  };
+}
+
+export interface AssignmentRequest {
+  assignee_id: string | null;
+  expected_updated_at: string;
+  reason?: string;
+}
+
+export interface AssignmentResponse {
+  ticket: TicketDetail;
+  receipt: AssignmentReceipt;
 }
 
 export interface TicketRelationship {
@@ -418,8 +461,19 @@ export const ticketsApi = {
   transition: transitionTicket,
   activity: (number: string) =>
     api<{ results: ActivityItem[] }>(`/tickets/${number}/activity/`),
-  assignees: (number: string) =>
-    api<{ results: TicketAssignee[] }>(`/tickets/${number}/assignees/`),
+  assignees: (number: string, search = "") => {
+    const params = new URLSearchParams();
+    if (search) params.set("search", search);
+    const query = params.toString();
+    return api<{ results: TicketAssignee[] }>(
+      `/tickets/${number}/assignees/${query ? `?${query}` : ""}`,
+    );
+  },
+  assign: (number: string, body: AssignmentRequest) =>
+    api<AssignmentResponse>(`/tickets/${number}/assignment/`, {
+      method: "POST",
+      body,
+    }),
   addMessage: (number: string, body_text: string) =>
     api<{ id: string }>(`/tickets/${number}/messages/`, {
       method: "POST",
@@ -465,6 +519,17 @@ const OPERATIONAL_GROUPS = new Set([
   "ops-agents",
   "supervisor-operational",
   "ops-supervisors",
+  "master",
+  "deputy-master",
+  "assistant-master",
+  "assistant-accountant",
+  "accountant",
+  "senior-accountant",
+  "principal-accountant",
+  "financial-controller",
+  "estate-examiner",
+  "records-clerk",
+  "data-clerk",
 ]);
 const IT_GROUPS = new Set(["agent-it", "it-agents", "lead-it", "it-leads"]);
 const ALL_DOMAIN_GROUPS = new Set([

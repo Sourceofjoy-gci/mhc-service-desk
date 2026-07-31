@@ -6,7 +6,7 @@ import type { KeycloakProfile, KeycloakTokenParsed } from "keycloak-js";
 import { useLocation } from "react-router-dom";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { renderWithProviders } from "@/test/render";
-import { api } from "@/lib/api";
+import { api, domainCapabilities } from "@/lib/api";
 import { AuthProvider, useAuth } from "./AuthProvider";
 import { getKeycloak, initKeycloak, isDevAuthEnabled } from "./keycloak";
 
@@ -18,6 +18,20 @@ vi.mock("./keycloak", () => ({
 }));
 
 const RETURN_TO_KEY = "mhc.auth.returnTo";
+
+const PRIMARY_DESIGNATION_ROLES = [
+  "master",
+  "deputy-master",
+  "assistant-master",
+  "assistant-accountant",
+  "accountant",
+  "senior-accountant",
+  "principal-accountant",
+  "financial-controller",
+  "estate-examiner",
+  "records-clerk",
+  "data-clerk",
+] as const;
 
 interface FakeKeycloak {
   token?: string;
@@ -103,6 +117,19 @@ function LocationProbe() {
   return <output aria-label="location">{location.pathname}</output>;
 }
 
+function OperationalNavigationProbe() {
+  const { user } = useAuth();
+  const domains = domainCapabilities(user?.groups ?? []).queueDomains;
+
+  return domains.includes("operational") ? (
+    <nav aria-label="Operational ticket workspace">Queue</nav>
+  ) : (
+    <output aria-label="Operational ticket workspace unavailable">
+      No operational navigation
+    </output>
+  );
+}
+
 describe("AuthProvider", () => {
   let keycloak: FakeKeycloak;
 
@@ -169,6 +196,48 @@ describe("AuthProvider", () => {
     expect(screen.getByLabelText("expiry")).toHaveTextContent("1900000000");
     expect(keycloak.loadUserProfile).toHaveBeenCalledOnce();
   });
+
+  it.each(PRIMARY_DESIGNATION_ROLES)(
+    "retains the %s realm role for authenticated operational navigation only",
+    async (role) => {
+      keycloak.tokenParsed = {
+        ...keycloak.tokenParsed,
+        groups: [],
+        realm_access: { roles: [role, "offline_access"] },
+      };
+      vi.mocked(initKeycloak).mockResolvedValue({
+        status: "authenticated",
+        token: "access-token",
+      });
+
+      renderWithProviders(
+        <AuthProvider>
+          <AuthProbe />
+          <OperationalNavigationProbe />
+        </AuthProvider>,
+      );
+
+      await waitFor(() =>
+        expect(screen.getByLabelText("state")).toHaveTextContent(
+          "authenticated",
+        ),
+      );
+      const identity = JSON.parse(
+        screen.getByLabelText("user").textContent ?? "{}",
+      ) as Record<string, unknown>;
+      expect(identity.groups).toEqual([role]);
+      expect(identity).not.toHaveProperty("can_assign");
+      expect(identity).not.toHaveProperty("office");
+      expect(identity).not.toHaveProperty("service");
+      expect(identity).not.toHaveProperty("queue");
+      expect(identity).not.toHaveProperty("confidentiality");
+      expect(
+        screen.getByRole("navigation", {
+          name: "Operational ticket workspace",
+        }),
+      ).toBeInTheDocument();
+    },
+  );
 
   it("waits for a protected consumer to request login", async () => {
     const user = userEvent.setup();

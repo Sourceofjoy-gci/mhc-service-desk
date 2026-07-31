@@ -17,6 +17,27 @@ import { getKeycloak, initKeycloak, isDevAuthEnabled } from "./keycloak";
 const RETURN_TO_KEY = "mhc.auth.returnTo";
 const DEV_TOKEN = "dev:demo:ops-agents";
 
+export const KEYCLOAK_REALM_ROLES: ReadonlySet<string> = new Set([
+  "staff",
+  "agent-operational",
+  "supervisor-operational",
+  "agent-it",
+  "lead-it",
+  "admin",
+  "auditor",
+  "master",
+  "deputy-master",
+  "assistant-master",
+  "assistant-accountant",
+  "accountant",
+  "senior-accountant",
+  "principal-accountant",
+  "financial-controller",
+  "estate-examiner",
+  "records-clerk",
+  "data-clerk",
+]);
+
 const DEV_USER: AuthUser = {
   subject: "dev:demo",
   username: "demo",
@@ -204,7 +225,7 @@ async function initializeSession(isDevAuth: boolean): Promise<AuthSnapshot> {
         subject: stringClaim(claims?.sub) ?? profile.id ?? "",
         username,
         displayName,
-        groups: stringArrayClaim(claims?.groups),
+        groups: authorizationGroups(claims),
       },
       error: null,
       expiresAt: typeof claims?.exp === "number" ? claims.exp : null,
@@ -231,6 +252,16 @@ function stringArrayClaim(value: unknown): string[] {
   return Array.isArray(value)
     ? value.filter((group): group is string => typeof group === "string")
     : [];
+}
+
+function authorizationGroups(
+  claims: ReturnType<typeof getKeycloak>["tokenParsed"],
+): string[] {
+  const groups = stringArrayClaim(claims?.groups);
+  const realmRoles = stringArrayClaim(claims?.realm_access?.roles).filter(
+    (role) => KEYCLOAK_REALM_ROLES.has(role),
+  );
+  return [...new Set([...groups, ...realmRoles])];
 }
 
 function normalizeReturnPath(path: string): string | null {

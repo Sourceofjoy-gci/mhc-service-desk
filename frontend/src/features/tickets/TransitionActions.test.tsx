@@ -96,6 +96,8 @@ const TICKET: TicketDetail = {
     can_update_work_state: true,
     can_self_assign: false,
     self_assignee_id: null,
+    self_assignee_detail: null,
+    can_assign: true,
     can_reassign: true,
     can_change_confidentiality: false,
     can_add_message: true,

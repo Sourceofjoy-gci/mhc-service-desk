@@ -103,6 +103,8 @@ const TICKET: TicketDetail = {
     can_update_work_state: true,
     can_self_assign: false,
     self_assignee_id: null,
+    self_assignee_detail: null,
+    can_assign: false,
     can_reassign: false,
     can_change_confidentiality: false,
     can_add_message: true,
@@ -145,6 +147,7 @@ const TICKET: TicketDetail = {
 const INITIAL_ACTIVITY: ActivityItem = {
   id: "activity-1",
   type: "status_transition",
+  category: "workflow",
   occurred_at: "2026-07-27T09:00:00Z",
   actor: { subject: "agent-1", display_name: "Case Agent" },
   visibility: "internal",
@@ -376,6 +379,7 @@ describe("ticket operator workspace", () => {
     const createdActivity: ActivityItem = {
       id: "activity-2",
       type: "message",
+      category: "public_reply",
       occurred_at: "2026-07-27T09:20:00Z",
       actor: { subject: "agent-1", display_name: "Case Agent" },
       visibility: "requester",

@@ -32,6 +32,7 @@ interface ActivityPayloads {
     ticket_number: string;
     direction: string;
   };
+  custody_event: Record<string, unknown>;
 }
 
 type TypedActivityItem = {
@@ -111,6 +112,12 @@ function typedActivity(item: ActivityItem): TypedActivityItem {
           ticket_number: text(payload.ticket_number, "Unknown ticket"),
           direction: text(payload.direction, "related"),
         },
+      };
+    case "custody_event":
+      return {
+        ...item,
+        type: "custody_event",
+        payload,
       };
     default:
       return assertNever(item.type);
@@ -323,6 +330,25 @@ function RelationshipActivity({
   );
 }
 
+function CustodyActivity({
+  item,
+}: {
+  item: Extract<TypedActivityItem, { type: "custody_event" }>;
+}) {
+  return (
+    <ActivityFrame
+      item={item}
+      label="Custody event"
+      className="border-l-emerald-500"
+    >
+      <h3 className="font-medium">Custody event</h3>
+      <p className="mt-1 text-sm">
+        {humanize(text(item.payload.action, "Recorded"))}
+      </p>
+    </ActivityFrame>
+  );
+}
+
 function renderActivity(item: TypedActivityItem) {
   switch (item.type) {
     case "message":
@@ -337,6 +363,8 @@ function renderActivity(item: TypedActivityItem) {
       return <AttachmentActivity item={item} />;
     case "relationship":
       return <RelationshipActivity item={item} />;
+    case "custody_event":
+      return <CustodyActivity item={item} />;
     default:
       return assertNever(item);
   }

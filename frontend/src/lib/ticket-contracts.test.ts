@@ -12,7 +12,14 @@ import {
   apiProblem,
   attachmentsApi,
   configureApiAuth,
+  domainCapabilities,
   ticketsApi,
+  type ActivityItem,
+  type AssignmentParty,
+  type AssignmentRequest,
+  type AssignmentResponse,
+  type TicketAssignee,
+  type TicketCapabilities,
   type TicketDetail,
   type TicketSummary,
   type TicketTransitionRequest,
@@ -31,6 +38,121 @@ function request(call: [input: RequestInfo | URL, init?: RequestInit]): {
   init: RequestInit;
 } {
   return { url: call[0], init: call[1] ?? {} };
+}
+
+function assignmentResponse(): AssignmentResponse {
+  return {
+    ticket: {
+      id: "ticket-1",
+      number: "OP-202607-000001",
+      domain: "operational",
+      title: "Estate review",
+      channel: "web",
+      priority: "P2",
+      confidentiality: "normal",
+      status_code: "assigned",
+      status_name: "Assigned",
+      status_public: "In progress",
+      requester_name: "Naledi Dube",
+      office_code: "MBABANE",
+      service_code: "ESTATES",
+      assignee: "00000000-0000-0000-0000-000000000012",
+      waiting_reason: "",
+      created_at: "2026-07-30T08:00:00Z",
+      updated_at: "2026-07-30T10:01:00Z",
+      age_hours: 2,
+      sla_health: "on_track",
+      available_transition_codes: ["in_progress"],
+      description: "Review the estate file.",
+      requester: {
+        id: "requester-1",
+        full_name: "Naledi Dube",
+        email: "naledi@example.test",
+        phone_e164: null,
+      },
+      service: "Estates",
+      request_type: "Estate review",
+      office: "Mbabane",
+      matter_reference: "EST-42",
+      tags: [],
+      custom_fields: {},
+      resolution_code: "",
+      resolution_summary: "",
+      acknowledged_at: "2026-07-30T08:15:00Z",
+      first_responded_at: null,
+      resolved_at: null,
+      closed_at: null,
+      reopened_at: null,
+      assignee_detail: {
+        id: "00000000-0000-0000-0000-000000000012",
+        display_name: "Finance Reviewer",
+      },
+      team: "Finance",
+      blocked_reason: "",
+      next_action: "Review account",
+      next_action_at: "2026-07-31T08:00:00Z",
+      available_transitions: [
+        {
+          to_status: "in_progress",
+          label: "Start work",
+          requires_resolution: false,
+          requires_reason: false,
+        },
+      ],
+      capabilities: {
+        can_update_work_state: true,
+        can_self_assign: false,
+        self_assignee_id: null,
+        self_assignee_detail: null,
+        can_assign: true,
+        can_reassign: true,
+        can_change_confidentiality: true,
+        can_add_message: true,
+        can_add_note: true,
+        can_upload_attachment: true,
+      },
+      sla_clocks: {
+        first_response: {
+          state: "met",
+          due_at: "2026-07-30T10:00:00Z",
+          remaining_seconds: 0,
+          overdue_seconds: 0,
+        },
+        resolution: {
+          state: "running",
+          due_at: "2026-07-31T08:00:00Z",
+          remaining_seconds: 79_140,
+          overdue_seconds: 0,
+        },
+      },
+      relationships: [],
+      attachments: [],
+      messages: [],
+      notes: [],
+    },
+    receipt: {
+      ticket_number: "OP-202607-000001",
+      action: "reassigned",
+      previous_assignee: {
+        id: "00000000-0000-0000-0000-000000000011",
+        display_name: "Estate Examiner",
+        designations: ["Estate Examiner"],
+        team_labels: ["Estate Administration"],
+      },
+      new_assignee: {
+        id: "00000000-0000-0000-0000-000000000012",
+        display_name: "Finance Reviewer",
+        designations: ["Accountant"],
+        team_labels: ["Finance"],
+      },
+      occurred_at: "2026-07-30T10:01:00Z",
+      performed_by: {
+        kind: "user",
+        subject: "supervisor-1",
+        display_name: "Operations Supervisor",
+      },
+    },
+  };
 }
 
 describe("ticket lifecycle API contracts", () => {
@@ -110,6 +232,46 @@ describe("ticket lifecycle API contracts", () => {
     });
   });
 
+  it("encodes candidate search against the guarded ticket subresource", async () => {
+    const fetchMock = vi
+      .spyOn(globalThis, "fetch")
+      .mockResolvedValueOnce(jsonResponse(200, { results: [] }));
+
+    await ticketsApi.assignees(
+      "OP-202607-000001",
+      "account & finance",
+    );
+
+    expect(request(fetchMock.mock.calls[0])).toMatchObject({
+      url:
+        "/api/v1/tickets/OP-202607-000001/assignees/?search=account+%26+finance",
+      init: { method: "GET" },
+    });
+  });
+
+  it("POSTs the exact assignment command and returns its authoritative response", async () => {
+    const response = assignmentResponse();
+    const fetchMock = vi
+      .spyOn(globalThis, "fetch")
+      .mockResolvedValueOnce(jsonResponse(200, response));
+    const values = {
+      assignee_id: "00000000-0000-0000-0000-000000000012",
+      expected_updated_at: "2026-07-30T10:00:00Z",
+      reason: "Transfer to finance review",
+    } satisfies AssignmentRequest;
+
+    await expect(
+      ticketsApi.assign("OP-202607-000001", values),
+    ).resolves.toEqual(response);
+
+    const { url, init } = request(fetchMock.mock.calls[0]);
+    expect(url).toBe(
+      "/api/v1/tickets/OP-202607-000001/assignment/",
+    );
+    expect(init.method).toBe("POST");
+    expect(JSON.parse(String(init.body))).toEqual(values);
+  });
+
   it("lists and uploads attachments through the ticket collection", async () => {
     const fetchMock = vi
       .spyOn(globalThis, "fetch")
@@ -165,6 +327,44 @@ describe("ticket lifecycle API contracts", () => {
         number: string,
         values: TicketTransitionRequest,
       ) => Promise<TicketDetail>
+    >();
+    expectTypeOf<TicketCapabilities["can_assign"]>().toEqualTypeOf<boolean>();
+    expectTypeOf<
+      TicketCapabilities["self_assignee_detail"]
+    >().toEqualTypeOf<TicketAssignee | null>();
+    expectTypeOf<TicketAssignee["designations"]>().toEqualTypeOf<string[]>();
+    expectTypeOf<TicketAssignee["team_labels"]>().toEqualTypeOf<string[]>();
+    expectTypeOf<ActivityItem["type"]>().toEqualTypeOf<
+      | "message"
+      | "internal_note"
+      | "status_transition"
+      | "work_state"
+      | "attachment"
+      | "relationship"
+      | "custody_event"
+    >();
+    expectTypeOf<ActivityItem["category"]>().toEqualTypeOf<
+      | "public_reply"
+      | "internal_note"
+      | "workflow"
+      | "custody"
+      | "attachment"
+      | "relationship"
+    >();
+    expectTypeOf<AssignmentParty>().toEqualTypeOf<{
+      id: string;
+      display_name: string;
+      designations: string[];
+      team_labels: string[];
+    }>();
+    expectTypeOf(ticketsApi.assign).toEqualTypeOf<
+      (
+        number: string,
+        body: AssignmentRequest,
+      ) => Promise<AssignmentResponse>
+    >();
+    expectTypeOf(domainCapabilities(["master"]).queueDomains).toEqualTypeOf<
+      ("operational" | "it")[]
     >();
   });
 });

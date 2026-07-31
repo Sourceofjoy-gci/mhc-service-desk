@@ -23,6 +23,7 @@ const ITEMS: ActivityItem[] = [
   {
     id: "message:1",
     type: "message",
+    category: "public_reply",
     occurred_at: "2026-07-27T08:00:00Z",
     actor: { subject: "agent-1", display_name: "Agent One" },
     visibility: "requester",
@@ -37,6 +38,7 @@ const ITEMS: ActivityItem[] = [
   {
     id: "note:1",
     type: "internal_note",
+    category: "internal_note",
     occurred_at: "2026-07-27T08:00:00.500Z",
     actor: { subject: "agent-2", display_name: "Supervisor Two" },
     visibility: "internal",
@@ -45,6 +47,7 @@ const ITEMS: ActivityItem[] = [
   {
     id: "transition:1",
     type: "status_transition",
+    category: "workflow",
     occurred_at: "2026-07-27T08:02:00Z",
     actor: { subject: "agent-1", display_name: "Agent One" },
     visibility: "internal",
@@ -53,6 +56,7 @@ const ITEMS: ActivityItem[] = [
   {
     id: "audit:1",
     type: "work_state",
+    category: "workflow",
     occurred_at: "2026-07-27T08:03:00Z",
     actor: { subject: "agent-1", display_name: "Agent One" },
     visibility: "internal",
@@ -64,6 +68,7 @@ const ITEMS: ActivityItem[] = [
   {
     id: "attachment:1",
     type: "attachment",
+    category: "attachment",
     occurred_at: "2026-07-27T08:04:00Z",
     actor: { subject: "agent-1", display_name: "Agent One" },
     visibility: "internal",
@@ -81,6 +86,7 @@ const ITEMS: ActivityItem[] = [
   {
     id: "relationship:1",
     type: "relationship",
+    category: "relationship",
     occurred_at: "2026-07-27T08:05:00Z",
     actor: null,
     visibility: "internal",
@@ -147,6 +153,7 @@ describe("typed ticket activity", () => {
     const earlier: ActivityItem = {
       id: "message:z-earlier",
       type: "message",
+      category: "public_reply",
       occurred_at: "2026-07-27T08:00:00.000001Z",
       actor: { subject: "agent-1", display_name: "Agent One" },
       visibility: "requester",
@@ -159,6 +166,7 @@ describe("typed ticket activity", () => {
     const later: ActivityItem = {
       id: "message:a-later",
       type: "message",
+      category: "public_reply",
       occurred_at: "2026-07-27T08:00:00.000999Z",
       actor: { subject: "agent-2", display_name: "Supervisor Two" },
       visibility: "requester",
@@ -179,6 +187,23 @@ describe("typed ticket activity", () => {
       expect.stringContaining("Earlier backend item"),
       expect.stringContaining("Later backend item"),
     ]);
+  });
+
+  it("accepts a custody event while preserving its server action", async () => {
+    const custody: ActivityItem = {
+      id: "custody:1",
+      type: "custody_event",
+      category: "custody",
+      occurred_at: "2026-07-27T08:06:00Z",
+      actor: { subject: "supervisor-1", display_name: "Supervisor One" },
+      visibility: "internal",
+      payload: { action: "reassigned" },
+    };
+    harness.activity.mockResolvedValue({ results: [custody] });
+
+    renderWithProviders(<ActivityTimeline ticketNumber="MHC-2026-000001" />);
+
+    expect(await screen.findByText("Reassigned")).toBeVisible();
   });
 
   it("shows a distinct loading state", () => {
