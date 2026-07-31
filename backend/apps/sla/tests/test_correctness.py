@@ -7,6 +7,7 @@ from importlib import import_module
 from threading import Event, Thread
 from typing import TypedDict
 from unittest.mock import patch
+from uuid import UUID, uuid4
 from zoneinfo import ZoneInfo
 
 import pytest
@@ -127,9 +128,10 @@ def test_calendar_math_merges_legacy_overlapping_intervals() -> None:
     assert business_seconds_between(start, end, calendar) == 3 * 3600
 
 
-def _ticket(basic_world: BasicWorld) -> Ticket:
+def _ticket(basic_world: BasicWorld, *, ticket_id: UUID | None = None) -> Ticket:
     service = basic_world["gen_info"]
     return Ticket.objects.create(
+        id=ticket_id or uuid4(),
         number=f"OP-202607-{Ticket.objects.count() + 993001:06d}",
         domain="operational",
         title="SLA correctness",
@@ -147,8 +149,9 @@ def _instance(
     *,
     due_at: datetime,
     state: str = SlaInstance.State.ACTIVE,
+    ticket_id: UUID | None = None,
 ) -> SlaInstance:
-    ticket = _ticket(basic_world)
+    ticket = _ticket(basic_world, ticket_id=ticket_id)
     policy = SlaPolicy.objects.get(domain="operational", priority="P3")
     return SlaInstance.objects.create(
         ticket=ticket,
@@ -541,8 +544,17 @@ def test_evaluator_skips_an_instance_locked_by_a_concurrent_sweep(
 def test_evaluator_skips_a_ticket_locked_by_an_independent_transaction(
     basic_world: BasicWorld,
 ) -> None:
-    """A busy ticket must not stall the rest of the evaluator batch."""
-    instance = _instance(basic_world, due_at=timezone.now() - timedelta(seconds=1))
+    """A busy first ticket must not stall an unlocked ticket in the same batch."""
+    instance = _instance(
+        basic_world,
+        due_at=timezone.now() - timedelta(seconds=1),
+        ticket_id=UUID(int=1),
+    )
+    unlocked_instance = _instance(
+        basic_world,
+        due_at=timezone.now() - timedelta(seconds=1),
+        ticket_id=UUID(int=2),
+    )
     ticket_locked = Event()
     release_ticket = Event()
     evaluation_finished = Event()
@@ -596,15 +608,83 @@ def test_evaluator_skips_a_ticket_locked_by_an_independent_transaction(
     if thread_errors:
         raise thread_errors[0]
     assert thread_errors == []
-    assert evaluation_results == [0]
+    assert evaluation_results == [1]
     instance.refresh_from_db()
+    unlocked_instance.refresh_from_db()
     assert instance.state == SlaInstance.State.ACTIVE
     assert instance.last_evaluated_at is None
     assert instance.ticket.custody_events.count() == 0
+    assert unlocked_instance.state == SlaInstance.State.BREACHED
+    assert unlocked_instance.last_evaluated_at is not None
 
     assert evaluate_open_slas() == 1
     instance.refresh_from_db()
     assert instance.state == SlaInstance.State.BREACHED
+
+
+@pytest.mark.django_db(transaction=True)
+def test_evaluator_does_not_skip_ticket_when_only_joined_status_is_locked(
+    basic_world: BasicWorld,
+) -> None:
+    """The aggregate lock must not include the joined workflow status row."""
+    instance = _instance(basic_world, due_at=timezone.now() - timedelta(seconds=1))
+    status_locked = Event()
+    release_status = Event()
+    evaluation_finished = Event()
+    evaluation_results: list[int] = []
+    thread_errors: list[BaseException] = []
+
+    def hold_status_lock() -> None:
+        close_old_connections()
+        try:
+            with transaction.atomic():
+                with connection.cursor() as cursor:
+                    cursor.execute("SET LOCAL lock_timeout = '2s'")
+                    cursor.execute("SET LOCAL statement_timeout = '5s'")
+                Status.objects.select_for_update().get(pk=instance.ticket.status_id)
+                status_locked.set()
+                if not release_status.wait(timeout=5):
+                    raise TimeoutError("test did not release the status lock")
+        except BaseException as exc:
+            thread_errors.append(exc)
+        finally:
+            close_old_connections()
+
+    def run_evaluator() -> None:
+        close_old_connections()
+        try:
+            with transaction.atomic():
+                with connection.cursor() as cursor:
+                    cursor.execute("SET LOCAL lock_timeout = '2s'")
+                    cursor.execute("SET LOCAL statement_timeout = '5s'")
+                evaluation_results.append(evaluate_open_slas())
+        except BaseException as exc:
+            thread_errors.append(exc)
+        finally:
+            evaluation_finished.set()
+            close_old_connections()
+
+    lock_thread = Thread(target=hold_status_lock, daemon=True)
+    evaluator_thread = Thread(target=run_evaluator, daemon=True)
+    try:
+        lock_thread.start()
+        assert status_locked.wait(timeout=5)
+        evaluator_thread.start()
+        assert evaluation_finished.wait(timeout=3)
+    finally:
+        release_status.set()
+        lock_thread.join(timeout=5)
+        evaluator_thread.join(timeout=5)
+
+    assert not lock_thread.is_alive(), "status-lock worker did not complete"
+    assert not evaluator_thread.is_alive(), "evaluator worker did not complete"
+    if thread_errors:
+        raise thread_errors[0]
+    assert thread_errors == []
+    assert evaluation_results == [1]
+    instance.refresh_from_db()
+    assert instance.state == SlaInstance.State.BREACHED
+    assert instance.last_evaluated_at is not None
 
 
 class TestSlaTransitionLockOrder(TransactionTestCase):
