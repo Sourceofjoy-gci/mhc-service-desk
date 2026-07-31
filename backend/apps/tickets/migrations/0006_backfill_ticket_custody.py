@@ -187,7 +187,17 @@ def backfill_ticket_custody(apps, schema_editor):
                 "subject": user.keycloak_subject,
                 "display_name": user.display_name or user.username,
             }
-        return {"kind": "system", "subject": subject or "legacy-backfill", "display_name": subject or "Legacy backfill"}
+        if subject:
+            return {
+                "kind": "legacy_unknown",
+                "subject": str(subject),
+                "display_name": str(subject),
+            }
+        return {
+            "kind": "system",
+            "subject": "legacy-backfill",
+            "display_name": "Legacy backfill",
+        }
 
     def owner(value):
         if value in (None, ""):
@@ -195,7 +205,14 @@ def backfill_ticket_custody(apps, schema_editor):
         key = uuid_lookup_key(value)
         user = context["users_by_id"].get(key) if key is not None else None
         if user is None:
-            return None
+            stable_id = str(value)
+            return {
+                "id": stable_id,
+                "subject": None,
+                "display_name": None,
+                "raw_value": stable_id,
+                "unresolved": True,
+            }
         return {
             "id": str(user.pk),
             "subject": user.keycloak_subject,
@@ -208,7 +225,13 @@ def backfill_ticket_custody(apps, schema_editor):
         key = uuid_lookup_key(value)
         location = context["queues_by_id"].get(key) if key is not None else None
         if location is None:
-            return None
+            stable_id = str(value)
+            return {
+                "id": stable_id,
+                "label": None,
+                "raw_value": stable_id,
+                "unresolved": True,
+            }
         return {"id": str(location.pk), "label": location.name}
 
     def status(value):
@@ -226,17 +249,41 @@ def backfill_ticket_custody(apps, schema_editor):
         sources = []
         audits = context["audits_by_ticket"].get(str(ticket.pk), [])
         created_audit = next((audit for audit in audits if audit.action == "ticket.created"), None)
+        transitions = context["transitions_by_ticket"].get(ticket.pk, [])
+        creation_transition = next(
+            (transition for transition in transitions if transition.from_status_id is None),
+            None,
+        )
         if created_audit is None:
             initial_status = context["initial_statuses"].get(ticket.domain)
+            creation_actor = (
+                actor(creation_transition.actor_subject)
+                if creation_transition is not None
+                else {
+                    "kind": "system",
+                    "subject": "legacy-backfill",
+                    "display_name": "Legacy backfill",
+                }
+            )
             created = _empty_event(
                 event_type="created",
                 occurred_at=ticket.created_at,
-                actor={"kind": "system", "subject": "legacy-backfill", "display_name": "Legacy backfill"},
+                actor=creation_actor,
                 source_process="ticket.legacy_backfill",
-                source_record_type="",
-                source_record_id="",
+                source_record_type=(
+                    "workflow_transition" if creation_transition is not None else ""
+                ),
+                source_record_id=(
+                    str(creation_transition.pk) if creation_transition is not None else ""
+                ),
             )
-            created["new_status"] = status(initial_status.pk) if initial_status else None
+            created["new_status"] = (
+                status(creation_transition.to_status_id)
+                if creation_transition is not None
+                else status(initial_status.pk)
+                if initial_status
+                else None
+            )
             sources.append((ticket.created_at, 0, "", created))
         else:
             created = _empty_event(
@@ -244,11 +291,23 @@ def backfill_ticket_custody(apps, schema_editor):
                 occurred_at=created_audit.occurred_at,
                 actor=actor(created_audit.actor_subject),
                 source_process="ticket.create",
-                source_record_type="audit_event",
-                source_record_id=str(created_audit.pk),
+                source_record_type=(
+                    "workflow_transition" if creation_transition is not None else "audit_event"
+                ),
+                source_record_id=(
+                    str(creation_transition.pk)
+                    if creation_transition is not None
+                    else str(created_audit.pk)
+                ),
             )
             initial_status = context["initial_statuses"].get(ticket.domain)
-            created["new_status"] = status(initial_status.pk) if initial_status else None
+            created["new_status"] = (
+                status(creation_transition.to_status_id)
+                if creation_transition is not None
+                else status(initial_status.pk)
+                if initial_status
+                else None
+            )
             sources.append((created_audit.occurred_at, 0, str(created_audit.pk), created))
 
         for audit in audits:
@@ -282,7 +341,7 @@ def backfill_ticket_custody(apps, schema_editor):
                 )
                 event["previous_owner"] = previous_owner
                 event["new_owner"] = new_owner
-                sources.append((audit.occurred_at, 1, str(audit.pk), event))
+                sources.append((audit.occurred_at, 2, str(audit.pk), event))
             if "queue" in before or "queue" in after:
                 event = _empty_event(
                     event_type="queue_changed",
@@ -294,11 +353,10 @@ def backfill_ticket_custody(apps, schema_editor):
                 )
                 event["previous_queue"] = queue(before.get("queue"))
                 event["new_queue"] = queue(after.get("queue"))
-                sources.append((audit.occurred_at, 2, str(audit.pk), event))
+                sources.append((audit.occurred_at, 1, str(audit.pk), event))
 
-        transitions = context["transitions_by_ticket"].get(ticket.pk, [])
         for transition in transitions:
-            if transition.from_status_id is None:
+            if creation_transition is not None and transition.pk == creation_transition.pk:
                 continue
             event = _empty_event(
                 event_type="reopened" if transition.to_status.code == "reopened" else "closed" if transition.to_status.code == "closed" else "status_changed",
@@ -372,9 +430,7 @@ def create_ticket_custody_protection(apps, schema_editor):
         RETURNS trigger AS $$
         BEGIN
           IF TG_OP = 'DELETE'
-             AND NOT EXISTS (
-               SELECT 1 FROM ticket WHERE id = OLD.ticket_id
-             ) THEN
+             AND current_setting('mhc.allow_ticket_custody_delete', true) = 'on' THEN
             RETURN OLD;
           END IF;
           RAISE EXCEPTION 'ticket custody events are immutable';

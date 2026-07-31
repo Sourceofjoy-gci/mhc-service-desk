@@ -42,12 +42,25 @@ reassignment, unassignment, and queue events.
 
 PostgreSQL rejects direct custody updates and deletes. The `0007` migration is
 state-only: Django's collector sees `DO_NOTHING` for the custody foreign key,
-while the physical database foreign key remains `ON DELETE CASCADE`. Therefore
-whole-ticket disposal removes custody records as part of deleting the ticket,
-but application-level collection does not separately select custody rows.
-There is no general session setting or same-role bypass for editing custody.
-The retention path remains responsible for legal-hold and candidate checks
-before an authorised whole-ticket disposal.
+while the physical database foreign key remains `ON DELETE CASCADE`. The
+`0008` migration makes that cascade fail closed unless the approved retention
+command has enabled `mhc.allow_ticket_custody_delete` with `SET LOCAL` inside
+the same atomic disposal transaction. Normal ORM deletion and direct SQL
+ticket deletion therefore cannot use the physical cascade. The setting is not
+exposed as an application helper and expires at transaction end. The retention
+path remains responsible for legal-hold and candidate checks before enabling
+an authorised whole-ticket disposal.
+
+Legacy backfill stores unresolved owner and queue references inside the hashed
+custody JSON using their original stable value, a null label/identity, and an
+explicit unresolved marker. Activity never recovers those custody facts from a
+mutable audit payload; linked audit identifiers are used to suppress duplicate
+legacy fields only. A non-empty historical actor subject that no longer
+resolves to a user is recorded as `legacy_unknown`, rather than being
+misrepresented as a system process. The authoritative null-origin workflow
+transition supplies a ticket's creation status when present, even if the
+configured initial status changed later. Only that consumed transition is
+suppressed from separate timeline output.
 
 The `0006` rollback removes the PostgreSQL trigger and restores the original
 non-cascading foreign key while deliberately retaining rows backfilled by that
@@ -64,6 +77,8 @@ the PRD records policy; this ledger is evidence, not an exemption from it.
   together.
 - Canonical fields, six-fractional-digit UTC timestamps, and ordering are
   compatibility constraints for writers, backfill, and verifiers.
+- Equal-time custody activity retains ledger `sequence`; paired queue and owner
+  events cannot be reordered by random event UUIDs.
 - Per-ticket locking serializes appends and avoids sequence/hash races at the
   cost of short contention on concurrent writes to the same ticket.
 - The chain makes accidental or unauthorised changes evident; privileged

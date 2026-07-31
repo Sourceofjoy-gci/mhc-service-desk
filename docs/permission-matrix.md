@@ -117,6 +117,12 @@ or named system process, source process, reason, and applicable prior/new
 owner, queue, and status snapshots. Administrators and records staff must use
 the approved retention/disposal process for a whole-ticket disposal after its
 hold and candidate checks; there is no custody edit or selective-delete route.
+The database permits its custody cascade only while that command holds an
+atomic disposal transaction and has enabled the transaction-local retention
+gate. Ordinary ORM deletes and direct SQL ticket deletes fail closed.
+Unresolved legacy owner/queue IDs remain hashed custody snapshots with null
+labels, and unresolved historical human subjects are shown as unverified
+legacy actors rather than system processes.
 The current custody integration covers creation, workflow, approved IT-child
 workflow, and SLA escalation. Assignment/queue integration is explicitly a
 Plan 2 pending change, not an authorization for current assignment writers to

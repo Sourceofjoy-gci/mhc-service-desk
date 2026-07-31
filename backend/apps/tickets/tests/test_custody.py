@@ -406,10 +406,12 @@ def test_postgresql_rejects_raw_custody_updates_and_deletes_but_allows_insert(ti
         with connection.cursor() as cursor:
             cursor.execute("DELETE FROM ticket_custody_event WHERE id = %s", [event.id])
 
-    def delete_with_old_guc() -> None:
+    def delete_parent_directly() -> None:
         with transaction.atomic(), connection.cursor() as cursor:
-            cursor.execute("SET LOCAL mhc.allow_ticket_custody_delete = 'on'")
-            cursor.execute("DELETE FROM ticket_custody_event WHERE id = %s", [event.id])
+            cursor.execute("DELETE FROM ticket WHERE id = %s", [ticket.id])
 
     with pytest.raises(DatabaseError, match="immutable"):
-        delete_with_old_guc()
+        delete_parent_directly()
+
+    assert Ticket._base_manager.filter(pk=ticket.pk).exists()
+    assert TicketCustodyEvent._base_manager.filter(pk=event.pk).exists()

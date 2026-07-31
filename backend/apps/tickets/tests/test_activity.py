@@ -3,7 +3,7 @@
 from __future__ import annotations
 
 from datetime import timedelta
-from uuid import uuid4
+from uuid import UUID, uuid4
 
 import pytest
 from django.urls import reverse
@@ -151,8 +151,8 @@ def test_activity_is_stable_typed_chronological_and_deduplicated(basic_world):
         f"relationship:{relationship.id}",
     ]
     assert len({item["id"] for item in activity}) == len(activity)
-    assert [(item["occurred_at"], item["id"]) for item in activity] == sorted(
-        (item["occurred_at"], item["id"]) for item in activity
+    assert [item["occurred_at"] for item in activity] == sorted(
+        item["occurred_at"] for item in activity
     )
     assert [item["type"] for item in activity] == [
         "message",
@@ -355,8 +355,8 @@ def test_activity_merges_custody_into_one_categorised_deduplicated_stream(basic_
 
     activity = build_ticket_activity(ticket)
 
-    assert [(item["occurred_at"], item["id"]) for item in activity] == sorted(
-        (item["occurred_at"], item["id"]) for item in activity
+    assert [item["occurred_at"] for item in activity] == sorted(
+        item["occurred_at"] for item in activity
     )
     assert {item["category"] for item in activity} >= {
         "public_reply",
@@ -486,6 +486,16 @@ def test_linked_custody_moves_raw_unresolvable_owner_without_a_duplicate_audit_f
         custody_event=CustodyEventInput(
             event_type=event_type,
             source_process="ticket.assignment",
+            previous_owner=(
+                CustodyParty.unresolved_reference(before_assignee)
+                if before_assignee
+                else None
+            ),
+            new_owner=(
+                CustodyParty.unresolved_reference(after_assignee)
+                if after_assignee
+                else None
+            ),
         ),
     )
 
@@ -528,6 +538,12 @@ def test_linked_custody_moves_raw_unresolvable_queue_without_a_duplicate_audit_f
         custody_event=CustodyEventInput(
             event_type=TicketCustodyEvent.EventType.QUEUE_CHANGED,
             source_process="ticket.routing",
+            previous_queue=(
+                CustodyQueue.unresolved_reference(before_queue) if before_queue else None
+            ),
+            new_queue=(
+                CustodyQueue.unresolved_reference(after_queue) if after_queue else None
+            ),
         ),
     )
 
@@ -555,6 +571,7 @@ def test_linked_assignment_audit_preserves_a_raw_unresolvable_owner_in_custody(b
         custody_event=CustodyEventInput(
             event_type=TicketCustodyEvent.EventType.UNASSIGNED,
             source_process="ticket.assignment",
+            previous_owner=CustodyParty.unresolved_reference("deleted-owner"),
         ),
         audit_action="ticket.assignment.changed",
     )
@@ -588,6 +605,7 @@ def test_linked_mixed_custody_audit_routes_partial_snapshot_fallbacks_once_per_f
                 source_process="ticket.assignment",
                 source_record_type="audit_event",
                 source_record_id=str(audit.id),
+                previous_owner=CustodyParty.unresolved_reference("deleted-owner"),
                 new_owner=CustodyParty(
                     id="agent-id",
                     subject="snapshot-agent",
@@ -599,6 +617,7 @@ def test_linked_mixed_custody_audit_routes_partial_snapshot_fallbacks_once_per_f
                 source_process="ticket.routing",
                 source_record_type="audit_event",
                 source_record_id=str(audit.id),
+                previous_queue=CustodyQueue.unresolved_reference("deleted-queue"),
             ),
         ),
     )
@@ -641,6 +660,45 @@ def test_linked_mixed_custody_audit_routes_partial_snapshot_fallbacks_once_per_f
         "unresolved": True,
     }
     assert queue_custody["payload"]["new_queue"] is None
+
+
+def test_equal_timestamp_custody_activity_uses_sequence_not_event_uuid(basic_world):
+    """Paired queue and owner events must retain their ledger ordering in activity."""
+    ticket = _ticket(basic_world)
+    occurred_at = timezone.now()
+    queue_event = TicketCustodyEvent.objects.create(
+        id=UUID("ffffffff-ffff-ffff-ffff-ffffffffffff"),
+        ticket=ticket,
+        sequence=1,
+        event_type=TicketCustodyEvent.EventType.QUEUE_CHANGED,
+        occurred_at=occurred_at,
+        actor_kind=TicketCustodyEvent.ActorKind.USER,
+        actor_subject="supervisor",
+        actor_display_name="Supervisor",
+        source_process="ticket.routing",
+        event_hash="a" * 64,
+    )
+    owner_event = TicketCustodyEvent.objects.create(
+        id=UUID("00000000-0000-0000-0000-000000000001"),
+        ticket=ticket,
+        sequence=2,
+        event_type=TicketCustodyEvent.EventType.ASSIGNED,
+        occurred_at=occurred_at,
+        actor_kind=TicketCustodyEvent.ActorKind.USER,
+        actor_subject="supervisor",
+        actor_display_name="Supervisor",
+        source_process="ticket.assignment",
+        previous_hash=queue_event.event_hash,
+        event_hash="b" * 64,
+    )
+
+    activity = build_ticket_activity(ticket)
+
+    assert [
+        item["id"]
+        for item in activity
+        if item["id"] in {f"custody:{queue_event.id}", f"custody:{owner_event.id}"}
+    ] == [f"custody:{queue_event.id}", f"custody:{owner_event.id}"]
 
 
 def test_linked_owner_custody_redacts_only_duplicate_legacy_assignee(basic_world):

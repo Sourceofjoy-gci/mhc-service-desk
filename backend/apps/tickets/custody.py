@@ -64,28 +64,61 @@ class CustodyActor:
 @dataclass(frozen=True)
 class CustodyParty:
     id: str
-    subject: str
-    display_name: str
+    subject: str | None
+    display_name: str | None
     designations: tuple[str, ...] = ()
     team_labels: tuple[str, ...] = ()
+    raw_value: str | None = None
+    unresolved: bool = False
 
-    def as_json(self) -> dict[str, str | list[str]]:
-        return {
+    def as_json(self) -> dict[str, object]:
+        snapshot: dict[str, object] = {
             "id": self.id,
             "subject": self.subject,
             "display_name": self.display_name,
             "designations": list(self.designations),
             "team_labels": list(self.team_labels),
         }
+        if self.unresolved:
+            snapshot["raw_value"] = self.raw_value or self.id
+            snapshot["unresolved"] = True
+        return snapshot
+
+    @classmethod
+    def unresolved_reference(cls, value: object) -> CustodyParty:
+        stable_id = str(value)
+        return cls(
+            id=stable_id,
+            subject=None,
+            display_name=None,
+            raw_value=stable_id,
+            unresolved=True,
+        )
 
 
 @dataclass(frozen=True)
 class CustodyQueue:
     id: str
-    label: str
+    label: str | None
+    raw_value: str | None = None
+    unresolved: bool = False
 
-    def as_json(self) -> dict[str, str]:
-        return {"id": self.id, "label": self.label}
+    def as_json(self) -> dict[str, object]:
+        snapshot: dict[str, object] = {"id": self.id, "label": self.label}
+        if self.unresolved:
+            snapshot["raw_value"] = self.raw_value or self.id
+            snapshot["unresolved"] = True
+        return snapshot
+
+    @classmethod
+    def unresolved_reference(cls, value: object) -> CustodyQueue:
+        stable_id = str(value)
+        return cls(
+            id=stable_id,
+            label=None,
+            raw_value=stable_id,
+            unresolved=True,
+        )
 
 
 @dataclass(frozen=True)
@@ -168,12 +201,12 @@ def _chain_payload(
     source_process: str,
     source_record_type: str,
     source_record_id: str,
-    previous_owner: dict[str, str] | None,
-    new_owner: dict[str, str] | None,
-    previous_queue: dict[str, str] | None,
-    new_queue: dict[str, str] | None,
-    previous_status: dict[str, str] | None,
-    new_status: dict[str, str] | None,
+    previous_owner: dict[str, object] | None,
+    new_owner: dict[str, object] | None,
+    previous_queue: dict[str, object] | None,
+    new_queue: dict[str, object] | None,
+    previous_status: dict[str, object] | None,
+    new_status: dict[str, object] | None,
     previous_designations: list[str],
     new_designations: list[str],
     previous_team_labels: list[str],
@@ -212,18 +245,24 @@ def _event_hash(payload: dict[str, object]) -> str:
     return hashlib.sha256(canonical).hexdigest()
 
 
-def _party_snapshot(party: CustodyParty | None) -> dict[str, str] | None:
+def _party_snapshot(party: CustodyParty | None) -> dict[str, object] | None:
     if party is None:
         return None
-    return {
+    snapshot: dict[str, object] = {
         "id": party.id,
         "subject": party.subject,
         "display_name": party.display_name,
     }
+    if party.unresolved:
+        snapshot["raw_value"] = party.raw_value or party.id
+        snapshot["unresolved"] = True
+    return snapshot
 
 
-def _snapshot(value: CustodyQueue | CustodyStatus | None) -> dict[str, str] | None:
-    return value.as_json() if value else None
+def _snapshot(value: CustodyQueue | CustodyStatus | None) -> dict[str, object] | None:
+    if value is None:
+        return None
+    return {key: item for key, item in value.as_json().items()}
 
 
 def _party_values(party: CustodyParty | None, attribute: str) -> list[str]:

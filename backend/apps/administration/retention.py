@@ -776,6 +776,9 @@ class Command(BaseCommand):
             queryset = Ticket._base_manager.filter(pk__in=candidate_ids)
             collector = Collector(using=connection.alias)
             collector.collect(list(queryset))
+            if connection.vendor == "postgresql":
+                with connection.cursor() as cursor:
+                    cursor.execute("SET LOCAL mhc.allow_ticket_custody_delete = 'on'")
             _total_deleted, deleted_by_model = collector.delete()
             disposed = deleted_by_model.get("tickets.Ticket", 0)
             return OrmDisposalCounts(

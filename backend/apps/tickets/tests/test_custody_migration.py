@@ -24,7 +24,7 @@ def test_0005_table_rolls_back_and_restores_through_current_leaf():
     """The original custody-table migration must reverse and replay cleanly."""
     from django.db.migrations.executor import MigrationExecutor
 
-    leaf = "0007_ticket_custody_collector_state"
+    leaf = "0008_harden_ticket_custody_contract"
     table = "ticket_custody_event"
     try:
         executor = MigrationExecutor(connection)
@@ -207,6 +207,13 @@ def test_backfill_and_activity_keep_later_transition_to_an_initial_status(basic_
         to_status=initial,
         actor_subject="intake-worker",
     )
+    second_null_from = TransitionHistory.objects.create(
+        ticket=ticket,
+        from_status=None,
+        to_status=triage,
+        actor_subject="legacy-import",
+        reason="Separate imported workflow fact",
+    )
     later_to_initial = TransitionHistory.objects.create(
         ticket=ticket,
         from_status=triage,
@@ -222,12 +229,17 @@ def test_backfill_and_activity_keep_later_transition_to_an_initial_status(basic_
         reason="Completed",
     )
     TransitionHistory.objects.filter(pk=creation.pk).update(occurred_at=created_at)
+    TransitionHistory.objects.filter(pk=second_null_from.pk).update(
+        occurred_at=created_at + timedelta(seconds=30)
+    )
     TransitionHistory.objects.filter(pk=later_to_initial.pk).update(
         occurred_at=created_at + timedelta(minutes=1)
     )
     TransitionHistory.objects.filter(pk=later_closed.pk).update(
         occurred_at=created_at + timedelta(minutes=2)
     )
+    Status.objects.filter(domain="operational", is_initial=True).update(is_initial=False)
+    Status.objects.filter(pk=triage.pk).update(is_initial=True)
 
     from django.apps import apps as django_apps
 
@@ -236,9 +248,18 @@ def test_backfill_and_activity_keep_later_transition_to_an_initial_status(basic_
     custody_events = list(ticket.custody_events.all())
     activity = build_ticket_activity(ticket)
 
-    assert [event.event_type for event in custody_events] == ["created", "status_changed", "closed"]
+    assert [event.event_type for event in custody_events] == [
+        "created",
+        "status_changed",
+        "status_changed",
+        "closed",
+    ]
+    assert custody_events[0].new_status == {"code": "new", "label": "New"}
+    assert custody_events[0].source_record_type == "workflow_transition"
+    assert custody_events[0].source_record_id == str(creation.id)
     assert [event.source_record_id for event in custody_events] == [
         str(ticket.custody_events.get(event_type="created").source_record_id),
+        str(second_null_from.id),
         str(later_to_initial.id),
         str(later_closed.id),
     ]
@@ -248,10 +269,19 @@ def test_backfill_and_activity_keep_later_transition_to_an_initial_status(basic_
         if item["type"] in {"custody_event", "status_transition"}
     ] == [
         ("custody_event", None, "new"),
+        ("status_transition", None, "triage"),
         ("status_transition", "triage", "new"),
         ("status_transition", "new", "closed"),
     ]
     assert not [item for item in activity if item["id"] == f"transition:{creation.id}"]
+    imported_fact = [
+        item
+        for item in activity
+        if item["payload"].get("source_record_id") == str(second_null_from.id)
+    ]
+    assert len(imported_fact) == 1
+    assert imported_fact[0]["payload"]["from"] is None
+    assert imported_fact[0]["payload"]["to"] == "triage"
     assert verify_custody_chain(ticket) is True
 
 
@@ -299,12 +329,15 @@ def test_0006_rollback_restores_trigger_fk_index_and_legacy_data(basic_world):
                 "SELECT count(*) FROM ticket_custody_event WHERE ticket_id = %s", [ticket.pk]
             )
             assert cursor.fetchone()[0] == 1
-            cursor.execute("DELETE FROM ticket WHERE id = %s", [cascade_ticket.pk])
+        with pytest.raises(DatabaseError, match="immutable"):
+            with transaction.atomic(), connection.cursor() as cursor:
+                cursor.execute("DELETE FROM ticket WHERE id = %s", [cascade_ticket.pk])
+        with connection.cursor() as cursor:
             cursor.execute(
                 "SELECT count(*) FROM ticket_custody_event WHERE ticket_id = %s",
                 [cascade_ticket.pk],
             )
-            assert cursor.fetchone()[0] == 0
+            assert cursor.fetchone()[0] == 1
         executor = MigrationExecutor(connection)
         executor.migrate([("tickets", "0005_ticketcustodyevent")])
         with connection.cursor() as cursor:
@@ -319,7 +352,7 @@ def test_0006_rollback_restores_trigger_fk_index_and_legacy_data(basic_world):
             with transaction.atomic(), connection.cursor() as cursor:
                 cursor.execute("DELETE FROM ticket WHERE id = %s", [ticket.pk])
     finally:
-        MigrationExecutor(connection).migrate([("tickets", "0007_ticket_custody_collector_state")])
+        MigrationExecutor(connection).migrate([("tickets", "0008_harden_ticket_custody_contract")])
 
 
 def test_0007_keeps_database_cascade_while_collector_skips_custody():
@@ -384,7 +417,9 @@ def test_0007_keeps_database_cascade_while_collector_skips_custody():
             )
             assert cursor.fetchone() == ("c",)
     finally:
-        MigrationExecutor(connection).migrate([("tickets", migration)])
+        MigrationExecutor(connection).migrate(
+            [("tickets", "0008_harden_ticket_custody_contract")]
+        )
 
 
 def test_backfill_synthesizes_only_a_minimal_legacy_created_event(basic_world):
@@ -481,12 +516,73 @@ def test_backfill_keeps_raw_assignment_direction_and_uses_explicit_tie_order(bas
         "queue_changed",
     }
     assert events[0].new_status == {"code": "legacy-first", "label": "Legacy first"}
-    assert all(event.new_owner is None for event in events[1:])
-    assert all(event.previous_owner is None for event in events[1:])
+    assigned = next(event for event in events if event.event_type == "assigned")
+    unassigned = next(event for event in events if event.event_type == "unassigned")
+    assert assigned.new_owner == {
+        "id": "missing-user",
+        "subject": None,
+        "display_name": None,
+        "raw_value": "missing-user",
+        "unresolved": True,
+    }
+    assert unassigned.previous_owner == assigned.new_owner
     queue_event = next(event for event in events if event.event_type == "queue_changed")
-    assert queue_event.previous_queue is None
+    assert queue_event.previous_queue == {
+        "id": "missing-queue",
+        "label": None,
+        "raw_value": "missing-queue",
+        "unresolved": True,
+    }
     assert queue_event.new_queue is None
+    assert {event.actor_kind for event in events} == {"legacy_unknown"}
     assert verify_custody_chain(ticket) is True
+
+
+def test_backfilled_unresolved_facts_do_not_depend_on_the_linked_audit(basic_world):
+    """Editing or deleting a linked audit must not change immutable custody facts."""
+    backfill_ticket_custody = import_module(
+        "apps.tickets.migrations.0006_backfill_ticket_custody"
+    ).backfill_ticket_custody
+    ticket = _ticket(basic_world, number="OP-LEGACY-IMMUTABLE-FACTS")
+    occurred_at = datetime(2025, 1, 4, 9, 0, tzinfo=UTC)
+    audit = _audit(
+        ticket=ticket,
+        action="ticket.work_state.changed",
+        actor_subject="deleted-supervisor",
+        before={"assignee": "deleted-owner", "queue": "deleted-queue"},
+        after={"assignee": None, "queue": None},
+        occurred_at=occurred_at,
+    )
+
+    from django.apps import apps as django_apps
+
+    backfill_ticket_custody(django_apps, None)
+    AuditEvent.objects.filter(pk=audit.pk).update(
+        payload={
+            "before": {"assignee": "rewritten-owner", "queue": "rewritten-queue"},
+            "after": {"assignee": None, "queue": None},
+        }
+    )
+
+    activity = build_ticket_activity(ticket)
+    owner_event = next(
+        item for item in activity if item["payload"].get("action") == "unassigned"
+    )
+    queue_event = next(
+        item for item in activity if item["payload"].get("action") == "queue_changed"
+    )
+    assert owner_event["payload"]["previous_owner"]["id"] == "deleted-owner"
+    assert queue_event["payload"]["previous_queue"]["id"] == "deleted-queue"
+    assert owner_event["payload"]["actor_kind"] == "legacy_unknown"
+
+    AuditEvent.objects.filter(pk=audit.pk).delete()
+    after_delete = build_ticket_activity(ticket)
+    assert next(
+        item for item in after_delete if item["payload"].get("action") == "unassigned"
+    )["payload"]["previous_owner"]["id"] == "deleted-owner"
+    assert next(
+        item for item in after_delete if item["payload"].get("action") == "queue_changed"
+    )["payload"]["previous_queue"]["id"] == "deleted-queue"
 
 
 def test_backfill_resolves_uppercase_uuid_snapshots(basic_world):

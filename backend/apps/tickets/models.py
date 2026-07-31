@@ -181,6 +181,7 @@ class TicketCustodyEvent(models.Model):
     class ActorKind(models.TextChoices):
         USER = "user", "User"
         SYSTEM = "system", "System"
+        LEGACY_UNKNOWN = "legacy_unknown", "Legacy actor (unverified)"
 
     id = models.UUIDField(primary_key=True, default=uuid.uuid4, editable=False)
     ticket = models.ForeignKey(
