@@ -16,7 +16,6 @@ from dataclasses import dataclass
 from typing import Any
 
 from django.db import transaction
-from django.utils import timezone
 
 from apps.tickets.events import record_ticket_event
 from apps.tickets.models import Ticket
