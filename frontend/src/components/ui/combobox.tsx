@@ -1,4 +1,4 @@
-import { useMemo, useRef } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 import { Combobox } from "@base-ui/react/combobox";
 import { CheckIcon, ChevronDownIcon, Loader2Icon } from "lucide-react";
 
@@ -106,7 +106,8 @@ export function StaffCombobox({
 }: StaffComboboxProps) {
   const triggerRef = useRef<HTMLButtonElement>(null);
   const popupLayerRef = useRef<HTMLDivElement>(null);
-  const selectedSnapshotRef = useRef<StaffMemberOption | null>(null);
+  const [selectedSnapshot, setSelectedSnapshot] =
+    useState<StaffMemberOption | null>(null);
   const errorId = `${id}-error`;
   const staffOptions = useMemo<StaffMemberOption[]>(
     () => options.map((assignee) => ({ kind: "staff", assignee })),
@@ -122,19 +123,24 @@ export function StaffCombobox({
   const selectedStaffOption = staffOptions.find(
     (option) => option.assignee.id === value,
   );
-  if (value === null) {
-    selectedSnapshotRef.current = null;
-  } else if (selectedStaffOption) {
-    selectedSnapshotRef.current = selectedStaffOption;
-  } else if (selectedSnapshotRef.current?.assignee.id !== value) {
-    selectedSnapshotRef.current = null;
-  }
+  useEffect(() => {
+    setSelectedSnapshot((currentSnapshot) => {
+      const nextSnapshot =
+        value === null
+          ? null
+          : (selectedStaffOption ??
+            (currentSnapshot?.assignee.id === value ? currentSnapshot : null));
+      return currentSnapshot === nextSnapshot ? currentSnapshot : nextSnapshot;
+    });
+  }, [selectedStaffOption, value]);
+
   const selectedOption: StaffOption | null =
     value === null
       ? allowUnassigned
         ? unassignedOption
         : null
-      : (selectedStaffOption ?? selectedSnapshotRef.current);
+      : (selectedStaffOption ??
+        (selectedSnapshot?.assignee.id === value ? selectedSnapshot : null));
 
   return (
     <Combobox.Root<StaffOption>

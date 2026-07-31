@@ -1,4 +1,4 @@
-import { useState } from "react";
+import { Suspense, useState } from "react";
 import {
   fireEvent,
   render,
@@ -29,6 +29,15 @@ const estateExaminer: TicketAssignee = {
 };
 
 const options = [accountant, estateExaminer];
+const pendingRender = new Promise<void>(() => undefined);
+
+function SuspendRender({ suspend }: { suspend: boolean }) {
+  if (suspend) {
+    throw pendingRender;
+  }
+
+  return null;
+}
 
 interface HarnessProps {
   initialValue?: string | null;
@@ -122,6 +131,7 @@ describe("StaffCombobox", () => {
 
     const trigger = screen.getByRole("combobox", { name: "Assignee" });
     expect(trigger).toHaveTextContent("Amina Dlamini");
+    expect(onValueChange).not.toHaveBeenCalled();
     const { search } = await openStaffCombobox(user);
     expect(
       screen.queryByRole("option", { name: /Amina Dlamini/ }),
@@ -135,9 +145,56 @@ describe("StaffCombobox", () => {
     await waitFor(() =>
       expect(eligibleOption).toHaveAttribute("data-highlighted"),
     );
+    expect(onValueChange).not.toHaveBeenCalled();
     await user.keyboard("{Enter}");
 
-    expect(onValueChange).toHaveBeenCalledWith(estateExaminer.id);
+    expect(onValueChange).toHaveBeenCalledTimes(1);
+    expect(onValueChange).toHaveBeenNthCalledWith(1, estateExaminer.id);
+  });
+
+  it("ignores selected staff observed only in an interrupted render", () => {
+    const props = {
+      id: "ticket-assignee",
+      label: "Assignee",
+      onValueChange: vi.fn(),
+      onSearchChange: vi.fn(),
+      allowUnassigned: false,
+    };
+    const { rerender } = render(
+      <Suspense fallback={<div>Updating assignee</div>}>
+        <StaffCombobox
+          {...props}
+          value={accountant.id}
+          options={[accountant]}
+        />
+        <SuspendRender suspend={false} />
+      </Suspense>,
+    );
+    expect(
+      screen.getByRole("combobox", { name: "Assignee" }),
+    ).toHaveTextContent("Amina Dlamini");
+
+    rerender(
+      <Suspense fallback={<div>Updating assignee</div>}>
+        <StaffCombobox
+          {...props}
+          value={estateExaminer.id}
+          options={[estateExaminer]}
+        />
+        <SuspendRender suspend />
+      </Suspense>,
+    );
+    expect(screen.getByText("Updating assignee")).toBeVisible();
+
+    rerender(
+      <Suspense fallback={<div>Updating assignee</div>}>
+        <StaffCombobox {...props} value={estateExaminer.id} options={[]} />
+        <SuspendRender suspend={false} />
+      </Suspense>,
+    );
+    expect(
+      screen.getByRole("combobox", { name: "Assignee" }),
+    ).toHaveTextContent("Select eligible team member");
   });
 
   it("replaces the display snapshot when the controlled value changes", () => {
@@ -157,6 +214,11 @@ describe("StaffCombobox", () => {
       screen.getByRole("combobox", { name: "Assignee" }),
     ).toHaveTextContent("Amina Dlamini");
 
+    rerender(<StaffCombobox {...props} value="unknown-staff" options={[]} />);
+    expect(
+      screen.getByRole("combobox", { name: "Assignee" }),
+    ).toHaveTextContent("Select eligible team member");
+
     rerender(
       <StaffCombobox
         {...props}
@@ -175,7 +237,14 @@ describe("StaffCombobox", () => {
       screen.getByRole("combobox", { name: "Assignee" }),
     ).toHaveTextContent("Themba Nkosi");
 
-    rerender(<StaffCombobox {...props} value="unknown-staff" options={[]} />);
+    rerender(<StaffCombobox {...props} value={null} options={[]} />);
+    expect(
+      screen.getByRole("combobox", { name: "Assignee" }),
+    ).toHaveTextContent("Select eligible team member");
+
+    rerender(
+      <StaffCombobox {...props} value={estateExaminer.id} options={[]} />,
+    );
     expect(
       screen.getByRole("combobox", { name: "Assignee" }),
     ).toHaveTextContent("Select eligible team member");
