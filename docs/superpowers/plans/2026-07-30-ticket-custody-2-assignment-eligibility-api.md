@@ -2,9 +2,9 @@
 
 > **For agentic workers:** REQUIRED SUB-SKILL: Use superpowers:subagent-driven-development (recommended) or superpowers:executing-plans to implement this plan task-by-task. Steps use checkbox (`- [ ]`) syntax for tracking.
 
-**Goal:** Let authorised internal staff assign, transfer, and unassign tickets only to active staff whose persisted designation and effective domain, office, service, queue, and confidentiality authority match the ticket.
+**Goal:** Let authorised internal staff assign, transfer, unassign, and route tickets only to eligible owners and queues whose effective domain, office, service, queue, and confidentiality authority matches the ticket.
 
-**Architecture:** Identity access exposes effective persisted role grants without widening existing actor scope. A ticket eligibility module converts those grants into explainable candidates and role-derived team labels. A dedicated atomic assignment service locks and revalidates both actor and target, writes audit/outbox/custody records, and returns an immutable receipt. The API delegates every assignment path to that service, including legacy work-state requests and automation.
+**Architecture:** Identity access exposes effective persisted role grants without widening existing actor scope. A ticket eligibility module converts those grants into explainable candidates and role-derived team labels. A dedicated atomic allocation boundary locks and revalidates the actor, resulting owner, and destination queue, writes audit/outbox/custody records, and returns immutable assignment or routing receipts. The API delegates every assignment and post-creation queue path to that boundary, including legacy work-state requests and automation.
 
 **Tech Stack:** Python 3.12, Django 5.2, Django REST Framework, PostgreSQL, pytest, Keycloak realm JSON, Ruff, mypy
 
@@ -20,7 +20,7 @@
 
 ## Plan Boundary and Dependencies
 
-This is Plan 2 of 3. It requires Plan 1's `CustodyActor`, `CustodyEventInput`, `CustodyParty`, and atomic `record_ticket_event` extension. It produces the candidate and assignment contracts consumed by Plan 3.
+This is Plan 2 of 3. It requires Plan 1's `CustodyActor`, `CustodyEventInput`, `CustodyParty`, `CustodyQueue`, and atomic `record_ticket_event` extension. It produces the candidate, assignment, and guarded queue-routing contracts consumed by Plan 3.
 
 ## Canonical Internal Designations
 
@@ -45,12 +45,13 @@ The Finance family is supported inside currently configured ticket domains and s
 - `backend/apps/identity_access/scope.py`: exposes effective active role grants and keeps persisted-role precedence.
 - `backend/apps/identity_access/tests/test_scope.py`: covers grant expiry, persisted-role precedence, and designation-only group rejection.
 - `backend/apps/tickets/eligibility.py`: owns designation metadata, exact scope matching, candidate search, and owner snapshots.
-- `backend/apps/tickets/assignment.py`: owns atomic human/system assignment mutations and receipts.
+- `backend/apps/tickets/assignment.py`: owns atomic human/system owner and post-creation queue mutations, their shared write boundary, and immutable receipts.
 - `backend/apps/tickets/permissions.py`: exposes actor assignment capability and compatibility alias.
 - `backend/apps/tickets/workflow.py`: maps an exact-scope designation actor to ordinary domain staff workflow roles without granting supervisor/lead authority.
-- `backend/apps/tickets/api.py`: validates assignment requests and serialises receipts.
-- `backend/apps/tickets/views.py`: exposes guarded candidate and assignment actions.
-- `backend/apps/tickets/services.py`: removes direct ownership mutation from generic work-state handling.
+- `backend/apps/tickets/api.py`: validates assignment and routing requests and serialises receipts.
+- `backend/apps/tickets/views.py`: exposes guarded candidate, assignment, and routing actions.
+- `backend/apps/tickets/services.py`: removes direct ownership mutation from generic work-state handling and retains queue-less creation as initial-state construction, not post-creation routing.
+- `backend/apps/tickets/it_child.py`: retains queue-less IT-child creation and status snapshots without becoming a post-creation queue writer.
 - `backend/apps/automation/views.py`: routes automation ownership changes through the system assignment service.
 - `backend/scripts/seed_dev.py`: seeds primary designation role definitions without overwriting configured scopes.
 - `infrastructure/keycloak/realm-mhc.json`: declares the eleven designation realm roles.
@@ -58,7 +59,10 @@ The Finance family is supported inside currently configured ticket domains and s
 - `backend/apps/tickets/tests/test_workflow_capabilities.py`: proves designation staff can action in-scope tickets while actor assignment authority remains unchanged.
 - `backend/apps/tickets/tests/test_assignment.py`: covers service atomicity, custody, receipts, and system assignment.
 - `backend/apps/tickets/tests/test_assignment_api.py`: covers API permissions, direct-call enforcement, conflicts, and response contracts.
+- `backend/apps/tickets/tests/test_routing.py`: covers guarded queue-only and paired owner/queue mutations, atomicity, source snapshots, and API enforcement.
+- `backend/apps/tickets/tests/test_integrity_boundaries.py`: prevents supported services, APIs, and automation from bypassing the allocation boundary.
 - `backend/apps/tickets/tests/test_assignment_role_matrix.py`: runs assignment and full lifecycle custody for every designation and legacy functional role.
+- `backend/apps/automation/tests/test_ai_assist.py`: covers the existing automation rule executor and its assignment delegation.
 
 ---
 
@@ -473,57 +477,164 @@ git commit -m "feat(tickets): expose guarded assignment API"
 
 ---
 
-### Task 5: Remove direct assignment bypasses
+### Task 5: Centralise assignment and production queue routing
 
 **Files:**
+- Modify: `backend/apps/tickets/assignment.py`
+- Modify: `backend/apps/tickets/eligibility.py`
+- Modify: `backend/apps/tickets/permissions.py`
 - Modify: `backend/apps/tickets/services.py`
 - Modify: `backend/apps/tickets/api.py`
+- Modify: `backend/apps/tickets/views.py`
+- Modify: `backend/apps/tickets/tests/test_assignment.py`
+- Modify: `backend/apps/tickets/tests/test_assignment_api.py`
+- Modify: `backend/apps/tickets/tests/test_permissions.py`
 - Modify: `backend/apps/tickets/tests/test_services.py`
 - Modify: `backend/apps/tickets/tests/test_work_state_api.py`
+- Modify: `backend/apps/tickets/tests/test_integrity_boundaries.py`
 - Modify: `backend/apps/automation/views.py`
-- Modify: `backend/apps/automation/tests/test_views.py`
+- Modify: `backend/apps/automation/tests/test_ai_assist.py`
+- Create: `backend/apps/tickets/tests/test_routing.py`
 - Create: `backend/apps/tickets/tests/test_assignment_role_matrix.py`
-- Create: `docs/security/ticket-assignment-permission-matrix.md`
+- Modify: `docs/permission-matrix.md`
 
 **Interfaces:**
 - Generic work-state requests no longer mutate `assignee` directly.
 - Assignment-only legacy requests delegate to `assign_ticket` for one release.
 - Automation delegates to `assign_ticket_by_system`.
+- Preserves `assign_ticket` and `assign_ticket_by_system` as the only public owner-only writers defined in Task 3.
+- Produces `is_eligible_assignee_for_queue(ticket: Ticket, user: User, queue: ServiceLocation | None) -> bool`.
+- Produces `can_route_ticket(user: User, ticket: Ticket, queue: ServiceLocation | None, *, request: Request | None = None, snapshot: AuthoritySnapshot | None = None) -> bool`.
+- Produces frozen `RoutingReceipt` and `RoutingResult` dataclasses.
+- Produces `route_ticket(*, ticket_id: UUID, actor: User, queue_id: UUID | None, assignee_id: UUID | None, expected_updated_at: datetime, reason: str, request: Request | None = None, snapshot: AuthoritySnapshot | None = None) -> RoutingResult`.
+- Produces `route_ticket_by_system(*, ticket_id: UUID, queue_id: UUID | None, assignee_id: UUID | None, actor_subject: str, actor_display_name: str, source_process: str, reason: str) -> RoutingResult`.
+- Produces `POST /api/v1/tickets/{number}/routing/` with `{queue_id, assignee_id, updated_at, reason}` and `{ticket, receipt}`.
 
-- [ ] **Step 1: Write failing bypass regression tests**
+- [ ] **Step 1: Record the current assignment and queue mutation inventory**
 
-Add tests proving:
-
-1. the work-state action rejects a mixed payload containing `assignee` plus another field with stable code `assignment_must_be_separate` and `fields.assignee` directing the client to the assignment action;
-2. an assignment-only legacy work-state request delegates to the same eligibility and custody enforcement as the dedicated action;
-3. automation cannot assign an ineligible target even when a rule contains its UUID;
-4. an eligible automation assignment records a system actor and immutable custody event; and
-5. direct database mutation remains outside all supported service/API paths and is detected by an integrity-boundary regression search.
-
-Create a parameterised role-matrix test covering the eleven canonical designation keys plus `agent-operational`, `ops-agents`, `supervisor-operational`, `ops-supervisors`, `agent-it`, `it-agents`, `lead-it`, and `it-leads`. For each role, construct an exact-scope eligible target and exercise a creation-to-closure scenario that assigns the parameterised target, transfers to a backup eligible target, unassigns, assigns again, records one canonical queue change, crosses one SLA escalation threshold, and executes the domain's valid workflow path through ordinary status change, resolution, reopening, resolution again, and closure. Assert `created`, `assigned`, `reassigned`, `unassigned`, `queue_changed`, `escalated`, `status_changed`, `reopened`, and `closed` each appear in chronological order with no visible workflow duplicate and a valid hash chain. Add the role's wrong-scope counterpart and assert assignment is rejected with no extra custody row.
-
-- [ ] **Step 2: Run bypass tests in the red state**
+Run these repository searches before writing tests:
 
 ```powershell
 Set-Location backend
-pytest apps/tickets/tests/test_services.py apps/tickets/tests/test_work_state_api.py apps/tickets/tests/test_assignment_role_matrix.py apps/automation/tests/test_views.py -q
+rg -n --glob '*.py' '\.queue\s*=|\bqueue_id\s*=|update_fields=.*queue|setattr\(.*queue' apps scripts
+rg -n 'queue_snapshot|Ticket\.objects\.create' apps/tickets/services.py apps/tickets/it_child.py
+rg -n '\.assignee\s*=|\bassignee_id\s*=|update_fields=.*assignee' apps/tickets apps/automation
 ```
 
-Expected: generic work state and automation still mutate `assignee_id` directly.
+The baseline inventory must state these observed results:
 
-- [ ] **Step 3: Delegate the compatibility path**
+1. `services.create_ticket` and `it_child.create_it_child_ticket` construct queue-less tickets and capture their initial queue snapshot; they do not provide post-creation routing;
+2. `it_child` status synchronisation copies an unchanged queue snapshot into lifecycle custody and does not mutate the queue;
+3. no supported production API or service currently changes `Ticket.queue` after creation;
+4. the only direct `.queue =` write is test setup in `backend/apps/tickets/tests/test_workflow_capabilities.py`; and
+5. generic work state in `tickets/services.py` and `_apply_action` in `automation/views.py` still write ownership directly and must be delegated.
+
+Do not add a public intake queue field or a new automation queue action. The production queue writer in this plan is the guarded routing service and staff API action. The integrity regression must make any later API, service, or automation queue bypass fail review.
+
+- [ ] **Step 2: Write failing allocation-boundary and routing tests**
+
+In `test_services.py`, `test_work_state_api.py`, `test_assignment_api.py`, `test_ai_assist.py`, and `test_integrity_boundaries.py`, add tests proving:
+
+1. the work-state action rejects a mixed payload containing `assignee` plus another field with stable code `assignment_must_be_separate` and `fields.assignee` directing the client to the assignment action;
+2. an assignment-only legacy work-state request delegates to the same eligibility and custody enforcement as the dedicated action;
+3. automation cannot assign an ineligible target even when a rule contains its username;
+4. an eligible automation assignment records a system actor and immutable custody event; and
+5. supported ticket APIs, ticket services, IT-child handling, and automation contain no direct post-creation `queue` or `assignee` write outside `assignment.py`.
+
+In `test_routing.py`, use real `ServiceLocation` rows and assert:
+
+1. a permitted supervisor can route an in-scope ticket to an active queue in the same office;
+2. inactive, missing, cross-office, and out-of-scope destination queues fail with no ticket, audit, outbox, or custody change;
+3. an auditor, inactive actor, ordinary designation actor without `can_assign`, and a direct API caller outside ticket scope cannot route;
+4. queue-only routing succeeds only when the existing owner remains eligible for the resulting queue;
+5. a queue change that would make the current owner ineligible must explicitly provide `assignee_id=None` or another eligible owner;
+6. paired queue change plus assignment, reassignment, or unassignment writes separate consecutive custody inputs in `queue_changed` then owner-event order with the same `occurred_at`, `source_process="ticket.routing"`, and source audit ID;
+7. snapshots contain stable queue IDs/labels and owner IDs/display/designation/team values captured before the save;
+8. no-op routing creates no audit, outbox, custody, or receipt timestamp change;
+9. stale `updated_at` has one winner and returns the canonical conflict;
+10. injected audit, outbox, or custody failure rolls back both queue and owner; and
+11. `POST /routing/` enforces the same service rules and returns only the immutable routing receipt plus refreshed ticket.
+
+Create a parameterised role-matrix test covering the eleven canonical designation keys plus `agent-operational`, `ops-agents`, `supervisor-operational`, `ops-supervisors`, `agent-it`, `it-agents`, `lead-it`, and `it-leads`. For each role, construct an exact-scope eligible target and exercise a creation-to-closure scenario that assigns the parameterised target, transfers to a backup eligible target, unassigns, assigns again, routes to an active same-office queue through `route_ticket`, crosses one SLA escalation threshold, and executes the domain's valid workflow path through ordinary status change, resolution, reopening, resolution again, and closure. Assert `created`, `assigned`, `reassigned`, `unassigned`, `queue_changed`, `escalated`, `status_changed`, `reopened`, and `closed` each appear in chronological order with no visible workflow duplicate and a valid hash chain. Add a wrong-scope owner and destination queue and assert each is rejected with no extra audit, outbox, or custody row.
+
+- [ ] **Step 3: Run allocation tests in the red state**
+
+```powershell
+Set-Location backend
+pytest apps/tickets/tests/test_assignment.py apps/tickets/tests/test_assignment_api.py apps/tickets/tests/test_routing.py apps/tickets/tests/test_services.py apps/tickets/tests/test_work_state_api.py apps/tickets/tests/test_integrity_boundaries.py apps/tickets/tests/test_assignment_role_matrix.py apps/automation/tests/test_ai_assist.py -q
+```
+
+Expected: `route_ticket`, `RoutingReceipt`, and the routing action are absent; generic work state and automation still mutate ownership directly.
+
+- [ ] **Step 4: Implement the guarded atomic allocation boundary**
 
 Remove `assignee` from `WORK_STATE_FIELDS` and ordinary mutation loops. In the work-state API, inspect validated keys before calling `update_work_state`: delegate an assignment-only request to `assign_ticket` by mapping legacy `updated_at` to `expected_updated_at`, reject a mixed request with code `assignment_must_be_separate` and `fields.assignee`, and keep the dedicated endpoint as the documented path. Mark this compatibility route for removal after one release.
 
-- [ ] **Step 4: Delegate automation ownership changes**
+In `eligibility.py`, implement `is_eligible_assignee_for_queue` by applying the existing exact designation/domain/office/service/confidentiality checks against the proposed queue instead of the ticket's current queue. A queue-scoped grant matches only the same stable queue ID; it never matches a null or different destination.
+
+In `permissions.py`, implement `can_route_ticket` as existing `can_assign` authority plus exact destination authority. An active destination must belong to the ticket office. An actor constrained to the current queue cannot route to another queue unless a separate active grant covers the destination; admin/auditor-only authority does not qualify.
+
+In `assignment.py`, preserve owner-only behavior in `assign_ticket` and `assign_ticket_by_system`. Extract one private locked allocation writer reused by those functions and the two routing functions. `route_ticket` must:
+
+1. scope and `select_for_update` the ticket before checking `expected_updated_at`;
+2. resolve `queue_id` to an active `ServiceLocation` in `ticket.office`, or accept null to clear the queue;
+3. require `can_route_ticket` and a non-blank reason;
+4. treat `assignee_id` as the explicit resulting owner, reload it under the transaction, and validate it with `is_eligible_assignee_for_queue`;
+5. reject an unchanged queue/owner pair without writing;
+6. capture previous and new owner/queue snapshots before saving;
+7. capture one `occurred_at = timezone.now()` and save queue and owner once;
+8. call `record_ticket_event` once with action `ticket.routing.changed`, before/after stable queue and owner IDs, and `source_process="ticket.routing"`; and
+9. pass a `queue_changed` custody input first, followed by `assigned`, `reassigned`, or `unassigned` only when ownership also changed, with the same timestamp and source metadata.
+
+`route_ticket_by_system` uses the same locked writer and destination/resulting-owner eligibility. It requires non-empty actor subject, display name, source process, and reason, and records actor kind `system`; it does not invent human authority or bypass queue/owner eligibility.
+
+Define the immutable result shape in `assignment.py`:
+
+```python
+@dataclass(frozen=True)
+class RoutingReceipt:
+    ticket_number: str
+    previous_queue: CustodyQueue | None
+    new_queue: CustodyQueue | None
+    previous_assignee: AssignmentParty | None
+    new_assignee: AssignmentParty | None
+    occurred_at: datetime
+    performed_by: AssignmentActor
+
+
+@dataclass(frozen=True)
+class RoutingResult:
+    ticket: Ticket
+    receipt: RoutingReceipt
+```
+
+- [ ] **Step 5: Expose the guarded routing API and delegate automation ownership**
+
+Add `QueueRoutingRequestSerializer` to `api.py` with required `updated_at`, nullable required `queue_id`, nullable required `assignee_id`, and a non-blank `reason` capped at 1000 characters. Add plain serializers for `RoutingReceipt`; serialise its stored snapshots without reloading mutable users or queues.
+
+Add `POST /api/v1/tickets/{number}/routing/` in `views.py`. Resolve the ticket through `self.get_object()`, validate the request, call `route_ticket`, and map scope, permission, eligibility/validation, and conflict exceptions to the existing structured 404/403/400/409 ticket-action responses. Return:
+
+```python
+Response(
+    {
+        "ticket": TicketDetailSerializer(
+            result.ticket,
+            context=self.get_serializer_context(),
+        ).data,
+        "receipt": RoutingReceiptSerializer(result.receipt).data,
+    }
+)
+```
 
 Replace the direct assignee assignment in `_apply_action` with `assign_ticket_by_system`, using actor subject `automation:{rule.id}`, display name `Automation rule: {rule.name}`, source process `automation.rule`, and the rule action's configured reason. Treat an ineligible target as an unsuccessful action and leave the ticket unchanged.
 
-- [ ] **Step 5: Document the permission matrix**
+- [ ] **Step 6: Document the assignment and queue-routing permission matrix**
 
-Create `docs/security/ticket-assignment-permission-matrix.md` with rows for operational agent, operational supervisor, IT agent, IT lead, each of the eleven designations, admin-only, auditor, inactive user, expired role, automation, and direct API caller. Columns must cover actor permission, target eligibility, domain, office, service, queue, Restricted, reassignment reason, and custody actor kind.
+Extend `docs/permission-matrix.md` with rows for operational agent, operational supervisor, IT agent, IT lead, each of the eleven designations, admin-only, auditor, inactive user, expired role, automation, and direct API caller. Columns must cover actor permission, target eligibility, domain, office, service, queue, Restricted, reassignment reason, and custody actor kind.
 
-- [ ] **Step 6: Run Plan 2 verification**
+Document that assignment authority and queue-routing authority are server-side checks; queue changes require an active same-office destination plus destination scope, and paired owner changes also require resulting-owner eligibility. Record that `create_ticket` and IT-child creation are initial-state constructors, while all post-creation queue mutations go through `route_ticket` or `route_ticket_by_system`.
+
+- [ ] **Step 7: Run Plan 2 verification**
 
 ```powershell
 Set-Location backend
@@ -533,14 +644,14 @@ mypy apps/identity_access apps/tickets apps/automation
 python manage.py makemigrations --check --dry-run
 ```
 
-Expected: all commands exit 0 with no supported direct-assignment bypass.
+Expected: all commands exit 0 with no supported direct assignment or post-creation queue bypass.
 
-- [ ] **Step 7: Commit bypass removal and documentation**
+- [ ] **Step 8: Commit allocation centralisation and documentation**
 
 ```powershell
-git add backend/apps/tickets/services.py backend/apps/tickets/api.py backend/apps/tickets/tests/test_services.py backend/apps/tickets/tests/test_work_state_api.py backend/apps/tickets/tests/test_assignment_role_matrix.py backend/apps/automation/views.py backend/apps/automation/tests/test_views.py docs/security/ticket-assignment-permission-matrix.md
+git add backend/apps/tickets/assignment.py backend/apps/tickets/eligibility.py backend/apps/tickets/permissions.py backend/apps/tickets/services.py backend/apps/tickets/api.py backend/apps/tickets/views.py backend/apps/tickets/tests/test_assignment.py backend/apps/tickets/tests/test_assignment_api.py backend/apps/tickets/tests/test_permissions.py backend/apps/tickets/tests/test_services.py backend/apps/tickets/tests/test_work_state_api.py backend/apps/tickets/tests/test_integrity_boundaries.py backend/apps/tickets/tests/test_routing.py backend/apps/tickets/tests/test_assignment_role_matrix.py backend/apps/automation/views.py backend/apps/automation/tests/test_ai_assist.py docs/permission-matrix.md
 git diff --cached --check
-git commit -m "refactor(tickets): centralize assignment enforcement"
+git commit -m "feat(tickets): centralize assignment and queue routing"
 ```
 
 ## Plan 2 Completion Gate
