@@ -657,6 +657,11 @@ def test_blank_actors_on_real_legacy_sources_are_not_claimed_as_system(basic_wor
     backfill_ticket_custody = import_module(
         "apps.tickets.migrations.0006_backfill_ticket_custody"
     ).backfill_ticket_custody
+    User.objects.create_user(
+        username="malformed-empty-subject",
+        keycloak_subject="",
+        display_name="Must not become the actor",
+    )
     ticket = _ticket(basic_world, number="OP-LEGACY-BLANK-ACTOR")
     created_at = datetime(2025, 1, 4, 10, 0, tzinfo=UTC)
     Ticket.objects.filter(pk=ticket.pk).update(created_at=created_at)

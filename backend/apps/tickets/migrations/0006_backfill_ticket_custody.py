@@ -180,6 +180,12 @@ def backfill_ticket_custody(apps, schema_editor):
             yield from tickets
 
     def actor(subject):
+        if subject in (None, ""):
+            return {
+                "kind": "legacy_unknown",
+                "subject": "",
+                "display_name": "Unknown legacy actor",
+            }
         user = context["users_by_subject"].get(subject)
         if user is not None:
             return {
@@ -189,8 +195,8 @@ def backfill_ticket_custody(apps, schema_editor):
             }
         return {
             "kind": "legacy_unknown",
-            "subject": str(subject or ""),
-            "display_name": str(subject) if subject else "Unknown legacy actor",
+            "subject": str(subject),
+            "display_name": str(subject),
         }
 
     def owner(value):
