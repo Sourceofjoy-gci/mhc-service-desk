@@ -152,6 +152,9 @@ class AuthoritySnapshot:
     scopes: tuple[Scope, ...] = ()
     capabilities: frozenset[str] = frozenset()
     restricted_scope_keys: frozenset[ScopeKey] = frozenset()
+    role_grants: tuple[EffectiveRoleGrant, ...] = ()
+    group_role_keys: frozenset[str] = frozenset()
+    uses_persisted_roles: bool = False
 
 
 def has_scope(user: object, required: Scope) -> bool:
@@ -280,15 +283,9 @@ def _active_persisted_assignments(
     return active or None
 
 
-def get_effective_role_grants(user: User) -> tuple[EffectiveRoleGrant, ...]:
-    """Return validated active grants, ordered by role then office (None first)."""
-    if not _has_active_identity(user):
-        return ()
-
-    assignments = _active_persisted_assignments(user)
-    if not assignments:
-        return ()
-
+def _effective_grants_from_assignments(
+    assignments: Sequence[_RoleAssignment],
+) -> tuple[EffectiveRoleGrant, ...]:
     grants: list[EffectiveRoleGrant] = []
     for assignment in assignments:
         scopes = _validated_role_scopes(assignment)
@@ -297,7 +294,11 @@ def get_effective_role_grants(user: User) -> tuple[EffectiveRoleGrant, ...]:
         grants.append(
             EffectiveRoleGrant(
                 role_key=assignment.role.keycloak_role,
-                role_name=assignment.role.name,
+                role_name=getattr(
+                    assignment.role,
+                    "name",
+                    assignment.role.keycloak_role,
+                ),
                 scopes=scopes,
                 office_id=assignment.office_id,
                 expires_at=assignment.expires_at,
@@ -315,42 +316,82 @@ def get_effective_role_grants(user: User) -> tuple[EffectiveRoleGrant, ...]:
     )
 
 
+def get_effective_role_grants(user: User) -> tuple[EffectiveRoleGrant, ...]:
+    """Return validated active grants, ordered by role then office (None first)."""
+    if not _has_active_identity(user):
+        return ()
+
+    assignments = _active_persisted_assignments(user)
+    if not assignments:
+        return ()
+    return _effective_grants_from_assignments(assignments)
+
+
 def _snapshot_from_persisted(
     assignments: Sequence[_RoleAssignment],
 ) -> AuthoritySnapshot:
+    grants = _effective_grants_from_assignments(assignments)
     scopes: list[Scope] = []
     capabilities: set[str] = set()
     restricted_scope_keys: set[ScopeKey] = set()
 
-    for assignment in assignments:
-        assignment_scopes = _validated_role_scopes(assignment)
-        if not assignment_scopes:
-            continue
-
-        scopes.extend(assignment_scopes)
-        role_name = assignment.role.keycloak_role
-        if role_name in _AUDITOR_ROLES:
+    for grant in grants:
+        scopes.extend(grant.scopes)
+        if grant.role_key in _AUDITOR_ROLES:
             capabilities.add("auditor")
-        if role_name in _RESTRICTED_VIEW_ROLES:
-            restricted_scope_keys.update(map(_scope_key, assignment_scopes))
+        if grant.role_key in _RESTRICTED_VIEW_ROLES:
+            restricted_scope_keys.update(map(_scope_key, grant.scopes))
         restricted_scope_keys.update(
-            _scope_key(scope) for scope in assignment_scopes if scope.restricted_only
+            _scope_key(scope) for scope in grant.scopes if scope.restricted_only
         )
 
     return AuthoritySnapshot(
         scopes=tuple(_normalise_scopes(scopes)),
         capabilities=frozenset(capabilities),
         restricted_scope_keys=frozenset(restricted_scope_keys),
+        role_grants=grants,
+        uses_persisted_roles=True,
     )
+
+
+def _string_group_names(raw_groups: object) -> set[str]:
+    if not isinstance(raw_groups, list | tuple | set | frozenset):
+        return set()
+    return {group for group in raw_groups if isinstance(group, str)}
+
+
+def _effective_group_names(user: object) -> set[str]:
+    groups = _string_group_names(getattr(user, "keycloak_groups", ()))
+    groups.update(_string_group_names(getattr(user, "_groups", ())))
+
+    prefetched_cache: object = getattr(user, "_prefetched_objects_cache", {})
+    prefetched_groups: object = None
+    if isinstance(prefetched_cache, dict):
+        prefetched_groups = prefetched_cache.get("groups")
+    if isinstance(prefetched_groups, Iterable) and not isinstance(
+        prefetched_groups,
+        str | bytes,
+    ):
+        groups.update(
+            name
+            for group in prefetched_groups
+            if isinstance((name := getattr(group, "name", None)), str)
+        )
+        return groups
+
+    group_manager: object = getattr(user, "groups", None)
+    values_list: object = getattr(group_manager, "values_list", None)
+    if getattr(user, "pk", None) and callable(values_list):
+        durable_names: object = values_list("name", flat=True)
+        if isinstance(durable_names, Iterable):
+            groups.update(
+                name for name in durable_names if isinstance(name, str)
+            )
+    return groups
 
 
 def _snapshot_from_groups(user: object) -> AuthoritySnapshot:
-    raw_groups: object = getattr(user, "_groups", [])
-    groups = (
-        {group for group in raw_groups if isinstance(group, str)}
-        if isinstance(raw_groups, list | tuple | set | frozenset)
-        else set()
-    )
+    groups = _effective_group_names(user)
     scopes: list[Scope] = []
     capabilities: set[str] = set()
     restricted_scope_keys: set[ScopeKey] = set()
@@ -395,6 +436,7 @@ def _snapshot_from_groups(user: object) -> AuthoritySnapshot:
         scopes=tuple(_normalise_scopes(scopes)),
         capabilities=frozenset(capabilities),
         restricted_scope_keys=frozenset(restricted_scope_keys),
+        group_role_keys=frozenset(groups),
     )
 
 
@@ -416,6 +458,9 @@ def _build_authority_snapshot(user: object) -> AuthoritySnapshot:
         scopes=(admin_scope,),
         capabilities=resolved.capabilities,
         restricted_scope_keys=frozenset({_scope_key(admin_scope)}),
+        role_grants=resolved.role_grants,
+        group_role_keys=resolved.group_role_keys,
+        uses_persisted_roles=resolved.uses_persisted_roles,
     )
 
 

@@ -1,9 +1,11 @@
 from __future__ import annotations
 
+from datetime import timedelta
 from types import SimpleNamespace
 from uuid import uuid4
 
 import pytest
+from django.utils import timezone
 
 from apps.audit.models import AuditEvent
 from apps.identity_access.models import Role, User, UserRole
@@ -290,6 +292,87 @@ def test_persisted_designation_suppresses_stale_supervisor_transition_group(
     transition.save(update_fields=["required_role"])
 
     assert not available_transitions(ticket, actor).exists()
+
+
+@pytest.mark.parametrize("mutation", ["add", "delete"])
+def test_cached_snapshot_freezes_supervisor_workflow_alias(
+    basic_world,
+    mutation,
+):
+    actor = _user([])
+    ticket = _ticket(basic_world)
+    designation = Role.objects.create(
+        keycloak_role="estate-examiner",
+        name="Estate Examiner",
+        scopes=[{"domain": "operational"}],
+    )
+    UserRole.objects.create(user=actor, role=designation)
+    supervisor = Role.objects.create(
+        keycloak_role="supervisor-operational",
+        name="Operational Supervisor",
+        scopes=[{"domain": "operational"}],
+    )
+    assignment = None
+    if mutation == "delete":
+        assignment = UserRole.objects.create(user=actor, role=supervisor)
+    request = SimpleNamespace(user=actor)
+    get_authority_snapshot(actor, request=request)
+    if mutation == "add":
+        UserRole.objects.create(user=actor, role=supervisor)
+    else:
+        assert assignment is not None
+        assignment.delete()
+    transition = Transition.objects.get(
+        domain=ticket.domain,
+        from_status=ticket.status,
+        to_status__code="triage",
+    )
+    transition.required_role = "ops-supervisors"
+    transition.save(update_fields=["required_role"])
+
+    expected_cached = mutation == "delete"
+    assert (
+        available_transitions(ticket, actor, request=request).exists()
+        is expected_cached
+    )
+    assert available_transitions(ticket, actor).exists() is (not expected_cached)
+
+
+@pytest.mark.parametrize("group_source", ["keycloak", "django"])
+def test_reloaded_expired_role_actor_gets_durable_workflow_fallback(
+    basic_world,
+    group_source,
+):
+    actor = _user([])
+    if group_source == "keycloak":
+        actor.keycloak_groups = ["ops-agents"]
+        actor.save(update_fields=["keycloak_groups"])
+    else:
+        from django.contrib.auth.models import Group
+
+        actor.groups.add(Group.objects.create(name="ops-agents"))
+    expired = Role.objects.create(
+        keycloak_role="estate-examiner",
+        name="Estate Examiner",
+        scopes=[{"domain": "it"}],
+    )
+    UserRole.objects.create(
+        user=actor,
+        role=expired,
+        expires_at=timezone.now() - timedelta(seconds=1),
+    )
+    ticket = _ticket(basic_world)
+    transition = Transition.objects.get(
+        domain=ticket.domain,
+        from_status=ticket.status,
+        to_status__code="triage",
+    )
+    transition.required_role = "ops-agents"
+    transition.save(update_fields=["required_role"])
+
+    reloaded = User.objects.get(pk=actor.pk)
+
+    assert available_transitions(ticket, reloaded).exists()
 
 
 def test_persisted_auditor_has_no_transitions_despite_mutable_group_snapshot(basic_world):

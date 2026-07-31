@@ -13,6 +13,7 @@ from django.utils import timezone
 from apps.identity_access.models import User, UserRole
 from apps.identity_access.scope import (
     AuthoritySnapshot,
+    EffectiveRoleGrant,
     Scope,
     can_view_restricted,
     get_authority_snapshot,
@@ -216,48 +217,6 @@ def _assignment_scope_matches_ticket(
     return _scope_matches_ticket(scope, ticket)
 
 
-def _assignment_role_scope_matches_ticket(
-    assignment: UserRole,
-    scope: Scope,
-    ticket: Ticket,
-    *,
-    scope_index: int,
-) -> bool:
-    role_key = assignment.role.keycloak_role
-    if assignment.office_id is not None and assignment.office_id != ticket.office_id:
-        return False
-    configured_scopes = assignment.role.scopes
-    if isinstance(configured_scopes, list) and configured_scopes:
-        raw_scope = configured_scopes[scope_index]
-        if isinstance(raw_scope, dict):
-            configured_office = raw_scope.get(
-                "office",
-                raw_scope.get("office_id"),
-            )
-            if (
-                configured_office is not None
-                and str(configured_office) != str(ticket.office_id)
-            ):
-                return False
-    if scope.domain != "admin" and scope.domain != ticket.domain:
-        return False
-    dimensions = (
-        (scope.office_id, ticket.office_id),
-        (scope.service_id, ticket.service_id),
-        (scope.queue_id, ticket.queue_id),
-    )
-    if any(
-        configured is not None and configured != str(actual)
-        for configured, actual in dimensions
-    ):
-        return False
-    if scope.restricted_only:
-        return ticket.confidentiality == Ticket.Confidentiality.RESTRICTED
-    if ticket.confidentiality == Ticket.Confidentiality.RESTRICTED:
-        return role_key in _RESTRICTED_ROLE_KEYS
-    return True
-
-
 def _ticket_visible_in_authority(
     ticket: Ticket,
     authority: AuthoritySnapshot,
@@ -375,39 +334,29 @@ def has_active_persisted_assignments(user: User) -> bool:
     )
 
 
-def _matching_assignment_role_aliases(
+def _matching_grant_role_aliases(
     ticket: Ticket,
-    assignments: list[UserRole],
+    grants: tuple[EffectiveRoleGrant, ...],
     *,
     authority: AuthoritySnapshot,
 ) -> set[str]:
     aliases: set[str] = set()
-    for assignment in assignments:
-        role_key = assignment.role.keycloak_role
-        scopes = validated_role_scopes(cast(Any, assignment))
-        if not scopes:
-            continue
+    for grant in grants:
+        role_key = grant.role_key
         matching_role_scopes = [
             scope
-            for index, scope in enumerate(scopes)
-            if _assignment_role_scope_matches_ticket(
-                assignment,
+            for scope in grant.scopes
+            if _role_grant_scope_matches_ticket(
+                grant,
                 scope,
                 ticket,
-                scope_index=index,
             )
         ]
         if any(scope.domain == "admin" for scope in matching_role_scopes):
             aliases.add("admin-scope")
         if role_key in _DESIGNATION_BY_KEY:
             if _ticket_visible_in_authority(ticket, authority) and any(
-                _assignment_scope_matches_ticket(
-                    assignment,
-                    scope,
-                    ticket,
-                    scope_index=index,
-                )
-                for index, scope in enumerate(scopes)
+                _scope_matches_ticket(scope, ticket) for scope in grant.scopes
             ):
                 aliases.update(
                     _ROLE_ALIASES[
@@ -423,6 +372,30 @@ def _matching_assignment_role_aliases(
     return aliases
 
 
+def _role_grant_scope_matches_ticket(
+    grant: EffectiveRoleGrant,
+    scope: Scope,
+    ticket: Ticket,
+) -> bool:
+    if scope.domain != "admin" and scope.domain != ticket.domain:
+        return False
+    dimensions = (
+        (scope.office_id, ticket.office_id),
+        (scope.service_id, ticket.service_id),
+        (scope.queue_id, ticket.queue_id),
+    )
+    if any(
+        configured is not None and configured != str(actual)
+        for configured, actual in dimensions
+    ):
+        return False
+    if scope.restricted_only:
+        return ticket.confidentiality == Ticket.Confidentiality.RESTRICTED
+    if ticket.confidentiality == Ticket.Confidentiality.RESTRICTED:
+        return grant.role_key in _RESTRICTED_ROLE_KEYS
+    return True
+
+
 def matching_actor_role_aliases(
     ticket: Ticket,
     user: User,
@@ -432,31 +405,19 @@ def matching_actor_role_aliases(
     """Return only roles whose own effective scope covers this ticket."""
     if not user.is_active:
         return frozenset()
-    all_assignments = _prefetched_assignments(user)
-    active_assignments = _active_assignments(all_assignments, now=timezone.now())
-    groups = _effective_groups(user)
-    if is_auditor_identity(
-        user,
-        active_assignments=active_assignments,
-        groups=groups,
-    ):
+    authority = snapshot or get_authority_snapshot(user)
+    if "auditor" in authority.capabilities:
+        return frozenset()
+    if is_auditor_identity(user):
         return frozenset()
     if user.is_superuser:
         return _ROLE_ALIASES["admin"]
 
-    authority = snapshot or _authority_for_candidate(
-        user,
-        all_assignments=all_assignments,
-        active_assignments=active_assignments,
-        groups=groups,
-    )
-    if "auditor" in authority.capabilities:
-        return frozenset()
-    if active_assignments:
+    if authority.uses_persisted_roles:
         return frozenset(
-            _matching_assignment_role_aliases(
+            _matching_grant_role_aliases(
                 ticket,
-                active_assignments,
+                authority.role_grants,
                 authority=authority,
             )
         )
@@ -464,7 +425,7 @@ def matching_actor_role_aliases(
         return frozenset()
 
     aliases: set[str] = set()
-    for role_key in _GROUP_FALLBACK_ROLE_KEYS & groups:
+    for role_key in _GROUP_FALLBACK_ROLE_KEYS & authority.group_role_keys:
         if role_key == "system-admins":
             aliases.update(_ROLE_ALIASES[role_key])
             continue

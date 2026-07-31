@@ -6,6 +6,7 @@ from types import SimpleNamespace
 from uuid import uuid4
 
 import pytest
+from django.contrib.auth.models import Group
 from django.utils import timezone
 from rest_framework.test import APIRequestFactory, force_authenticate
 
@@ -764,6 +765,72 @@ def test_only_expired_persisted_assignments_restore_legacy_group_fallback():
 
     assert get_user_scopes(user) == [Scope(domain="operational")]
     assert set(visible.values_list("title", flat=True)) == {"Operational normal"}
+
+
+@pytest.mark.parametrize("group_source", ["keycloak", "django"])
+@pytest.mark.usefixtures("_confidentiality_tickets")
+def test_reloaded_expired_role_user_uses_durable_legacy_group_fallback(
+    group_source,
+):
+    user = _persisted_user(groups=[])
+    if group_source == "keycloak":
+        user.keycloak_groups = ["ops-agents"]
+        user.save(update_fields=["keycloak_groups"])
+    else:
+        user.groups.add(Group.objects.create(name="ops-agents"))
+    _assign_persisted_role(
+        user,
+        keycloak_role="estate-examiner",
+        scopes=[{"domain": "it"}],
+        expires_at=timezone.now() - timedelta(seconds=1),
+    )
+
+    reloaded = User.objects.get(pk=user.pk)
+    visible = scope_ticket_queryset(reloaded, Ticket.objects.all())
+
+    assert get_user_scopes(reloaded) == [Scope(domain="operational")]
+    assert set(visible.values_list("title", flat=True)) == {"Operational normal"}
+
+
+def test_authority_snapshot_captures_active_validated_grants_immutably(basic_world):
+    user = _persisted_user(groups=["ops-supervisors"])
+    role = Role.objects.create(
+        keycloak_role="supervisor-operational",
+        name="Operational Supervisor",
+        scopes=[
+            {
+                "domain": "operational",
+                "office": str(basic_world["office"].id),
+                "service": str(basic_world["gen_info"].id),
+            }
+        ],
+    )
+    assignment = UserRole.objects.create(
+        user=user,
+        role=role,
+        office=basic_world["office"],
+    )
+
+    snapshot = get_authority_snapshot(user)
+    assignment.delete()
+
+    assert snapshot.uses_persisted_roles is True
+    assert snapshot.group_role_keys == frozenset()
+    assert snapshot.role_grants == (
+        EffectiveRoleGrant(
+            role_key="supervisor-operational",
+            role_name="Operational Supervisor",
+            scopes=(
+                Scope(
+                    domain="operational",
+                    office_id=str(basic_world["office"].id),
+                    service_id=str(basic_world["gen_info"].id),
+                ),
+            ),
+            office_id=basic_world["office"].id,
+            expires_at=None,
+        ),
+    )
 
 
 @pytest.mark.parametrize(
