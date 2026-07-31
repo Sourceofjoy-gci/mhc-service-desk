@@ -886,3 +886,91 @@ def test_concurrent_actor_legacy_group_removal_cannot_use_stale_authority(
         ticket=ticket,
         mutate_locked_actor=remove_groups,
     )
+
+
+@pytest.mark.parametrize(
+    ("mode", "actor_groups", "status"),
+    [
+        ("transfer", ["ops-supervisors"], "new"),
+        ("self", ["ops-agents"], "new"),
+        ("auto-transition", ["ops-supervisors"], "triage"),
+    ],
+)
+def test_request_local_auditor_claim_denies_assignment_with_old_snapshot(
+    basic_world,
+    mode,
+    actor_groups,
+    status,
+):
+    actor = _user(actor_groups)
+    snapshot = get_authority_snapshot(actor)
+    actor._groups = [*actor_groups, "auditors"]
+    target = actor if mode == "self" else _user(["ops-agents"])
+    ticket = _ticket(basic_world, status=status)
+    previous_updated_at = ticket.updated_at
+
+    with pytest.raises(TicketPermissionError):
+        assign_ticket(
+            ticket_id=ticket.id,
+            actor=actor,
+            assignee_id=target.id,
+            expected_updated_at=ticket.updated_at,
+            snapshot=snapshot,
+        )
+
+    ticket.refresh_from_db()
+    assert ticket.assignee_id is None
+    assert ticket.status.code == status
+    assert ticket.updated_at == previous_updated_at
+    assert _assignment_rows(ticket) == (0, 0, 0)
+    assert not TransitionHistory.objects.filter(ticket=ticket).exists()
+
+
+def test_non_auditor_request_groups_cannot_widen_old_assignment_snapshot(
+    basic_world,
+):
+    actor = _user()
+    snapshot = get_authority_snapshot(actor)
+    actor._groups = ["ops-supervisors"]
+    target = _user(["ops-agents"])
+    ticket = _ticket(basic_world)
+
+    with pytest.raises(TicketScopeError):
+        assign_ticket(
+            ticket_id=ticket.id,
+            actor=actor,
+            assignee_id=target.id,
+            expected_updated_at=ticket.updated_at,
+            snapshot=snapshot,
+        )
+
+    ticket.refresh_from_db()
+    assert ticket.assignee_id is None
+    assert _assignment_rows(ticket) == (0, 0, 0)
+
+
+def test_non_auditor_request_groups_do_not_break_locked_positive_authority(
+    basic_world,
+):
+    actor = _user(["ops-agents"])
+    snapshot = get_authority_snapshot(actor)
+    supervisor_role = Role.objects.create(
+        keycloak_role="supervisor-operational",
+        name="Operational supervisor",
+        scopes=[{"domain": "operational"}],
+    )
+    UserRole.objects.create(user=actor, role=supervisor_role)
+    actor._groups = ["it-agents"]
+    target = _user(["ops-agents"])
+    ticket = _ticket(basic_world)
+
+    result = assign_ticket(
+        ticket_id=ticket.id,
+        actor=actor,
+        assignee_id=target.id,
+        expected_updated_at=ticket.updated_at,
+        snapshot=snapshot,
+    )
+
+    assert result.ticket.assignee_id == target.id
+    assert _assignment_rows(ticket) == (1, 1, 1)

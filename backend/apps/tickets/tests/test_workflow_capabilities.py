@@ -601,7 +601,7 @@ def test_new_auditor_identity_denies_even_when_operator_scope_snapshot_is_cached
 
 @pytest.mark.parametrize(
     "auditor_source",
-    ["persisted-role", "django-group", "keycloak-group"],
+    ["persisted-role", "django-group", "keycloak-group", "request-group"],
 )
 def test_old_operator_snapshot_cannot_bypass_fresh_auditor_deny(
     basic_world,
@@ -616,10 +616,12 @@ def test_old_operator_snapshot_cannot_bypass_fresh_auditor_deny(
         UserRole.objects.create(user=actor, role=auditor_role)
     elif auditor_source == "django-group":
         actor.groups.add(Group.objects.create(name="auditors"))
-    else:
+    elif auditor_source == "keycloak-group":
         User.objects.filter(pk=actor.pk).update(
             keycloak_groups=["ops-agents", "auditors"]
         )
+    else:
+        actor._groups = ["ops-agents", "auditors"]
 
     assert not available_transitions(ticket, actor, snapshot=snapshot).exists()
     assert not matching_actor_role_aliases(ticket, actor, snapshot=snapshot)

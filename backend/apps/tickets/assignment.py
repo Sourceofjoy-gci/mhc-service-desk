@@ -25,6 +25,7 @@ from apps.workflow.models import Transition
 from .custody import CustodyActor, CustodyEventInput, CustodyParty
 from .eligibility import (
     AssigneeCandidate,
+    _has_request_local_auditor_claim,
     eligible_assignee_candidate,
     matching_actor_role_aliases,
 )
@@ -274,6 +275,10 @@ def assign_ticket(
     snapshot: AuthoritySnapshot | None = None,
 ) -> AssignmentResult:
     """Assign a scoped ticket after rechecking actor and target authority."""
+    request_local_auditor = _has_request_local_auditor_claim(
+        actor,
+        request=request,
+    )
     authority = snapshot or get_authority_snapshot(actor, request=request)
     try:
         locked = (
@@ -302,6 +307,12 @@ def assign_ticket(
         raise TicketPermissionError
     locked_actor = locked_actor_authority.user
     locked_actor_snapshot = locked_actor_authority.snapshot
+    if (
+        request_local_auditor
+        or locked_actor_snapshot.auditor_identity
+        or "auditor" in locked_actor_snapshot.capabilities
+    ):
+        raise TicketPermissionError
     if not scope_ticket_queryset(
         locked_actor,
         Ticket.objects.filter(pk=locked.pk),

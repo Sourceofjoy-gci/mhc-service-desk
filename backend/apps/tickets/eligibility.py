@@ -294,6 +294,32 @@ def _resolved_sources_include_auditor(
     )
 
 
+def _has_request_local_auditor_claim(
+    user: User,
+    *,
+    request: object | None = None,
+) -> bool:
+    """Return only request-local auditor denial facts for this identity."""
+
+    def has_auditor_group(identity: object) -> bool:
+        raw_groups = getattr(identity, "_groups", ())
+        if not isinstance(raw_groups, list | tuple | set | frozenset):
+            return False
+        return bool(
+            _AUDITOR_ROLE_KEYS
+            & {group for group in raw_groups if isinstance(group, str)}
+        )
+
+    if has_auditor_group(user):
+        return True
+    request_user = getattr(request, "user", None)
+    return bool(
+        request_user is not None
+        and getattr(request_user, "pk", None) == user.pk
+        and has_auditor_group(request_user)
+    )
+
+
 def is_auditor_identity(user: User) -> bool:
     """Apply a fresh, complete read-only auditor boundary."""
     claim_groups = {group for group in (user.keycloak_groups or []) if isinstance(group, str)}
