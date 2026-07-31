@@ -190,6 +190,13 @@ def _scope_matches_ticket(scope: Scope, ticket: Ticket) -> bool:
     return all(configured is None or configured == str(actual) for configured, actual in dimensions)
 
 
+def _functional_scope_matches_confidentiality(scope: Scope, ticket: Ticket) -> bool:
+    return (
+        not scope.restricted_only
+        or ticket.confidentiality == Ticket.Confidentiality.RESTRICTED
+    )
+
+
 def _assignment_scope_matches_ticket(
     assignment: UserRole,
     scope: Scope,
@@ -197,7 +204,10 @@ def _assignment_scope_matches_ticket(
 ) -> bool:
     if assignment.office_id is not None and assignment.office_id != ticket.office_id:
         return False
-    return _scope_matches_ticket(scope, ticket)
+    return _scope_matches_ticket(
+        scope,
+        ticket,
+    ) and _functional_scope_matches_confidentiality(scope, ticket)
 
 
 def _ticket_visible_in_authority(
@@ -443,7 +453,7 @@ def _role_grant_scope_covers_ticket_dimensions(
         configured is not None and configured != str(actual) for configured, actual in dimensions
     ):
         return False
-    return True
+    return _functional_scope_matches_confidentiality(scope, ticket)
 
 
 def _role_grant_scope_matches_ticket(

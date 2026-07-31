@@ -337,6 +337,57 @@ def test_legacy_routing_actor_role_family_cannot_cross_configured_domain(
     assert _counts(ticket) == (0, 0, 0)
 
 
+def test_restricted_only_functional_actor_cannot_route_ordinary_ticket_via_separate_visibility(
+    basic_world,
+):
+    current = _queue(basic_world, "Restricted-only actor current")
+    destination = _queue(basic_world, "Restricted-only actor destination")
+    ticket = _ticket(basic_world, queue=current)
+    actor = _user()
+    restricted_supervisor = Role.objects.create(
+        keycloak_role="supervisor-operational",
+        name="Restricted-only operational supervisor",
+        scopes=[
+            _scope(ticket, queue=current, restricted=True),
+            _scope(ticket, queue=destination, restricted=True),
+        ],
+    )
+    ordinary_visibility = Role.objects.create(
+        keycloak_role="visibility-only",
+        name="Ordinary ticket visibility",
+        scopes=[
+            _scope(ticket, queue=current),
+            _scope(ticket, queue=destination),
+        ],
+    )
+    UserRole.objects.create(
+        user=actor,
+        role=restricted_supervisor,
+        office=ticket.office,
+    )
+    UserRole.objects.create(
+        user=actor,
+        role=ordinary_visibility,
+        office=ticket.office,
+    )
+    original_updated_at = ticket.updated_at
+
+    with pytest.raises(TicketPermissionError):
+        _route(
+            ticket,
+            actor,
+            queue_id=destination.id,
+            assignee_id=None,
+        )
+
+    ticket.refresh_from_db()
+    assert ticket.queue_id == current.id
+    assert ticket.assignee_id is None
+    assert ticket.status.code == "new"
+    assert ticket.updated_at == original_updated_at
+    assert _counts(ticket) == (0, 0, 0)
+
+
 def test_queue_only_routing_requires_existing_owner_to_remain_eligible(basic_world):
     current = _queue(basic_world, "Current owner queue")
     destination = _queue(basic_world, "New owner queue")

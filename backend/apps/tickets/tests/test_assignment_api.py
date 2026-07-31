@@ -145,6 +145,24 @@ def _side_effect_counts(ticket: Ticket) -> tuple[int, int, int]:
     )
 
 
+def _grant_restricted_functional_role_with_ordinary_visibility(
+    user: User,
+    ticket: Ticket,
+) -> None:
+    _grant(
+        user,
+        scopes=[_scope(ticket, restricted=True)],
+        office=ticket.office,
+    )
+    _grant(
+        user,
+        role_key="visibility-only",
+        role_name="Ordinary ticket visibility",
+        scopes=[_scope(ticket)],
+        office=ticket.office,
+    )
+
+
 def test_candidate_directory_requires_assignment_authority(basic_world):
     actor = _user(["ops-agents"])
     ticket = _ticket(basic_world)
@@ -161,6 +179,52 @@ def test_candidate_directory_requires_assignment_authority(basic_world):
         "fields": {},
         "correlation_id": CORRELATION_ID,
     }
+
+
+def test_candidate_directory_excludes_restricted_only_functional_target_from_ordinary_ticket(
+    basic_world,
+):
+    actor = _user(["ops-supervisors"])
+    target = _user(display_name="Restricted-only Estate Examiner")
+    ticket = _ticket(basic_world)
+    _grant_restricted_functional_role_with_ordinary_visibility(target, ticket)
+
+    response = _client(actor).get(
+        _candidate_url(ticket),
+        HTTP_X_CORRELATION_ID=CORRELATION_ID,
+    )
+
+    assert response.status_code == 200
+    assert str(target.id) not in {item["id"] for item in response.data["results"]}
+
+
+def test_assignment_api_rejects_restricted_functional_target_for_ordinary_ticket(
+    basic_world,
+):
+    actor = _user(["ops-supervisors"])
+    target = _user(display_name="Restricted-only Estate Examiner")
+    ticket = _ticket(basic_world)
+    _grant_restricted_functional_role_with_ordinary_visibility(target, ticket)
+    original_updated_at = ticket.updated_at
+
+    response = _post_assignment(
+        _client(actor),
+        ticket,
+        assignee_id=target.id,
+    )
+
+    assert response.status_code == 400
+    assert response.data == {
+        "code": "invalid_assignment",
+        "detail": "Assignment is invalid.",
+        "fields": {"assignee_id": ["Select an eligible assignee."]},
+        "correlation_id": CORRELATION_ID,
+    }
+    ticket.refresh_from_db()
+    assert ticket.assignee_id is None
+    assert ticket.status.code == "new"
+    assert ticket.updated_at == original_updated_at
+    assert _side_effect_counts(ticket) == (0, 0, 0)
 
 
 def test_candidate_directory_returns_only_exact_active_staff_with_metadata_and_search(

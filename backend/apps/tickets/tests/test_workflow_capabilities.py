@@ -284,6 +284,48 @@ def test_functional_designation_with_separate_restricted_visibility_can_act(
     assert updated.status.code == "triage"
 
 
+def test_restricted_only_functional_actor_cannot_work_ordinary_ticket_via_separate_visibility(
+    basic_world,
+):
+    ticket = _ticket(basic_world)
+    actor = _user([])
+    exact_scope = {
+        "domain": ticket.domain,
+        "office": str(ticket.office_id),
+        "service": str(ticket.service_id),
+    }
+    restricted_functional_role = Role.objects.create(
+        keycloak_role="estate-examiner",
+        name="Restricted-only Estate Examiner",
+        scopes=[{**exact_scope, "restricted_only": True}],
+    )
+    ordinary_visibility = Role.objects.create(
+        keycloak_role="visibility-only",
+        name="Ordinary ticket visibility",
+        scopes=[exact_scope],
+    )
+    UserRole.objects.create(
+        user=actor,
+        role=restricted_functional_role,
+        office=ticket.office,
+    )
+    UserRole.objects.create(
+        user=actor,
+        role=ordinary_visibility,
+        office=ticket.office,
+    )
+    transition = Transition.objects.get(
+        domain=ticket.domain,
+        from_status=ticket.status,
+        to_status__code="triage",
+    )
+    transition.required_role = "ops-agents"
+    transition.save(update_fields=["required_role"])
+
+    assert not available_transitions(ticket, actor).exists()
+    _assert_denied_without_side_effects(ticket, actor)
+
+
 @pytest.mark.parametrize(
     ("ticket_domain", "role_key", "required_role"),
     [

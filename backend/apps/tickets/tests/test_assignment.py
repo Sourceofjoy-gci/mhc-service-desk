@@ -106,6 +106,53 @@ def _assign(
     )
 
 
+def test_restricted_only_functional_actor_cannot_assign_ordinary_ticket_via_separate_visibility(
+    basic_world,
+):
+    actor = _user()
+    target = _user(["ops-agents"])
+    ticket = _ticket(basic_world)
+    exact_scope = {
+        "domain": ticket.domain,
+        "office": str(ticket.office_id),
+        "service": str(ticket.service_id),
+    }
+    restricted_supervisor = Role.objects.create(
+        keycloak_role="supervisor-operational",
+        name="Restricted-only operational supervisor",
+        scopes=[{**exact_scope, "restricted_only": True}],
+    )
+    ordinary_visibility = Role.objects.create(
+        keycloak_role="visibility-only",
+        name="Ordinary ticket visibility",
+        scopes=[exact_scope],
+    )
+    UserRole.objects.create(
+        user=actor,
+        role=restricted_supervisor,
+        office=ticket.office,
+    )
+    UserRole.objects.create(
+        user=actor,
+        role=ordinary_visibility,
+        office=ticket.office,
+    )
+    original_updated_at = ticket.updated_at
+
+    with pytest.raises(TicketPermissionError):
+        _assign(ticket, actor, target.id)
+
+    ticket.refresh_from_db()
+    assert ticket.assignee_id is None
+    assert ticket.status.code == "new"
+    assert ticket.updated_at == original_updated_at
+    assert _assignment_rows(ticket) == (0, 0, 0)
+    assert not AuditEvent.objects.filter(object_id=str(ticket.id)).exists()
+    assert not OutboxEvent.objects.filter(aggregate_id=str(ticket.id)).exists()
+    assert not TicketCustodyEvent.objects.filter(ticket=ticket).exists()
+    assert not TransitionHistory.objects.filter(ticket=ticket).exists()
+
+
 def test_initial_assignment_records_one_atomic_event_and_complete_receipt(
     basic_world,
     monkeypatch,
