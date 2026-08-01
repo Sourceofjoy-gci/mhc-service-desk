@@ -306,7 +306,7 @@ describe("typed ticket activity", () => {
       expect.stringContaining("Internal investigation detail"),
       expect.stringContaining("Assigned"),
       expect.stringContaining("Queue changed"),
-      expect.stringContaining("Reassigned"),
+      expect.stringContaining("Transferred / reassigned"),
       expect.stringContaining("Escalated"),
       expect.stringContaining("Status changed"),
       expect.stringContaining("Unassigned"),
@@ -365,7 +365,7 @@ describe("typed ticket activity", () => {
       ["Custody event: Ticket created", "Ticket intake"],
       ["Custody event: Assigned", "Master Dlamini"],
       ["Custody event: Queue changed", "Master Dlamini"],
-      ["Custody event: Reassigned", "Deputy Master Naidoo"],
+      ["Custody event: Transferred / reassigned", "Deputy Master Naidoo"],
       ["Custody event: Escalated", "SLA monitor"],
       ["Custody event: Unassigned", "Deputy Master Naidoo"],
       ["Workflow event: Status changed", "Thandi Mokoena"],
@@ -496,7 +496,7 @@ describe("typed ticket activity", () => {
 
     renderWithProviders(<ActivityTimeline ticketNumber="MHC-2026-000001" />);
 
-    expect(await screen.findByText("Reassigned")).toBeVisible();
+    expect(await screen.findByText("Transferred / reassigned")).toBeVisible();
   });
 
   it("safely parses malformed custody records and string arrays", async () => {

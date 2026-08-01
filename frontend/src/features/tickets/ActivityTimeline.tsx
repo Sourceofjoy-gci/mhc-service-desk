@@ -465,7 +465,7 @@ function CustodyActivity({
   const actionLabels: Record<string, string> = {
     created: "Ticket created",
     assigned: "Assigned",
-    reassigned: "Reassigned",
+    reassigned: "Transferred / reassigned",
     unassigned: "Unassigned",
     queue_changed: "Queue changed",
     escalated: "Escalated",
