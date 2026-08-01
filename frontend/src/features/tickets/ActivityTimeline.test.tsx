@@ -537,6 +537,55 @@ describe("typed ticket activity", () => {
     expect(screen.queryByText("not text")).not.toBeInTheDocument();
   });
 
+  it("shows no invented date for malformed custody and message timestamps", async () => {
+    const custody: ActivityItem = {
+      id: "custody:malformed-timestamp",
+      type: "custody_event",
+      category: "custody",
+      occurred_at: "not-a-timestamp",
+      actor: { subject: "system", display_name: "System" },
+      visibility: "internal",
+      payload: {
+        action: "escalated",
+        actor_kind: "system",
+        source_process: "sla.monitor",
+        reason: "SLA threshold reached",
+      },
+    };
+    const message: ActivityItem = {
+      id: "message:missing-timestamp",
+      type: "message",
+      category: "public_reply",
+      occurred_at: null as unknown as string,
+      actor: { subject: "agent-1", display_name: "Agent One" },
+      visibility: "requester",
+      payload: {
+        body_text: "Requester-safe update",
+        direction: "outbound",
+        delivery_status: "sent",
+      },
+    };
+    harness.activity.mockResolvedValue({ results: [custody, message] });
+
+    renderWithProviders(<ActivityTimeline ticketNumber="MHC-2026-000001" />);
+
+    const timeline = await screen.findByRole("list", {
+      name: "Ticket activity",
+    });
+    expect(
+      within(timeline).getByRole("article", {
+        name: "Custody event: Escalated",
+      }),
+    ).toBeVisible();
+    expect(
+      within(timeline).getByRole("article", {
+        name: "Requester-visible message",
+      }),
+    ).toHaveTextContent("Requester-safe update");
+    expect(within(timeline).getAllByText("Time unavailable")).toHaveLength(2);
+    expect(within(timeline).queryByRole("time")).not.toBeInTheDocument();
+  });
+
   it("falls back safely when a custody actor contains nested fields", async () => {
     const custody: ActivityItem = {
       id: "custody:nested-actor",

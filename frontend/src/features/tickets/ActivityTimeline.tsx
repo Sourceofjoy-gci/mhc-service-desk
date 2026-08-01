@@ -231,6 +231,21 @@ function displayValue(value: unknown): string {
   return "Updated";
 }
 
+function formatDateTime(
+  value: unknown,
+): { dateTime: string; label: string } | null {
+  if (typeof value !== "string" || !value.trim()) return null;
+  const date = new Date(value);
+  if (Number.isNaN(date.getTime())) return null;
+  return {
+    dateTime: value,
+    label: new Intl.DateTimeFormat(undefined, {
+      dateStyle: "medium",
+      timeStyle: "short",
+    }).format(date),
+  };
+}
+
 function ActivityFrame({
   item,
   label,
@@ -246,6 +261,7 @@ function ActivityFrame({
   children: React.ReactNode;
   className?: string;
 }) {
+  const occurredAt = formatDateTime(item.occurred_at);
   return (
     <article
       aria-label={label}
@@ -263,12 +279,11 @@ function ActivityFrame({
       <footer className="mt-3 flex flex-wrap items-center gap-x-2 text-xs text-muted-foreground">
         <span>{item.actor?.display_name ?? "System"}</span>
         <span aria-hidden>·</span>
-        <time dateTime={item.occurred_at}>
-          {new Intl.DateTimeFormat(undefined, {
-            dateStyle: "medium",
-            timeStyle: "short",
-          }).format(new Date(item.occurred_at))}
-        </time>
+        {occurredAt ? (
+          <time dateTime={occurredAt.dateTime}>{occurredAt.label}</time>
+        ) : (
+          <span>Time unavailable</span>
+        )}
       </footer>
     </article>
   );
