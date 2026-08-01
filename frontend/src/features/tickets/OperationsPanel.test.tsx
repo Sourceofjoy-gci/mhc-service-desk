@@ -1,6 +1,16 @@
-import { act, fireEvent, screen, waitFor } from "@testing-library/react";
+import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
+import {
+  act,
+  fireEvent,
+  screen,
+  waitFor,
+  within,
+} from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
-import { useState } from "react";
+import { StrictMode, useLayoutEffect, useState } from "react";
+import { flushSync } from "react-dom";
+import { createRoot } from "react-dom/client";
+import { MemoryRouter } from "react-router-dom";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import {
   ApiError,
@@ -195,6 +205,11 @@ function renderStatefulPanel(ticket: TicketDetail, onUpdated = vi.fn()) {
     <StatefulPanel initialTicket={ticket} onUpdated={onUpdated} />,
   );
   return { onUpdated };
+}
+
+function ResolveOnLayout({ resolve }: { resolve: () => void }) {
+  useLayoutEffect(resolve, [resolve]);
+  return null;
 }
 
 beforeEach(() => {
@@ -511,7 +526,14 @@ describe("server-driven ticket operations", () => {
       next_action: "Never show this A action",
       updated_at: "2026-07-27T11:01:00Z",
     };
-    harness.updateWorkState.mockReturnValue(pending.promise);
+    const updatedTicketB = {
+      ...ticketB,
+      team: "Updated B team",
+      updated_at: "2026-07-27T11:02:00Z",
+    };
+    harness.updateWorkState
+      .mockReturnValueOnce(pending.promise)
+      .mockResolvedValueOnce(updatedTicketB);
     const onUpdated = vi.fn();
     const onReload = vi.fn();
     const onActivityChanged = vi.fn();
@@ -566,6 +588,16 @@ describe("server-driven ticket operations", () => {
     expect(screen.getByRole("button", { name: "Save" })).toBeDisabled();
     expect(onUpdated).not.toHaveBeenCalled();
     expect(onActivityChanged).not.toHaveBeenCalled();
+
+    await user.clear(screen.getByRole("textbox", { name: "Team" }));
+    await user.type(
+      screen.getByRole("textbox", { name: "Team" }),
+      updatedTicketB.team,
+    );
+    await user.click(screen.getByRole("button", { name: "Save" }));
+
+    await waitFor(() => expect(onUpdated).toHaveBeenCalledWith(updatedTicketB));
+    expect(onActivityChanged).toHaveBeenCalledTimes(1);
   });
 
   it("does not leak a late work-state error into the next ticket", async () => {
@@ -630,6 +662,100 @@ describe("server-driven ticket operations", () => {
     expect(screen.queryByText(/corr-late-ticket-a/)).not.toBeInTheDocument();
     expect(screen.getByRole("button", { name: "Save" })).toBeDisabled();
     expect(onUpdated).not.toHaveBeenCalled();
+  });
+
+  it("closes ticket A scope during the ticket B commit before passive cleanup", async () => {
+    const pending = deferred<TicketDetail>();
+    const ticketB = {
+      ...TICKET,
+      id: "ticket-2",
+      number: "MHC-2026-000002",
+      team: "Records",
+      next_action: "Index the second ticket",
+      updated_at: "2026-07-27T11:00:00Z",
+    };
+    const lateTicketA = {
+      ...TICKET,
+      team: "Late layout-phase A response",
+      updated_at: "2026-07-27T11:01:00Z",
+    };
+    harness.updateWorkState.mockReturnValue(pending.promise);
+    const onUpdated = vi.fn();
+    const onReload = vi.fn();
+    const onActivityChanged = vi.fn();
+    const queryClient = new QueryClient({
+      defaultOptions: {
+        queries: { retry: false },
+        mutations: { retry: false },
+      },
+    });
+    const container = document.createElement("div");
+    document.body.append(container);
+    const root = createRoot(container);
+    const actEnvironment = globalThis as typeof globalThis & {
+      IS_REACT_ACT_ENVIRONMENT?: boolean;
+    };
+    const previousActEnvironment = actEnvironment.IS_REACT_ACT_ENVIRONMENT;
+    const renderTicket = (ticket: TicketDetail, resolve?: () => void) => (
+      <StrictMode>
+        <QueryClientProvider client={queryClient}>
+          <MemoryRouter
+            initialEntries={["/"]}
+            future={{ v7_startTransition: true, v7_relativeSplatPath: true }}
+          >
+            <OperationsPanel
+              ticket={ticket}
+              onUpdated={onUpdated}
+              onReload={onReload}
+              onActivityChanged={onActivityChanged}
+            />
+            {resolve ? <ResolveOnLayout resolve={resolve} /> : null}
+          </MemoryRouter>
+        </QueryClientProvider>
+      </StrictMode>
+    );
+
+    try {
+      await act(async () => root.render(renderTicket(TICKET)));
+      fireEvent.change(
+        within(container).getByRole("textbox", { name: "Team" }),
+        {
+          target: { value: "Submitted A edit" },
+        },
+      );
+      fireEvent.click(within(container).getByRole("button", { name: "Save" }));
+      await waitFor(() =>
+        expect(harness.updateWorkState).toHaveBeenCalledTimes(1),
+      );
+      const mutationA = queryClient.getMutationCache().getAll()[0];
+      const deliverLateSuccess = mutationA.options.onSuccess as unknown as (
+        ticket: TicketDetail,
+      ) => Promise<void>;
+      expect(deliverLateSuccess).toBeTypeOf("function");
+
+      actEnvironment.IS_REACT_ACT_ENVIRONMENT = false;
+      flushSync(() => {
+        root.render(
+          renderTicket(ticketB, () => {
+            // A promise would resume after passive effects; invoke the real
+            // registered callback here to exercise the layout/passive gap.
+            void deliverLateSuccess(lateTicketA);
+          }),
+        );
+      });
+      actEnvironment.IS_REACT_ACT_ENVIRONMENT = previousActEnvironment;
+
+      expect(
+        within(container).getByRole("textbox", { name: "Team" }),
+      ).toHaveValue(ticketB.team);
+      expect(onUpdated).not.toHaveBeenCalled();
+      expect(onActivityChanged).not.toHaveBeenCalled();
+    } finally {
+      actEnvironment.IS_REACT_ACT_ENVIRONMENT = previousActEnvironment;
+      flushSync(() => root.unmount());
+      pending.resolve(lateTicketA);
+      container.remove();
+    }
   });
 
   it("does not infer elevated controls when capability flags deny them", () => {

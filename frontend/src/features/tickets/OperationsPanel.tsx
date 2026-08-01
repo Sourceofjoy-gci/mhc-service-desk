@@ -1,6 +1,12 @@
 import { useMutation } from "@tanstack/react-query";
 import { AlertCircle } from "lucide-react";
-import { useEffect, useReducer, useRef, type FormEvent } from "react";
+import {
+  useEffect,
+  useLayoutEffect,
+  useReducer,
+  useRef,
+  type FormEvent,
+} from "react";
 import { Alert, AlertDescription, AlertTitle } from "@/components/ui/alert";
 import { Button } from "@/components/ui/button";
 import {
@@ -191,7 +197,7 @@ function ScopedOperationsPanel({
     updatedAt: ticket.updated_at,
   });
 
-  useEffect(() => {
+  useLayoutEffect(() => {
     scopeActive.current = true;
     return () => {
       scopeActive.current = false;
