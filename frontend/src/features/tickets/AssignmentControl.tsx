@@ -1,6 +1,12 @@
-import { useMutation, useQuery } from "@tanstack/react-query";
+import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { AlertCircle, ShieldAlert } from "lucide-react";
-import { useEffect, useRef, useState, type FormEvent } from "react";
+import {
+  useEffect,
+  useLayoutEffect,
+  useRef,
+  useState,
+  type FormEvent,
+} from "react";
 import { toast } from "sonner";
 
 import { Alert, AlertDescription, AlertTitle } from "@/components/ui/alert";
@@ -46,6 +52,18 @@ interface AssignmentProposal {
   source: ProposalSource;
 }
 
+interface AssignmentMutationInput {
+  selected: TicketAssignee | null;
+  submittedReason: string;
+  ticketNumber: string;
+  expectedUpdatedAt: string;
+  requestId: number;
+}
+
+interface CandidateRevalidation {
+  dataUpdatedAt: number;
+}
+
 const actionLabels: Record<AssignmentAction, string> = {
   assign: "Assign",
   transfer: "Transfer",
@@ -81,12 +99,36 @@ function assignmentPartyName(party: AssignmentReceipt["previous_assignee"]) {
   return party?.display_name ?? "Unassigned";
 }
 
-function receiptSummary(receipt: AssignmentReceipt) {
-  const occurredAt = new Intl.DateTimeFormat(undefined, {
+function formatReceiptDateTime(value: string) {
+  const date = new Date(value);
+  if (Number.isNaN(date.getTime())) return "date/time unavailable";
+  return new Intl.DateTimeFormat(undefined, {
     dateStyle: "medium",
     timeStyle: "short",
-  }).format(new Date(receipt.occurred_at));
+  }).format(date);
+}
+
+function receiptSummary(receipt: AssignmentReceipt) {
+  const occurredAt = formatReceiptDateTime(receipt.occurred_at);
   return `${receipt.ticket_number} ${receipt.action}: ${assignmentPartyName(receipt.previous_assignee)} → ${assignmentPartyName(receipt.new_assignee)} on ${occurredAt} by ${receipt.performed_by.display_name}.`;
+}
+
+function assigneeContext(assignee: TicketAssignee) {
+  const designation = assignee.designations.join(", ");
+  const team = assignee.team_labels.join(", ");
+  return [designation, team].filter(Boolean).join(" · ");
+}
+
+function isTargetEligibilityProblem(
+  error: unknown,
+  problem: ApiProblem | null,
+) {
+  return (
+    error instanceof ApiError &&
+    error.status === 400 &&
+    (problem?.code === "ineligible_assignee" ||
+      Boolean(problem?.fields.assignee_id?.length))
+  );
 }
 
 function errorDetail(problem: ApiProblem | null, fallback: string) {
@@ -113,50 +155,83 @@ function ScopedAssignmentControl({
   onReload,
   onActivityChanged,
 }: AssignmentControlProps) {
+  const queryClient = useQueryClient();
   const panelRef = useRef<HTMLElement>(null);
   const returnFocusRef = useRef<HTMLButtonElement | null>(null);
   const submitLockRef = useRef(false);
   const scopeActiveRef = useRef(true);
-  const observedUpdatedAtRef = useRef(ticket.updated_at);
+  const scopeTicketNumberRef = useRef(ticket.number);
+  const currentTicketRef = useRef({
+    number: ticket.number,
+    updatedAt: ticket.updated_at,
+  });
+  const nextRequestIdRef = useRef(1);
+  const activeRequestIdRef = useRef<number | null>(null);
   const candidateSnapshots = useRef(new Map<string, TicketAssignee>());
+  const candidateDirectoryReadyRef = useRef(false);
   const [search, setSearch] = useState("");
   const debouncedSearch = useDebouncedValue(search, 250);
   const [proposal, setProposal] = useState<AssignmentProposal | undefined>();
   const [reason, setReason] = useState("");
   const [receipt, setReceipt] = useState<string | null>(null);
+  const [candidateRevalidation, setCandidateRevalidation] =
+    useState<CandidateRevalidation | null>(null);
   const [permissionProblem, setPermissionProblem] = useState<ApiProblem | null>(
     null,
   );
 
-  useEffect(() => {
+  useLayoutEffect(() => {
     scopeActiveRef.current = true;
     return () => {
       scopeActiveRef.current = false;
     };
   }, []);
 
+  const candidateQueryKey = [
+    "ticket",
+    ticket.number,
+    "assignees",
+    debouncedSearch,
+  ] as const;
   const candidates = useQuery({
-    queryKey: ["ticket", ticket.number, "assignees", debouncedSearch],
+    queryKey: candidateQueryKey,
     queryFn: () => ticketsApi.assignees(ticket.number, debouncedSearch),
     enabled: ticket.capabilities.can_assign,
   });
   const candidateOptions = candidates.data?.results ?? [];
+  if (candidates.data !== undefined) {
+    candidateDirectoryReadyRef.current = true;
+  }
   for (const candidate of candidateOptions) {
     candidateSnapshots.current.set(candidate.id, candidate);
   }
 
+  const requestIsCurrent = (values: AssignmentMutationInput) => {
+    const currentTicket = currentTicketRef.current;
+    return (
+      scopeActiveRef.current &&
+      values.requestId === activeRequestIdRef.current &&
+      values.ticketNumber === scopeTicketNumberRef.current &&
+      values.ticketNumber === currentTicket.number &&
+      values.expectedUpdatedAt === currentTicket.updatedAt
+    );
+  };
+
   const mutation = useMutation({
-    mutationFn: (values: {
-      selected: TicketAssignee | null;
-      submittedReason: string;
-    }) =>
-      ticketsApi.assign(ticket.number, {
+    mutationFn: (values: AssignmentMutationInput) =>
+      ticketsApi.assign(values.ticketNumber, {
         assignee_id: values.selected?.id ?? null,
-        expected_updated_at: ticket.updated_at,
+        expected_updated_at: values.expectedUpdatedAt,
         reason: values.submittedReason,
       }),
-    onSuccess: async (response) => {
-      if (!scopeActiveRef.current) return;
+    onSuccess: async (response, values) => {
+      if (
+        !requestIsCurrent(values) ||
+        response.ticket.number !== values.ticketNumber ||
+        response.receipt.ticket_number !== values.ticketNumber
+      ) {
+        return;
+      }
       onUpdated(response.ticket);
       const summary = receiptSummary(response.receipt);
       setReceipt(summary);
@@ -165,19 +240,65 @@ function ScopedAssignmentControl({
       setReason("");
       await onActivityChanged?.();
     },
-    onError: (error) => {
-      if (!scopeActiveRef.current) return;
+    onError: (error, values) => {
+      if (!requestIsCurrent(values)) return;
+      const problem = apiProblem(error);
       if (error instanceof ApiError && error.status === 403) {
-        setPermissionProblem(apiProblem(error));
+        setPermissionProblem(problem);
         setProposal(undefined);
         setReason("");
         window.setTimeout(() => returnFocusRef.current?.focus(), 0);
+        return;
+      }
+      if (isTargetEligibilityProblem(error, problem)) {
+        setCandidateRevalidation({
+          dataUpdatedAt: candidates.dataUpdatedAt,
+        });
+        void queryClient
+          .invalidateQueries({
+            queryKey: ["ticket", values.ticketNumber, "assignees"],
+          })
+          .then(() => {
+            if (!requestIsCurrent(values)) return;
+            const queryState = queryClient.getQueryState(candidateQueryKey);
+            if (queryState?.status === "success") {
+              setCandidateRevalidation(null);
+            }
+          });
+      }
+      if (problem?.fields.reason?.length) {
+        window.setTimeout(() => {
+          document
+            .getElementById(`assignment-reason-${values.ticketNumber}`)
+            ?.focus();
+        }, 0);
       }
     },
-    onSettled: () => {
-      submitLockRef.current = false;
+    onSettled: (_response, _error, values) => {
+      if (
+        scopeActiveRef.current &&
+        activeRequestIdRef.current === values.requestId
+      ) {
+        submitLockRef.current = false;
+      }
     },
   });
+
+  useLayoutEffect(() => {
+    const previousTicket = currentTicketRef.current;
+    const versionChanged =
+      previousTicket.number !== ticket.number ||
+      previousTicket.updatedAt !== ticket.updated_at;
+    currentTicketRef.current = {
+      number: ticket.number,
+      updatedAt: ticket.updated_at,
+    };
+    if (versionChanged) {
+      activeRequestIdRef.current = null;
+      submitLockRef.current = false;
+      mutation.reset();
+    }
+  }, [mutation, ticket.number, ticket.updated_at]);
 
   const currentId = ticket.assignee_detail?.id ?? null;
   const selectedId =
@@ -187,13 +308,32 @@ function ScopedAssignmentControl({
       ? null
       : proposedAction(currentId, proposal.selected);
   const reasonRequired = action === "transfer" || action === "unassign";
-  const disabled = mutation.isPending;
-  const mutationProblem = apiProblem(mutation.error);
+  const mutationIsCurrent =
+    mutation.variables === undefined || requestIsCurrent(mutation.variables);
+  const disabled = mutation.isPending && mutationIsCurrent;
+  const mutationProblem = mutationIsCurrent ? apiProblem(mutation.error) : null;
   const stale =
-    mutation.error instanceof ApiError && mutation.error.status === 409;
+    mutationIsCurrent &&
+    mutation.error instanceof ApiError &&
+    mutation.error.status === 409;
   const forbidden =
-    mutation.error instanceof ApiError && mutation.error.status === 403;
+    mutationIsCurrent &&
+    mutation.error instanceof ApiError &&
+    mutation.error.status === 403;
+  const missing =
+    mutationIsCurrent &&
+    mutation.error instanceof ApiError &&
+    mutation.error.status === 404;
+  const targetEligibilityChanged = isTargetEligibilityProblem(
+    mutationIsCurrent ? mutation.error : null,
+    mutationProblem,
+  );
   const candidateProblem = apiProblem(candidates.error);
+  const candidateDirectoryUnavailable =
+    ticket.capabilities.can_assign &&
+    (!candidateDirectoryReadyRef.current || candidates.isError);
+  const candidateConfirmationUnavailable =
+    candidateDirectoryUnavailable || candidates.isFetching;
   const selfCandidate = ticket.capabilities.self_assignee_detail;
   const canSelfAssign =
     ticket.capabilities.can_self_assign && selfCandidate !== null;
@@ -204,18 +344,34 @@ function ScopedAssignmentControl({
       : proposal.selected !== null &&
         canSelfAssign &&
         selfCandidate.id === proposal.selected.id);
+  const proposalTargetMissing =
+    targetEligibilityChanged &&
+    proposal?.source === "directory" &&
+    proposal.selected !== null &&
+    !candidateOptions.some(
+      (candidate) => candidate.id === proposal.selected?.id,
+    );
+  const directoryProposalBlocked =
+    proposal?.source === "directory" &&
+    (candidateConfirmationUnavailable ||
+      candidateRevalidation !== null ||
+      proposalTargetMissing);
 
   useEffect(() => {
-    const timestampChanged = observedUpdatedAtRef.current !== ticket.updated_at;
-    observedUpdatedAtRef.current = ticket.updated_at;
     if (
-      timestampChanged &&
-      mutation.error instanceof ApiError &&
-      mutation.error.status === 409
+      candidateRevalidation !== null &&
+      candidates.isSuccess &&
+      !candidates.isFetching &&
+      candidates.dataUpdatedAt > candidateRevalidation.dataUpdatedAt
     ) {
-      mutation.reset();
+      setCandidateRevalidation(null);
     }
-  }, [mutation, ticket.updated_at]);
+  }, [
+    candidateRevalidation,
+    candidates.dataUpdatedAt,
+    candidates.isFetching,
+    candidates.isSuccess,
+  ]);
 
   useEffect(() => {
     if (proposal === undefined || proposalAllowed) return;
@@ -254,6 +410,8 @@ function ScopedAssignmentControl({
   ) => {
     if (
       disabled ||
+      (source === "directory" &&
+        (candidateConfirmationUnavailable || candidateRevalidation !== null)) ||
       selected?.id === currentId ||
       (selected === null && currentId === null)
     ) {
@@ -288,6 +446,7 @@ function ScopedAssignmentControl({
     if (
       proposal === undefined ||
       !proposalAllowed ||
+      directoryProposalBlocked ||
       submitLockRef.current ||
       disabled ||
       (reasonRequired && !reason.trim())
@@ -295,9 +454,15 @@ function ScopedAssignmentControl({
       return;
     }
     submitLockRef.current = true;
+    const requestId = nextRequestIdRef.current;
+    nextRequestIdRef.current += 1;
+    activeRequestIdRef.current = requestId;
     mutation.mutate({
       selected: proposal.selected,
       submittedReason: reason.trim(),
+      ticketNumber: ticket.number,
+      expectedUpdatedAt: ticket.updated_at,
+      requestId,
     });
   };
 
@@ -328,7 +493,11 @@ function ScopedAssignmentControl({
           onValueChange={selectCandidate}
           onSearchChange={setSearch}
           allowUnassigned={currentId !== null}
-          disabled={disabled}
+          disabled={
+            disabled ||
+            candidateDirectoryUnavailable ||
+            candidateRevalidation !== null
+          }
           loading={candidates.isLoading || candidates.isFetching}
           error={candidateError}
         />
@@ -394,7 +563,9 @@ function ScopedAssignmentControl({
               <div className="flex flex-col gap-2 rounded-lg border border-border bg-muted/35 p-3 text-sm">
                 <p>
                   <span className="text-muted-foreground">Ticket:</span>{" "}
-                  <span className="font-medium">{ticket.number}</span>
+                  <span className="font-medium">
+                    {ticket.number} — {ticket.title}
+                  </span>
                 </p>
                 <p>
                   <span className="text-muted-foreground">
@@ -408,6 +579,16 @@ function ScopedAssignmentControl({
                     {proposal.selected?.display_name ?? "Unassigned"}
                   </span>
                 </p>
+                {proposal.selected ? (
+                  <p>
+                    <span className="text-muted-foreground">
+                      Designation / team:
+                    </span>{" "}
+                    <span className="font-medium">
+                      {assigneeContext(proposal.selected)}
+                    </span>
+                  </p>
+                ) : null}
               </div>
 
               <Field data-invalid={reasonErrors.length > 0 || undefined}>
@@ -443,7 +624,42 @@ function ScopedAssignmentControl({
                     assignment again.
                   </AlertDescription>
                 </Alert>
-              ) : mutation.isError && !forbidden ? (
+              ) : missing ? (
+                <Alert variant="destructive">
+                  <AlertCircle aria-hidden="true" />
+                  <AlertTitle>Ticket is no longer available</AlertTitle>
+                  <AlertDescription>
+                    {mutationProblem ? (
+                      <>
+                        <p>{mutationProblem.detail}</p>
+                        <p>Reference: {mutationProblem.correlation_id}</p>
+                      </>
+                    ) : (
+                      mutationErrorDetail
+                    )}
+                  </AlertDescription>
+                </Alert>
+              ) : targetEligibilityChanged ? (
+                <Alert variant="destructive">
+                  <AlertCircle aria-hidden="true" />
+                  <AlertTitle>
+                    Selected staff member is no longer eligible
+                  </AlertTitle>
+                  <AlertDescription>
+                    {mutationProblem ? (
+                      <>
+                        <p>{mutationProblem.detail}</p>
+                        {mutationProblem.fields.assignee_id?.map((message) => (
+                          <p key={message}>{message}</p>
+                        ))}
+                        <p>Reference: {mutationProblem.correlation_id}</p>
+                      </>
+                    ) : (
+                      mutationErrorDetail
+                    )}
+                  </AlertDescription>
+                </Alert>
+              ) : mutation.isError && mutationIsCurrent && !forbidden ? (
                 <Alert variant="destructive">
                   <AlertCircle aria-hidden="true" />
                   <AlertTitle>Could not update the assignment</AlertTitle>
@@ -469,7 +685,7 @@ function ScopedAssignmentControl({
                 >
                   Cancel
                 </Button>
-                {stale ? (
+                {stale || missing ? (
                   <Button type="button" disabled={disabled} onClick={onReload}>
                     Reload
                   </Button>
@@ -479,6 +695,7 @@ function ScopedAssignmentControl({
                     disabled={
                       disabled ||
                       !proposalAllowed ||
+                      directoryProposalBlocked ||
                       (reasonRequired && !reason.trim())
                     }
                   >

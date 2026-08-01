@@ -1,3 +1,4 @@
+import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import {
   act,
   fireEvent,
@@ -6,6 +7,10 @@ import {
   within,
 } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
+import { StrictMode, useLayoutEffect } from "react";
+import { flushSync } from "react-dom";
+import { createRoot } from "react-dom/client";
+import { MemoryRouter } from "react-router-dom";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 
 import {
@@ -230,6 +235,7 @@ function renderControl(
     />,
   );
   return {
+    queryClient: view.queryClient,
     onUpdated,
     onReload,
     onActivityChanged,
@@ -243,6 +249,11 @@ function renderControl(
         />,
       ),
   };
+}
+
+function ResolveOnLayout({ resolve }: { resolve: () => void }) {
+  useLayoutEffect(resolve, [resolve]);
+  return null;
 }
 
 async function openCandidateList(user: ReturnType<typeof userEvent.setup>) {
@@ -313,6 +324,130 @@ describe("internal ticket assignment", () => {
     ).toBeVisible();
   });
 
+  it("blocks every directory assignment path when the initial candidate lookup fails", async () => {
+    harness.assignees.mockRejectedValue(
+      new ApiError(503, {
+        code: "candidate_directory_unavailable",
+        detail: "The eligible staff directory is temporarily unavailable.",
+        fields: {},
+        correlation_id: "corr-candidates-initial",
+      }),
+    );
+    renderControl(ticketWithCapabilities({ can_assign: true }));
+
+    expect(
+      await screen.findByText(
+        "The eligible staff directory is temporarily unavailable. Reference: corr-candidates-initial",
+      ),
+    ).toBeVisible();
+    const trigger = screen.getByRole("combobox", {
+      name: "Eligible team member",
+    });
+    expect(trigger).toBeDisabled();
+    fireEvent.click(trigger);
+    expect(screen.queryByRole("dialog")).not.toBeInTheDocument();
+    expect(harness.assign).not.toHaveBeenCalled();
+  });
+
+  it("blocks a stale proposal after a background lookup error and recovers only after a successful lookup", async () => {
+    const backgroundLookup = deferred<{ results: TicketAssignee[] }>();
+    const lookupFailure = new ApiError(503, {
+      code: "candidate_directory_unavailable",
+      detail: "The eligible staff directory is temporarily unavailable.",
+      fields: {},
+      correlation_id: "corr-candidates-background",
+    });
+    const user = userEvent.setup();
+    const { queryClient } = renderControl(
+      ticketWithCapabilities({ can_assign: true }),
+    );
+
+    await chooseCandidate(user, ACCOUNTANT.display_name);
+    const reason = screen.getByRole("textbox", { name: "Reason for transfer" });
+    await user.type(reason, "Finance review required");
+    harness.assignees.mockReturnValueOnce(backgroundLookup.promise);
+    let backgroundRefetch!: Promise<void>;
+    act(() => {
+      backgroundRefetch = queryClient.refetchQueries({
+        queryKey: ["ticket", BASE_TICKET.number, "assignees"],
+        type: "active",
+      });
+    });
+
+    await waitFor(() => expect(harness.assignees).toHaveBeenCalledTimes(2));
+    const confirm = screen.getByRole("button", { name: "Transfer" });
+    expect(confirm).toBeDisabled();
+
+    await act(async () => {
+      backgroundLookup.reject(lookupFailure);
+      await backgroundRefetch;
+    });
+
+    expect(
+      await screen.findByText(
+        "The eligible staff directory is temporarily unavailable. Reference: corr-candidates-background",
+      ),
+    ).toBeVisible();
+    expect(confirm).toBeDisabled();
+    fireEvent.click(confirm);
+    expect(harness.assign).not.toHaveBeenCalled();
+    expect(screen.getByRole("dialog")).toHaveTextContent(
+      `New assignee: ${ACCOUNTANT.display_name}`,
+    );
+
+    harness.assignees.mockResolvedValueOnce({
+      results: [CURRENT_ASSIGNEE, ACCOUNTANT, RECORDS_CLERK],
+    });
+    await act(async () => {
+      await queryClient.refetchQueries({
+        queryKey: ["ticket", BASE_TICKET.number, "assignees"],
+        type: "active",
+      });
+    });
+
+    await waitFor(() => expect(confirm).toBeEnabled());
+    expect(
+      screen.queryByText(/corr-candidates-background/),
+    ).not.toBeInTheDocument();
+  });
+
+  it("blocks an open unassignment confirmation after the candidate lookup fails", async () => {
+    const user = userEvent.setup();
+    const { queryClient } = renderControl(
+      ticketWithCapabilities({ can_assign: true }),
+    );
+
+    await chooseCandidate(user, "Unassigned");
+    await user.type(
+      screen.getByRole("textbox", { name: "Reason for transfer" }),
+      "Return to queue",
+    );
+    harness.assignees.mockRejectedValueOnce(
+      new ApiError(503, {
+        code: "candidate_directory_unavailable",
+        detail: "The eligible staff directory is temporarily unavailable.",
+        fields: {},
+        correlation_id: "corr-candidates-unassign",
+      }),
+    );
+    await act(async () => {
+      await queryClient.refetchQueries({
+        queryKey: ["ticket", BASE_TICKET.number, "assignees"],
+        type: "active",
+      });
+    });
+
+    expect(
+      await screen.findByText(
+        "The eligible staff directory is temporarily unavailable. Reference: corr-candidates-unassign",
+      ),
+    ).toBeVisible();
+    const confirm = screen.getByRole("button", { name: "Unassign" });
+    expect(confirm).toBeDisabled();
+    fireEvent.click(confirm);
+    expect(harness.assign).not.toHaveBeenCalled();
+  });
+
   it("debounces candidate searches and stale responses cannot replace the latest results", async () => {
     const finance = deferred<{ results: TicketAssignee[] }>();
     const records = deferred<{ results: TicketAssignee[] }>();
@@ -367,12 +502,17 @@ describe("internal ticket assignment", () => {
         name: "Confirm ticket assignment",
       }),
     ).toBeVisible();
-    expect(dialog).toHaveTextContent(`Ticket: ${BASE_TICKET.number}`);
+    expect(dialog).toHaveTextContent(
+      `Ticket: ${BASE_TICKET.number} — ${BASE_TICKET.title}`,
+    );
     expect(dialog).toHaveTextContent(
       `Previous assignee: ${CURRENT_ASSIGNEE.display_name}`,
     );
     expect(dialog).toHaveTextContent(
       `New assignee: ${ACCOUNTANT.display_name}`,
+    );
+    expect(dialog).toHaveTextContent(
+      "Designation / team: Accountant · Finance",
     );
   });
 
@@ -400,6 +540,12 @@ describe("internal ticket assignment", () => {
     renderControl(ticketWithCapabilities({ can_assign: true }));
 
     await chooseCandidate(user, "Unassigned");
+    expect(screen.getByRole("dialog")).toHaveTextContent(
+      "New assignee: Unassigned",
+    );
+    expect(screen.getByRole("dialog")).not.toHaveTextContent(
+      "Designation / team:",
+    );
     const confirm = screen.getByRole("button", { name: "Unassign" });
     expect(confirm).toBeDisabled();
     await user.type(
@@ -681,6 +827,150 @@ describe("internal ticket assignment", () => {
     expect(screen.getByText(CURRENT_ASSIGNEE.display_name)).toBeVisible();
   });
 
+  it("does not apply an older assignment response after the same ticket version refreshes", async () => {
+    const pending = deferred<AssignmentResponse>();
+    harness.assign.mockReturnValue(pending.promise);
+    const originalTicket = unassignedTicket({ can_assign: true });
+    const refreshedTicket = {
+      ...originalTicket,
+      title: "Server-refreshed estate matter",
+      updated_at: "2026-07-30T10:45:00Z",
+    };
+    const staleResponseTicket = {
+      ...originalTicket,
+      assignee: ACCOUNTANT.id,
+      assignee_detail: {
+        id: ACCOUNTANT.id,
+        display_name: ACCOUNTANT.display_name,
+      },
+      updated_at: "2026-07-30T10:30:00Z",
+    };
+    const user = userEvent.setup();
+    const { onUpdated, onActivityChanged, rerenderTicket } =
+      renderControl(originalTicket);
+
+    await chooseCandidate(user, ACCOUNTANT.display_name);
+    await user.click(screen.getByRole("button", { name: "Assign" }));
+    await waitFor(() => expect(harness.assign).toHaveBeenCalledTimes(1));
+    rerenderTicket(refreshedTicket);
+
+    await act(async () => {
+      pending.resolve(responseWith(staleResponseTicket));
+      await pending.promise;
+    });
+
+    expect(onUpdated).not.toHaveBeenCalled();
+    expect(onActivityChanged).not.toHaveBeenCalled();
+    expect(harness.toastSuccess).not.toHaveBeenCalled();
+    expect(screen.queryByRole("status")).not.toBeInTheDocument();
+  });
+
+  it("closes the old ticket scope during the new ticket commit before passive cleanup", async () => {
+    const pending = deferred<AssignmentResponse>();
+    harness.assign.mockReturnValue(pending.promise);
+    const ticketA = unassignedTicket({ can_assign: true });
+    const ticketB = {
+      ...ticketWithCapabilities({ can_assign: true }),
+      id: "ticket-2",
+      number: "MHC-2026-000002",
+      title: "Second estate matter",
+      updated_at: "2026-07-30T11:00:00Z",
+    };
+    const lateTicketA = {
+      ...ticketA,
+      assignee: ACCOUNTANT.id,
+      assignee_detail: {
+        id: ACCOUNTANT.id,
+        display_name: ACCOUNTANT.display_name,
+      },
+      updated_at: "2026-07-30T10:30:00Z",
+    };
+    const onUpdated = vi.fn();
+    const onReload = vi.fn();
+    const onActivityChanged = vi.fn();
+    const queryClient = new QueryClient({
+      defaultOptions: {
+        queries: { retry: false },
+        mutations: { retry: false },
+      },
+    });
+    const container = document.createElement("div");
+    document.body.append(container);
+    const root = createRoot(container);
+    const actEnvironment = globalThis as typeof globalThis & {
+      IS_REACT_ACT_ENVIRONMENT?: boolean;
+    };
+    const previousActEnvironment = actEnvironment.IS_REACT_ACT_ENVIRONMENT;
+    const renderTicket = (ticket: TicketDetail, resolve?: () => void) => (
+      <StrictMode>
+        <QueryClientProvider client={queryClient}>
+          <MemoryRouter
+            initialEntries={["/"]}
+            future={{ v7_startTransition: true, v7_relativeSplatPath: true }}
+          >
+            <AssignmentControl
+              ticket={ticket}
+              onUpdated={onUpdated}
+              onReload={onReload}
+              onActivityChanged={onActivityChanged}
+            />
+            {resolve ? <ResolveOnLayout resolve={resolve} /> : null}
+          </MemoryRouter>
+        </QueryClientProvider>
+      </StrictMode>
+    );
+
+    try {
+      await act(async () => root.render(renderTicket(ticketA)));
+      await waitFor(() =>
+        expect(
+          within(container).getByRole("combobox", {
+            name: "Eligible team member",
+          }),
+        ).toBeEnabled(),
+      );
+      fireEvent.click(
+        within(container).getByRole("combobox", {
+          name: "Eligible team member",
+        }),
+      );
+      fireEvent.click(
+        await within(container).findByRole("option", {
+          name: /Thandi Mokoena/,
+        }),
+      );
+      fireEvent.click(screen.getByRole("button", { name: "Assign" }));
+      await waitFor(() => expect(harness.assign).toHaveBeenCalledTimes(1));
+      const mutationA = queryClient.getMutationCache().getAll()[0];
+      const deliverLateSuccess = mutationA.options.onSuccess as unknown as (
+        response: AssignmentResponse,
+        variables: unknown,
+      ) => Promise<void>;
+      const variables = mutationA.state.variables;
+      expect(deliverLateSuccess).toBeTypeOf("function");
+
+      actEnvironment.IS_REACT_ACT_ENVIRONMENT = false;
+      flushSync(() => {
+        root.render(
+          renderTicket(ticketB, () => {
+            void deliverLateSuccess(responseWith(lateTicketA), variables);
+          }),
+        );
+      });
+      actEnvironment.IS_REACT_ACT_ENVIRONMENT = previousActEnvironment;
+
+      expect(onUpdated).not.toHaveBeenCalled();
+      expect(onActivityChanged).not.toHaveBeenCalled();
+      expect(harness.toastSuccess).not.toHaveBeenCalled();
+      expect(within(container).queryByRole("status")).not.toBeInTheDocument();
+    } finally {
+      actEnvironment.IS_REACT_ACT_ENVIRONMENT = previousActEnvironment;
+      flushSync(() => root.unmount());
+      pending.resolve(responseWith(lateTicketA));
+      container.remove();
+    }
+  });
+
   it("closes and discards a directory proposal when can_assign is revoked", async () => {
     const user = userEvent.setup();
     const { rerenderTicket } = renderControl(
@@ -795,6 +1085,126 @@ describe("internal ticket assignment", () => {
     expect(screen.getByText(/corr-assignment-400/)).toBeVisible();
     expect(screen.getByRole("dialog")).toBeVisible();
     expect(reason).toHaveValue("Too vague");
+    expect(reason).toHaveAttribute("aria-invalid", "true");
+    await waitFor(() => expect(reason).toHaveFocus());
+    expect(
+      screen
+        .getByText("Provide a more specific transfer reason.")
+        .closest('[role="alert"]'),
+    ).toBeVisible();
+  });
+
+  it("keeps an ineligible target proposal but gates resubmission until candidates refresh", async () => {
+    const refreshedCandidates = deferred<{ results: TicketAssignee[] }>();
+    harness.assignees
+      .mockResolvedValueOnce({
+        results: [CURRENT_ASSIGNEE, ACCOUNTANT, RECORDS_CLERK],
+      })
+      .mockReturnValueOnce(refreshedCandidates.promise);
+    harness.assign.mockRejectedValue(
+      new ApiError(400, {
+        code: "invalid_assignment",
+        detail: "The selected staff member cannot action this ticket now.",
+        fields: {
+          assignee_id: ["Select a currently eligible team member."],
+        },
+        correlation_id: "corr-assignee-ineligible",
+      }),
+    );
+    const user = userEvent.setup();
+    renderControl(ticketWithCapabilities({ can_assign: true }));
+
+    await chooseCandidate(user, ACCOUNTANT.display_name);
+    const reason = screen.getByRole("textbox", { name: "Reason for transfer" });
+    await user.type(reason, "Finance review required");
+    await user.click(screen.getByRole("button", { name: "Transfer" }));
+
+    expect(
+      await screen.findByText("Selected staff member is no longer eligible"),
+    ).toBeVisible();
+    expect(
+      screen.getByText(
+        "The selected staff member cannot action this ticket now.",
+      ),
+    ).toBeVisible();
+    expect(
+      screen.getByText("Select a currently eligible team member."),
+    ).toBeVisible();
+    expect(screen.getByRole("dialog")).toHaveTextContent(
+      `New assignee: ${ACCOUNTANT.display_name}`,
+    );
+    expect(reason).toHaveValue("Finance review required");
+    const confirm = screen.getByRole("button", { name: "Transfer" });
+    expect(confirm).toBeDisabled();
+    fireEvent.click(confirm);
+    expect(harness.assign).toHaveBeenCalledTimes(1);
+    expect(harness.assignees).toHaveBeenCalledTimes(2);
+
+    refreshedCandidates.resolve({
+      results: [CURRENT_ASSIGNEE, ACCOUNTANT, RECORDS_CLERK],
+    });
+    await waitFor(() => expect(confirm).toBeEnabled());
+  });
+
+  it("treats ineligible_assignee as a target eligibility change", async () => {
+    harness.assign.mockRejectedValue(
+      new ApiError(400, {
+        code: "ineligible_assignee",
+        detail: "The proposed owner is outside the ticket scope.",
+        fields: { assignee_id: ["Choose another eligible owner."] },
+        correlation_id: "corr-ineligible-code",
+      }),
+    );
+    const user = userEvent.setup();
+    renderControl(ticketWithCapabilities({ can_assign: true }));
+
+    await chooseCandidate(user, ACCOUNTANT.display_name);
+    await user.type(
+      screen.getByRole("textbox", { name: "Reason for transfer" }),
+      "Finance review required",
+    );
+    await user.click(screen.getByRole("button", { name: "Transfer" }));
+
+    expect(
+      await screen.findByText("Selected staff member is no longer eligible"),
+    ).toBeVisible();
+    expect(screen.getByText("Choose another eligible owner.")).toBeVisible();
+  });
+
+  it("offers Reload for an assignment-time missing ticket without losing proposal context", async () => {
+    harness.assign.mockRejectedValue(
+      new ApiError(404, {
+        code: "ticket_not_found",
+        detail: "This ticket no longer exists or is no longer accessible.",
+        fields: {},
+        correlation_id: "corr-assignment-404",
+      }),
+    );
+    const user = userEvent.setup();
+    const { onReload } = renderControl(
+      ticketWithCapabilities({ can_assign: true }),
+    );
+
+    await chooseCandidate(user, ACCOUNTANT.display_name);
+    const reason = screen.getByRole("textbox", { name: "Reason for transfer" });
+    await user.type(reason, "Finance review required");
+    await user.click(screen.getByRole("button", { name: "Transfer" }));
+
+    expect(
+      await screen.findByText("Ticket is no longer available"),
+    ).toBeVisible();
+    expect(
+      screen.getByText(
+        "This ticket no longer exists or is no longer accessible.",
+      ),
+    ).toBeVisible();
+    expect(screen.getByRole("dialog")).toHaveTextContent(
+      `New assignee: ${ACCOUNTANT.display_name}`,
+    );
+    expect(reason).toHaveValue("Finance review required");
+    expect(onReload).not.toHaveBeenCalled();
+    await user.click(screen.getByRole("button", { name: "Reload" }));
+    expect(onReload).toHaveBeenCalledTimes(1);
   });
 
   it("discards the proposal after a permission or eligibility change", async () => {
@@ -909,5 +1319,39 @@ describe("internal ticket assignment", () => {
 
     activity.resolve();
     await waitFor(() => expect(onActivityChanged).toHaveBeenCalledTimes(1));
+  });
+
+  it("renders a safe receipt fallback when the server timestamp is malformed", async () => {
+    const malformedReceipt: AssignmentReceipt = {
+      ...RECEIPT,
+      occurred_at: "not-a-date",
+    };
+    const refreshed = {
+      ...BASE_TICKET,
+      assignee: ACCOUNTANT.id,
+      assignee_detail: {
+        id: ACCOUNTANT.id,
+        display_name: ACCOUNTANT.display_name,
+      },
+      updated_at: "2026-07-30T10:30:00Z",
+    };
+    harness.assign.mockResolvedValue(responseWith(refreshed, malformedReceipt));
+    const user = userEvent.setup();
+    const { onUpdated } = renderControl(
+      ticketWithCapabilities({ can_assign: true }),
+    );
+
+    await chooseCandidate(user, ACCOUNTANT.display_name);
+    await user.type(
+      screen.getByRole("textbox", { name: "Reason for transfer" }),
+      "Finance review required",
+    );
+    await user.click(screen.getByRole("button", { name: "Transfer" }));
+
+    await waitFor(() => expect(onUpdated).toHaveBeenCalledWith(refreshed));
+    const receipt = screen.getByRole("status");
+    expect(receipt).toHaveTextContent("on date/time unavailable");
+    expect(receipt).not.toHaveTextContent("Invalid Date");
+    expect(harness.toastSuccess).toHaveBeenCalledWith(receipt.textContent);
   });
 });
