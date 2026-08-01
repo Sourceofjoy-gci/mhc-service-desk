@@ -54,6 +54,7 @@ interface AssignmentProposal {
 
 interface AssignmentMutationInput {
   selected: TicketAssignee | null;
+  source: ProposalSource;
   submittedReason: string;
   ticketNumber: string;
   expectedUpdatedAt: string;
@@ -62,6 +63,11 @@ interface AssignmentMutationInput {
 
 interface CandidateRevalidation {
   dataUpdatedAt: number;
+}
+
+interface SelfEligibilityRecovery {
+  rejectedUpdatedAt: string;
+  rejectedAssigneeId: string;
 }
 
 const actionLabels: Record<AssignmentAction, string> = {
@@ -176,6 +182,8 @@ function ScopedAssignmentControl({
   const [receipt, setReceipt] = useState<string | null>(null);
   const [candidateRevalidation, setCandidateRevalidation] =
     useState<CandidateRevalidation | null>(null);
+  const [selfEligibilityRecovery, setSelfEligibilityRecovery] =
+    useState<SelfEligibilityRecovery | null>(null);
   const [permissionProblem, setPermissionProblem] = useState<ApiProblem | null>(
     null,
   );
@@ -251,20 +259,27 @@ function ScopedAssignmentControl({
         return;
       }
       if (isTargetEligibilityProblem(error, problem)) {
-        setCandidateRevalidation({
-          dataUpdatedAt: candidates.dataUpdatedAt,
-        });
-        void queryClient
-          .invalidateQueries({
-            queryKey: ["ticket", values.ticketNumber, "assignees"],
-          })
-          .then(() => {
-            if (!requestIsCurrent(values)) return;
-            const queryState = queryClient.getQueryState(candidateQueryKey);
-            if (queryState?.status === "success") {
-              setCandidateRevalidation(null);
-            }
+        if (values.source === "self" && values.selected !== null) {
+          setSelfEligibilityRecovery({
+            rejectedUpdatedAt: values.expectedUpdatedAt,
+            rejectedAssigneeId: values.selected.id,
           });
+        } else {
+          setCandidateRevalidation({
+            dataUpdatedAt: candidates.dataUpdatedAt,
+          });
+          void queryClient
+            .invalidateQueries({
+              queryKey: ["ticket", values.ticketNumber, "assignees"],
+            })
+            .then(() => {
+              if (!requestIsCurrent(values)) return;
+              const queryState = queryClient.getQueryState(candidateQueryKey);
+              if (queryState?.status === "success") {
+                setCandidateRevalidation(null);
+              }
+            });
+        }
       }
       if (problem?.fields.reason?.length) {
         window.setTimeout(() => {
@@ -356,6 +371,10 @@ function ScopedAssignmentControl({
     (candidateConfirmationUnavailable ||
       candidateRevalidation !== null ||
       proposalTargetMissing);
+  const selfProposalBlocked =
+    proposal?.source === "self" && selfEligibilityRecovery !== null;
+  const proposalRecoveryBlocked =
+    directoryProposalBlocked || selfProposalBlocked;
 
   useEffect(() => {
     if (
@@ -372,6 +391,18 @@ function ScopedAssignmentControl({
     candidates.isFetching,
     candidates.isSuccess,
   ]);
+
+  useEffect(() => {
+    if (
+      selfEligibilityRecovery !== null &&
+      (ticket.updated_at !== selfEligibilityRecovery.rejectedUpdatedAt ||
+        !ticket.capabilities.can_self_assign ||
+        ticket.capabilities.self_assignee_detail?.id !==
+          selfEligibilityRecovery.rejectedAssigneeId)
+    ) {
+      setSelfEligibilityRecovery(null);
+    }
+  }, [selfEligibilityRecovery, ticket.capabilities, ticket.updated_at]);
 
   useEffect(() => {
     if (proposal === undefined || proposalAllowed) return;
@@ -446,7 +477,7 @@ function ScopedAssignmentControl({
     if (
       proposal === undefined ||
       !proposalAllowed ||
-      directoryProposalBlocked ||
+      proposalRecoveryBlocked ||
       submitLockRef.current ||
       disabled ||
       (reasonRequired && !reason.trim())
@@ -459,6 +490,7 @@ function ScopedAssignmentControl({
     activeRequestIdRef.current = requestId;
     mutation.mutate({
       selected: proposal.selected,
+      source: proposal.source,
       submittedReason: reason.trim(),
       ticketNumber: ticket.number,
       expectedUpdatedAt: ticket.updated_at,
@@ -613,6 +645,16 @@ function ScopedAssignmentControl({
                 />
               </Field>
 
+              {proposal.source === "directory" && candidateError ? (
+                <Alert variant="destructive">
+                  <AlertCircle aria-hidden="true" />
+                  <AlertTitle>
+                    Eligible team member lookup unavailable
+                  </AlertTitle>
+                  <AlertDescription>{candidateError}</AlertDescription>
+                </Alert>
+              ) : null}
+
               {stale ? (
                 <Alert variant="destructive">
                   <AlertCircle aria-hidden="true" />
@@ -685,7 +727,7 @@ function ScopedAssignmentControl({
                 >
                   Cancel
                 </Button>
-                {stale || missing ? (
+                {stale || missing || selfProposalBlocked ? (
                   <Button type="button" disabled={disabled} onClick={onReload}>
                     Reload
                   </Button>
@@ -695,7 +737,7 @@ function ScopedAssignmentControl({
                     disabled={
                       disabled ||
                       !proposalAllowed ||
-                      directoryProposalBlocked ||
+                      proposalRecoveryBlocked ||
                       (reasonRequired && !reason.trim())
                     }
                   >

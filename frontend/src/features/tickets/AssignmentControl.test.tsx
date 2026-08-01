@@ -383,15 +383,20 @@ describe("internal ticket assignment", () => {
       await backgroundRefetch;
     });
 
+    const dialog = screen.getByRole("dialog");
+    const lookupAlert = await within(dialog).findByRole("alert");
     expect(
-      await screen.findByText(
+      within(lookupAlert).getByText("Eligible team member lookup unavailable"),
+    ).toBeVisible();
+    expect(
+      within(lookupAlert).getByText(
         "The eligible staff directory is temporarily unavailable. Reference: corr-candidates-background",
       ),
     ).toBeVisible();
     expect(confirm).toBeDisabled();
     fireEvent.click(confirm);
     expect(harness.assign).not.toHaveBeenCalled();
-    expect(screen.getByRole("dialog")).toHaveTextContent(
+    expect(dialog).toHaveTextContent(
       `New assignee: ${ACCOUNTANT.display_name}`,
     );
 
@@ -407,7 +412,7 @@ describe("internal ticket assignment", () => {
 
     await waitFor(() => expect(confirm).toBeEnabled());
     expect(
-      screen.queryByText(/corr-candidates-background/),
+      within(dialog).queryByText(/corr-candidates-background/),
     ).not.toBeInTheDocument();
   });
 
@@ -437,8 +442,9 @@ describe("internal ticket assignment", () => {
       });
     });
 
+    const dialog = screen.getByRole("dialog");
     expect(
-      await screen.findByText(
+      await within(dialog).findByText(
         "The eligible staff directory is temporarily unavailable. Reference: corr-candidates-unassign",
       ),
     ).toBeVisible();
@@ -1028,6 +1034,89 @@ describe("internal ticket assignment", () => {
     expect(harness.assign).toHaveBeenCalledWith(BASE_TICKET.number, {
       assignee_id: RECORDS_CLERK.id,
       expected_updated_at: BASE_TICKET.updated_at,
+      reason: "Pick up own queue work",
+    });
+  });
+
+  it("blocks an ineligible self-assignment until Reload yields a new authoritative ticket state", async () => {
+    const selfTicket = unassignedTicket({
+      can_assign: false,
+      can_self_assign: true,
+      self_assignee_id: RECORDS_CLERK.id,
+      self_assignee_detail: RECORDS_CLERK,
+    });
+    const refreshedTicket = {
+      ...selfTicket,
+      updated_at: "2026-07-30T10:45:00Z",
+    };
+    const assignedTicket = {
+      ...refreshedTicket,
+      assignee: RECORDS_CLERK.id,
+      assignee_detail: {
+        id: RECORDS_CLERK.id,
+        display_name: RECORDS_CLERK.display_name,
+      },
+    };
+    harness.assign
+      .mockRejectedValueOnce(
+        new ApiError(400, {
+          code: "invalid_assignment",
+          detail: "Your staff eligibility changed before assignment.",
+          fields: {
+            assignee_id: ["Reload this ticket before trying again."],
+          },
+          correlation_id: "corr-self-ineligible",
+        }),
+      )
+      .mockResolvedValueOnce(
+        responseWith(assignedTicket, {
+          ...RECEIPT,
+          previous_assignee: null,
+          new_assignee: RECORDS_CLERK,
+        }),
+      );
+    const user = userEvent.setup();
+    const { onReload, rerenderTicket } = renderControl(selfTicket);
+
+    await user.click(screen.getByRole("button", { name: "Self-assign" }));
+    const reason = screen.getByRole("textbox", { name: "Reason for transfer" });
+    await user.type(reason, "Pick up own queue work");
+    await user.click(screen.getByRole("button", { name: "Assign" }));
+
+    expect(
+      await screen.findByText("Selected staff member is no longer eligible"),
+    ).toBeVisible();
+    const dialog = screen.getByRole("dialog");
+    expect(dialog).toHaveTextContent(
+      `New assignee: ${RECORDS_CLERK.display_name}`,
+    );
+    expect(dialog).toHaveTextContent(
+      "Designation / team: Records Clerk · Records",
+    );
+    expect(reason).toHaveValue("Pick up own queue work");
+    expect(
+      screen.queryByRole("button", { name: "Assign" }),
+    ).not.toBeInTheDocument();
+    const reload = screen.getByRole("button", { name: "Reload" });
+    fireEvent.submit(dialog.querySelector("form") as HTMLFormElement);
+    expect(harness.assign).toHaveBeenCalledTimes(1);
+
+    await user.click(reload);
+    expect(onReload).toHaveBeenCalledTimes(1);
+    rerenderTicket(selfTicket);
+    expect(screen.getByRole("button", { name: "Reload" })).toBeVisible();
+    fireEvent.submit(dialog.querySelector("form") as HTMLFormElement);
+    expect(harness.assign).toHaveBeenCalledTimes(1);
+
+    rerenderTicket(refreshedTicket);
+    const retry = await screen.findByRole("button", { name: "Assign" });
+    expect(retry).toBeEnabled();
+    await user.click(retry);
+
+    await waitFor(() => expect(harness.assign).toHaveBeenCalledTimes(2));
+    expect(harness.assign).toHaveBeenLastCalledWith(BASE_TICKET.number, {
+      assignee_id: RECORDS_CLERK.id,
+      expected_updated_at: refreshedTicket.updated_at,
       reason: "Pick up own queue work",
     });
   });
