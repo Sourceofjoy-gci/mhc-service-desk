@@ -1,4 +1,4 @@
-import { fireEvent, screen, waitFor } from "@testing-library/react";
+import { act, fireEvent, screen, waitFor } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { useState } from "react";
 import { beforeEach, describe, expect, it, vi } from "vitest";
@@ -493,6 +493,143 @@ describe("server-driven ticket operations", () => {
       screen.queryByText("Next action needs more detail."),
     ).not.toBeInTheDocument();
     expect(screen.getByRole("button", { name: "Save" })).toBeDisabled();
+  });
+
+  it("ignores a successful work-state response after navigation changes ticket scope", async () => {
+    const pending = deferred<TicketDetail>();
+    const ticketB = {
+      ...TICKET,
+      id: "ticket-2",
+      number: "MHC-2026-000002",
+      team: "Records",
+      next_action: "Index the second ticket",
+      updated_at: "2026-07-27T11:00:00Z",
+    };
+    const lateTicketA = {
+      ...TICKET,
+      team: "Late A response",
+      next_action: "Never show this A action",
+      updated_at: "2026-07-27T11:01:00Z",
+    };
+    harness.updateWorkState.mockReturnValue(pending.promise);
+    const onUpdated = vi.fn();
+    const onReload = vi.fn();
+    const onActivityChanged = vi.fn();
+    const user = userEvent.setup();
+    const result = renderWithProviders(
+      <OperationsPanel
+        ticket={TICKET}
+        onUpdated={onUpdated}
+        onReload={onReload}
+        onActivityChanged={onActivityChanged}
+      />,
+    );
+
+    await user.clear(screen.getByRole("textbox", { name: "Team" }));
+    await user.type(
+      screen.getByRole("textbox", { name: "Team" }),
+      "Submitted A edit",
+    );
+    await user.click(screen.getByRole("button", { name: "Save" }));
+    await waitFor(() =>
+      expect(harness.updateWorkState).toHaveBeenCalledTimes(1),
+    );
+
+    result.rerender(
+      <OperationsPanel
+        ticket={ticketB}
+        onUpdated={onUpdated}
+        onReload={onReload}
+        onActivityChanged={onActivityChanged}
+      />,
+    );
+    await waitFor(() =>
+      expect(screen.getByRole("textbox", { name: "Team" })).toHaveValue(
+        ticketB.team,
+      ),
+    );
+
+    await act(async () => pending.resolve(lateTicketA));
+
+    expect(screen.getByRole("textbox", { name: "Team" })).toHaveValue(
+      ticketB.team,
+    );
+    expect(screen.getByRole("textbox", { name: "Next action" })).toHaveValue(
+      ticketB.next_action,
+    );
+    expect(
+      screen.queryByDisplayValue(lateTicketA.team),
+    ).not.toBeInTheDocument();
+    expect(
+      screen.queryByDisplayValue(lateTicketA.next_action),
+    ).not.toBeInTheDocument();
+    expect(screen.getByRole("button", { name: "Save" })).toBeDisabled();
+    expect(onUpdated).not.toHaveBeenCalled();
+    expect(onActivityChanged).not.toHaveBeenCalled();
+  });
+
+  it("does not leak a late work-state error into the next ticket", async () => {
+    const pending = deferred<TicketDetail>();
+    const ticketB = {
+      ...TICKET,
+      id: "ticket-2",
+      number: "MHC-2026-000002",
+      team: "Records",
+      next_action: "Index the second ticket",
+      updated_at: "2026-07-27T11:00:00Z",
+    };
+    harness.updateWorkState.mockReturnValue(pending.promise);
+    const onUpdated = vi.fn();
+    const onReload = vi.fn();
+    const user = userEvent.setup();
+    const result = renderWithProviders(
+      <OperationsPanel
+        ticket={TICKET}
+        onUpdated={onUpdated}
+        onReload={onReload}
+      />,
+    );
+
+    await user.clear(screen.getByRole("textbox", { name: "Team" }));
+    await user.type(
+      screen.getByRole("textbox", { name: "Team" }),
+      "Submitted A edit",
+    );
+    await user.click(screen.getByRole("button", { name: "Save" }));
+    await waitFor(() =>
+      expect(harness.updateWorkState).toHaveBeenCalledTimes(1),
+    );
+    result.rerender(
+      <OperationsPanel
+        ticket={ticketB}
+        onUpdated={onUpdated}
+        onReload={onReload}
+      />,
+    );
+
+    await act(async () =>
+      pending.reject(
+        new ApiError(400, {
+          code: "invalid_work_state",
+          detail: "Ticket A failed after navigation.",
+          fields: { team: ["Ticket A team is invalid."] },
+          correlation_id: "corr-late-ticket-a",
+        }),
+      ),
+    );
+
+    expect(screen.getByRole("textbox", { name: "Team" })).toHaveValue(
+      ticketB.team,
+    );
+    expect(
+      screen.queryByText("Ticket A failed after navigation."),
+    ).not.toBeInTheDocument();
+    expect(
+      screen.queryByText("Ticket A team is invalid."),
+    ).not.toBeInTheDocument();
+    expect(screen.queryByText(/corr-late-ticket-a/)).not.toBeInTheDocument();
+    expect(screen.getByRole("button", { name: "Save" })).toBeDisabled();
+    expect(onUpdated).not.toHaveBeenCalled();
   });
 
   it("does not infer elevated controls when capability flags deny them", () => {

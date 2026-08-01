@@ -166,6 +166,15 @@ function ReadOnlyValue({
 
 export function OperationsPanel({
   ticket,
+  ...callbacks
+}: OperationsPanelProps) {
+  return (
+    <ScopedOperationsPanel key={ticket.number} ticket={ticket} {...callbacks} />
+  );
+}
+
+function ScopedOperationsPanel({
+  ticket,
   onUpdated,
   onReload,
   onActivityChanged,
@@ -175,15 +184,30 @@ export function OperationsPanel({
   );
   const { values, dirty } = form;
   const inFlight = useRef(false);
+  const scopeActive = useRef(true);
+  const scopeTicketNumber = useRef(ticket.number);
   const observedTicket = useRef({
     number: ticket.number,
     updatedAt: ticket.updated_at,
   });
 
+  useEffect(() => {
+    scopeActive.current = true;
+    return () => {
+      scopeActive.current = false;
+    };
+  }, []);
+
   const update = useMutation({
     mutationFn: (payload: TicketWorkStateUpdate) =>
       ticketsApi.updateWorkState(ticket.number, payload),
     onSuccess: async (refreshedTicket) => {
+      if (
+        !scopeActive.current ||
+        refreshedTicket.number !== scopeTicketNumber.current
+      ) {
+        return;
+      }
       const refreshedValues = valuesFromTicket(refreshedTicket);
       dispatch({
         type: "replace",
@@ -194,12 +218,15 @@ export function OperationsPanel({
       await onActivityChanged?.();
     },
     onSettled: () => {
-      inFlight.current = false;
+      if (scopeActive.current) inFlight.current = false;
     },
   });
   const updateError = useRef(update.error);
-  updateError.current = update.error;
   const resetUpdate = update.reset;
+
+  useEffect(() => {
+    updateError.current = update.error;
+  }, [update.error]);
 
   useEffect(() => {
     const previous = observedTicket.current;
