@@ -98,11 +98,301 @@ const ITEMS: ActivityItem[] = [
   },
 ];
 
+const COMPLETE_CUSTODY_ITEMS: ActivityItem[] = [
+  {
+    id: "custody:created",
+    type: "custody_event",
+    category: "custody",
+    occurred_at: "2026-07-27T08:00:00Z",
+    actor: { subject: "ticket-intake", display_name: "Ticket intake" },
+    visibility: "internal",
+    payload: {
+      action: "created",
+      previous_owner: null,
+      new_owner: null,
+      previous_queue: null,
+      new_queue: null,
+      previous_status: null,
+      new_status: { code: "new", label: "New" },
+      actor_kind: "system",
+      source_process: "ticket.intake",
+      reason: "Online submission received",
+    },
+  },
+  ITEMS[0],
+  ITEMS[1],
+  {
+    id: "custody:assigned",
+    type: "custody_event",
+    category: "custody",
+    occurred_at: "2026-07-27T08:03:00Z",
+    actor: { subject: "master-1", display_name: "Master Dlamini" },
+    visibility: "internal",
+    payload: {
+      action: "assigned",
+      previous_owner: null,
+      new_owner: {
+        id: "staff-1",
+        display_name: "Lindiwe Khumalo",
+        designations: ["Estate Examiner"],
+        team_labels: ["Estate Administration"],
+      },
+      previous_queue: null,
+      new_queue: null,
+      previous_status: null,
+      new_status: null,
+      actor_kind: "user",
+      source_process: "ticket.assignment",
+      reason: "Allocate for examination",
+    },
+  },
+  {
+    id: "custody:queue",
+    type: "custody_event",
+    category: "custody",
+    occurred_at: "2026-07-27T08:04:00Z",
+    actor: { subject: "master-1", display_name: "Master Dlamini" },
+    visibility: "internal",
+    payload: {
+      action: "queue_changed",
+      previous_owner: null,
+      new_owner: null,
+      previous_queue: { id: "queue-intake", label: "Intake" },
+      new_queue: { id: "queue-estates", label: "Estates examination" },
+      previous_status: null,
+      new_status: null,
+      actor_kind: "user",
+      source_process: "ticket.routing",
+      reason: "Route to the examining queue",
+    },
+  },
+  {
+    id: "custody:reassigned",
+    type: "custody_event",
+    category: "custody",
+    occurred_at: "2026-07-27T08:05:00Z",
+    actor: { subject: "deputy-master-1", display_name: "Deputy Master Naidoo" },
+    visibility: "internal",
+    payload: {
+      action: "reassigned",
+      previous_owner: {
+        id: "staff-1",
+        display_name: "Lindiwe Khumalo",
+        designations: ["Estate Examiner"],
+        team_labels: ["Estate Administration"],
+      },
+      new_owner: {
+        id: "staff-2",
+        display_name: "Thandi Mokoena",
+        designations: ["Senior Accountant"],
+        team_labels: ["Finance"],
+      },
+      previous_queue: null,
+      new_queue: null,
+      previous_status: null,
+      new_status: null,
+      actor_kind: "user",
+      source_process: "ticket.assignment",
+      reason: "Financial review required",
+    },
+  },
+  {
+    id: "custody:escalated",
+    type: "custody_event",
+    category: "custody",
+    occurred_at: "2026-07-27T08:06:00Z",
+    actor: { subject: "sla-monitor", display_name: "SLA monitor" },
+    visibility: "internal",
+    payload: {
+      action: "escalated",
+      previous_owner: null,
+      new_owner: null,
+      previous_queue: null,
+      new_queue: null,
+      previous_status: null,
+      new_status: null,
+      actor_kind: "system",
+      source_process: "sla.monitor",
+      reason: "Resolution SLA at risk",
+    },
+  },
+  {
+    id: "custody:status",
+    type: "status_transition",
+    category: "workflow",
+    occurred_at: "2026-07-27T08:07:00Z",
+    actor: { subject: "staff-2", display_name: "Thandi Mokoena" },
+    visibility: "internal",
+    payload: {
+      action: "status_changed",
+      from: "triage",
+      to: "in_progress",
+      reason: "Examination started",
+    },
+  },
+  {
+    id: "custody:unassigned",
+    type: "custody_event",
+    category: "custody",
+    occurred_at: "2026-07-27T08:08:00Z",
+    actor: { subject: "deputy-master-1", display_name: "Deputy Master Naidoo" },
+    visibility: "internal",
+    payload: {
+      action: "unassigned",
+      previous_owner: {
+        id: "staff-2",
+        display_name: "Thandi Mokoena",
+        designations: ["Senior Accountant"],
+        team_labels: ["Finance"],
+      },
+      new_owner: null,
+      previous_queue: null,
+      new_queue: null,
+      previous_status: null,
+      new_status: null,
+      actor_kind: "user",
+      source_process: "ticket.assignment",
+      reason: "Return to the team queue",
+    },
+  },
+  {
+    id: "custody:reopened",
+    type: "status_transition",
+    category: "workflow",
+    occurred_at: "2026-07-27T08:09:00Z",
+    actor: { subject: "records-clerk-1", display_name: "Records Clerk Maseko" },
+    visibility: "internal",
+    payload: {
+      action: "reopened",
+      from: "resolved",
+      to: "reopened",
+      reason: "New records received",
+    },
+  },
+  {
+    id: "custody:closed",
+    type: "status_transition",
+    category: "workflow",
+    occurred_at: "2026-07-27T08:10:00Z",
+    actor: { subject: "master-1", display_name: "Master Dlamini" },
+    visibility: "internal",
+    payload: {
+      action: "closed",
+      from: "resolved",
+      to: "closed",
+      reason: "Matter completed",
+    },
+  },
+];
+
 beforeEach(() => {
   harness.activity.mockReset();
 });
 
 describe("typed ticket activity", () => {
+  it("renders the complete creation-to-closure custody history in API order", async () => {
+    harness.activity.mockResolvedValue({ results: COMPLETE_CUSTODY_ITEMS });
+
+    renderWithProviders(<ActivityTimeline ticketNumber="MHC-2026-000001" />);
+
+    const timeline = await screen.findByRole("list", {
+      name: "Ticket activity",
+    });
+    const entries = within(timeline).getAllByRole("listitem");
+    expect(entries).toHaveLength(11);
+    expect(entries.map((entry) => entry.textContent)).toEqual([
+      expect.stringContaining("Ticket created"),
+      expect.stringContaining("Requester-visible update"),
+      expect.stringContaining("Internal investigation detail"),
+      expect.stringContaining("Assigned"),
+      expect.stringContaining("Queue changed"),
+      expect.stringContaining("Reassigned"),
+      expect.stringContaining("Escalated"),
+      expect.stringContaining("Status changed"),
+      expect.stringContaining("Unassigned"),
+      expect.stringContaining("Ticket reopened"),
+      expect.stringContaining("Ticket closed"),
+    ]);
+
+    expect(screen.getByText("Visible to requester")).toBeVisible();
+    expect(screen.getByText("Internal only")).toBeVisible();
+    expect(screen.getAllByText("Workflow")).toHaveLength(3);
+    expect(screen.getAllByText("Chain of custody")).toHaveLength(6);
+
+    expect(
+      screen.getByText(
+        "Owner: Unassigned → Lindiwe Khumalo (Estate Examiner · Estate Administration)",
+      ),
+    ).toBeVisible();
+    expect(
+      screen.getByText(
+        "Owner: Lindiwe Khumalo (Estate Examiner · Estate Administration) → Thandi Mokoena (Senior Accountant · Finance)",
+      ),
+    ).toBeVisible();
+    expect(
+      screen.getByText(
+        "Owner: Thandi Mokoena (Senior Accountant · Finance) → Unassigned",
+      ),
+    ).toBeVisible();
+    expect(
+      screen.getByText("Queue: Intake → Estates examination"),
+    ).toBeVisible();
+    expect(screen.getByText("Status: Triage → In progress")).toBeVisible();
+    expect(screen.getByText("Status: Resolved → Reopened")).toBeVisible();
+    expect(screen.getByText("Status: Resolved → Closed")).toBeVisible();
+
+    expect(screen.getByText("System process: ticket.intake")).toBeVisible();
+    expect(screen.getByText("System process: sla.monitor")).toBeVisible();
+    for (const reason of [
+      "Online submission received",
+      "Allocate for examination",
+      "Route to the examining queue",
+      "Financial review required",
+      "Resolution SLA at risk",
+      "Examination started",
+      "Return to the team queue",
+      "New records received",
+      "Matter completed",
+    ]) {
+      expect(screen.getByText(reason)).toBeVisible();
+    }
+    const timestamps = within(timeline).getAllByRole("time");
+    expect(timestamps).toHaveLength(11);
+    for (const timestamp of timestamps) {
+      expect(timestamp).not.toBeEmptyDOMElement();
+    }
+    for (const [articleName, actorName] of [
+      ["Custody event: Ticket created", "Ticket intake"],
+      ["Custody event: Assigned", "Master Dlamini"],
+      ["Custody event: Queue changed", "Master Dlamini"],
+      ["Custody event: Reassigned", "Deputy Master Naidoo"],
+      ["Custody event: Escalated", "SLA monitor"],
+      ["Custody event: Unassigned", "Deputy Master Naidoo"],
+      ["Workflow event: Status changed", "Thandi Mokoena"],
+    ]) {
+      expect(
+        within(screen.getByRole("article", { name: articleName })).getByText(
+          actorName,
+        ),
+      ).toBeVisible();
+    }
+    expect(
+      screen.getByRole("article", {
+        name: "Workflow event: Ticket reopened",
+      }),
+    ).toHaveTextContent("Records Clerk Maseko");
+    expect(
+      screen.getByRole("article", {
+        name: "Workflow event: Ticket closed",
+      }),
+    ).toHaveTextContent("Master Dlamini");
+
+    // The backend presents custody-backed status facts as workflow entries;
+    // they must not be duplicated as generic custody cards.
+    expect(screen.getAllByText("Ticket reopened")).toHaveLength(1);
+    expect(screen.getAllByText("Ticket closed")).toHaveLength(1);
+  });
+
   it("renders every supported activity type oldest first without raw payloads", async () => {
     harness.activity.mockResolvedValue({ results: ITEMS });
 
@@ -116,7 +406,7 @@ describe("typed ticket activity", () => {
     expect(entries.map((entry) => entry.textContent)).toEqual([
       expect.stringContaining("Requester-visible update"),
       expect.stringContaining("Internal investigation detail"),
-      expect.stringContaining("Triage to In progress"),
+      expect.stringContaining("Status: Triage → In progress"),
       expect.stringContaining("Team changed from Intake to Estates"),
       expect.stringContaining("evidence.pdf"),
       expect.stringContaining("MHC-2026-000099"),
@@ -130,6 +420,9 @@ describe("typed ticket activity", () => {
     ).toHaveAttribute("data-visibility", "internal");
     expect(screen.getByText("Visible to requester")).toBeVisible();
     expect(screen.getByText("Internal only")).toBeVisible();
+    expect(screen.getAllByText("Workflow")).toHaveLength(2);
+    expect(screen.getByText("Attachment")).toBeVisible();
+    expect(screen.getByText("Relationship")).toBeVisible();
 
     expect(screen.getByText("Started")).toBeVisible();
     expect(
@@ -204,6 +497,44 @@ describe("typed ticket activity", () => {
     renderWithProviders(<ActivityTimeline ticketNumber="MHC-2026-000001" />);
 
     expect(await screen.findByText("Reassigned")).toBeVisible();
+  });
+
+  it("safely parses malformed custody records and string arrays", async () => {
+    const custody: ActivityItem = {
+      id: "custody:malformed",
+      type: "custody_event",
+      category: "custody",
+      occurred_at: "2026-07-27T08:06:00Z",
+      actor: null,
+      visibility: "internal",
+      payload: {
+        action: ["reassigned"],
+        previous_owner: "not-an-owner",
+        new_owner: {
+          id: "staff-safe",
+          display_name: "Safe Owner",
+          designations: ["Accountant", 42, ""],
+          team_labels: [null, "Finance"],
+        },
+        previous_queue: [],
+        new_queue: { id: "queue-finance", label: "Finance review" },
+        actor_kind: "robot",
+        source_process: { unsafe: true },
+        reason: ["not text"],
+      },
+    };
+    harness.activity.mockResolvedValue({ results: [custody] });
+
+    renderWithProviders(<ActivityTimeline ticketNumber="MHC-2026-000001" />);
+
+    expect(await screen.findByText("Recorded")).toBeVisible();
+    expect(
+      screen.getByText("Owner: Unassigned → Safe Owner (Accountant · Finance)"),
+    ).toBeVisible();
+    expect(screen.getByText("Chain of custody")).toBeVisible();
+    expect(screen.getByText("Queue: Not set → Finance review")).toBeVisible();
+    expect(screen.queryByText(/unsafe/i)).not.toBeInTheDocument();
+    expect(screen.queryByText("not text")).not.toBeInTheDocument();
   });
 
   it("shows a distinct loading state", () => {

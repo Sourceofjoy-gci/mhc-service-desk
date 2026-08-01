@@ -172,6 +172,27 @@ const INITIAL_ACTIVITY: ActivityItem = {
   },
 };
 
+const CREATED_CUSTODY_ACTIVITY: ActivityItem = {
+  id: "custody:created",
+  type: "custody_event",
+  category: "custody",
+  occurred_at: "2026-07-27T08:00:00Z",
+  actor: { subject: "ticket-intake", display_name: "Ticket intake" },
+  visibility: "internal",
+  payload: {
+    action: "created",
+    previous_owner: null,
+    new_owner: null,
+    previous_queue: null,
+    new_queue: null,
+    previous_status: null,
+    new_status: { code: "new", label: "New" },
+    actor_kind: "system",
+    source_process: "ticket.intake",
+    reason: "Online submission received",
+  },
+};
+
 const NEW_ASSIGNEE: TicketAssignee = {
   id: "agent-2",
   username: "thandi.mokoena",
@@ -276,6 +297,23 @@ beforeEach(() => {
 });
 
 describe("ticket operator workspace", () => {
+  it("renders the internal custody category and system provenance on ticket detail", async () => {
+    harness.activity.mockResolvedValue({
+      results: [CREATED_CUSTODY_ACTIVITY],
+    });
+
+    renderDetail();
+
+    expect(
+      await screen.findByRole("article", {
+        name: "Custody event: Ticket created",
+      }),
+    ).toBeVisible();
+    expect(screen.getByText("Chain of custody")).toBeVisible();
+    expect(screen.getByText("System process: ticket.intake")).toBeVisible();
+    expect(screen.getByText("Online submission received")).toBeVisible();
+  });
+
   it("renders the lifecycle workspace in action-first mobile order with preserved context", async () => {
     renderDetail();
 

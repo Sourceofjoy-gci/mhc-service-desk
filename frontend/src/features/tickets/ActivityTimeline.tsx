@@ -8,7 +8,13 @@ import {
   EmptyTitle,
 } from "@/components/ui/empty";
 import { Spinner } from "@/components/ui/spinner";
-import { ApiError, apiProblem, type ActivityItem, ticketsApi } from "@/lib/api";
+import {
+  ApiError,
+  apiProblem,
+  type ActivityItem,
+  type AssignmentParty,
+  ticketsApi,
+} from "@/lib/api";
 
 interface ActivityTimelineProps {
   ticketNumber: string;
@@ -21,7 +27,12 @@ interface ActivityPayloads {
     delivery_status: string;
   };
   internal_note: { body: string };
-  status_transition: { from: string; to: string; reason: string };
+  status_transition: {
+    action: string;
+    from: string;
+    to: string;
+    reason: string;
+  };
   work_state: {
     before: Record<string, unknown>;
     after: Record<string, unknown>;
@@ -32,7 +43,18 @@ interface ActivityPayloads {
     ticket_number: string;
     direction: string;
   };
-  custody_event: Record<string, unknown>;
+  custody_event: {
+    action: string;
+    previous_owner: AssignmentParty | null;
+    new_owner: AssignmentParty | null;
+    previous_queue: { id: string; label: string } | null;
+    new_queue: { id: string; label: string } | null;
+    previous_status: { code: string; label: string } | null;
+    new_status: { code: string; label: string } | null;
+    actor_kind: "user" | "system";
+    source_process: string;
+    reason: string;
+  };
 }
 
 type TypedActivityItem = {
@@ -52,8 +74,56 @@ function record(value: unknown): Record<string, unknown> {
     : {};
 }
 
+function nullableRecord(value: unknown): Record<string, unknown> | null {
+  return typeof value === "object" && value !== null && !Array.isArray(value)
+    ? (value as Record<string, unknown>)
+    : null;
+}
+
 function text(value: unknown, fallback = "Not provided"): string {
   return typeof value === "string" && value.trim() ? value : fallback;
+}
+
+function strings(value: unknown): string[] {
+  return Array.isArray(value)
+    ? value.filter(
+        (entry): entry is string =>
+          typeof entry === "string" && Boolean(entry.trim()),
+      )
+    : [];
+}
+
+function assignmentParty(value: unknown): AssignmentParty | null {
+  const party = nullableRecord(value);
+  if (!party) return null;
+  return {
+    id: text(party.id, ""),
+    display_name: text(party.display_name, "Unknown owner"),
+    designations: strings(party.designations),
+    team_labels: strings(party.team_labels),
+  };
+}
+
+function queue(value: unknown): { id: string; label: string } | null {
+  const queueRecord = nullableRecord(value);
+  if (!queueRecord) return null;
+  return {
+    id: text(queueRecord.id, ""),
+    label: text(queueRecord.label, "Unknown queue"),
+  };
+}
+
+function status(value: unknown): { code: string; label: string } | null {
+  const statusRecord = nullableRecord(value);
+  if (!statusRecord) return null;
+  return {
+    code: text(statusRecord.code, "unknown"),
+    label: text(statusRecord.label, "Unknown status"),
+  };
+}
+
+function actorKind(value: unknown): "user" | "system" {
+  return value === "system" ? "system" : "user";
 }
 
 function typedActivity(item: ActivityItem): TypedActivityItem {
@@ -80,9 +150,10 @@ function typedActivity(item: ActivityItem): TypedActivityItem {
         ...item,
         type: "status_transition",
         payload: {
+          action: text(payload.action, "status_changed"),
           from: text(payload.from, "unknown"),
           to: text(payload.to, "unknown"),
-          reason: text(payload.reason, "No reason recorded"),
+          reason: text(payload.reason, ""),
         },
       };
     case "work_state":
@@ -117,7 +188,18 @@ function typedActivity(item: ActivityItem): TypedActivityItem {
       return {
         ...item,
         type: "custody_event",
-        payload,
+        payload: {
+          action: text(payload.action, "recorded"),
+          previous_owner: assignmentParty(payload.previous_owner),
+          new_owner: assignmentParty(payload.new_owner),
+          previous_queue: queue(payload.previous_queue),
+          new_queue: queue(payload.new_queue),
+          previous_status: status(payload.previous_status),
+          new_status: status(payload.new_status),
+          actor_kind: actorKind(payload.actor_kind),
+          source_process: text(payload.source_process, ""),
+          reason: text(payload.reason, ""),
+        },
       };
     default:
       return assertNever(item.type);
@@ -143,11 +225,15 @@ function displayValue(value: unknown): string {
 function ActivityFrame({
   item,
   label,
+  category,
+  categoryClassName,
   children,
   className = "",
 }: {
   item: TypedActivityItem;
   label: string;
+  category: string;
+  categoryClassName: string;
   children: React.ReactNode;
   className?: string;
 }) {
@@ -157,6 +243,13 @@ function ActivityFrame({
       data-visibility={item.visibility}
       className={`border-l-2 py-3 pl-4 ${className}`}
     >
+      <div className="mb-2">
+        <span
+          className={`inline-flex rounded-full border px-2 py-0.5 text-[11px] font-medium ${categoryClassName}`}
+        >
+          {category}
+        </span>
+      </div>
       {children}
       <footer className="mt-3 flex flex-wrap items-center gap-x-2 text-xs text-muted-foreground">
         <span>{item.actor?.display_name ?? "System"}</span>
@@ -181,14 +274,11 @@ function MessageActivity({
     <ActivityFrame
       item={item}
       label="Requester-visible message"
+      category="Visible to requester"
+      categoryClassName="border-sky-300/70 bg-sky-100/70 text-sky-800 dark:border-sky-700 dark:bg-sky-950/50 dark:text-sky-300"
       className="border-l-sky-500 bg-sky-50/60 pr-3 dark:bg-sky-950/20"
     >
-      <div className="flex flex-wrap items-center justify-between gap-2">
-        <h3 className="font-medium">Message</h3>
-        <span className="text-xs font-medium text-sky-700 dark:text-sky-300">
-          Visible to requester
-        </span>
-      </div>
+      <h3 className="font-medium">Message</h3>
       <p className="mt-2 whitespace-pre-wrap text-sm">
         {item.payload.body_text}
       </p>
@@ -209,14 +299,11 @@ function NoteActivity({
     <ActivityFrame
       item={item}
       label="Internal note"
+      category="Internal only"
+      categoryClassName="border-amber-300/70 bg-amber-100/70 text-amber-900 dark:border-amber-700 dark:bg-amber-950/50 dark:text-amber-300"
       className="border-l-amber-500 bg-amber-50/60 pr-3 dark:bg-amber-950/20"
     >
-      <div className="flex flex-wrap items-center justify-between gap-2">
-        <h3 className="font-medium">Internal note</h3>
-        <span className="text-xs font-medium text-amber-800 dark:text-amber-300">
-          Internal only
-        </span>
-      </div>
+      <h3 className="font-medium">Internal note</h3>
       <p className="mt-2 whitespace-pre-wrap text-sm">{item.payload.body}</p>
     </ActivityFrame>
   );
@@ -227,19 +314,29 @@ function TransitionActivity({
 }: {
   item: Extract<TypedActivityItem, { type: "status_transition" }>;
 }) {
+  const actionLabel =
+    item.payload.action === "reopened" || item.payload.to === "reopened"
+      ? "Ticket reopened"
+      : item.payload.action === "closed" || item.payload.to === "closed"
+        ? "Ticket closed"
+        : "Status changed";
   return (
     <ActivityFrame
       item={item}
-      label="Status transition"
+      label={`Workflow event: ${actionLabel}`}
+      category="Workflow"
+      categoryClassName="border-primary/30 bg-primary/5 text-primary"
       className="border-l-primary"
     >
-      <h3 className="font-medium">Status changed</h3>
+      <h3 className="font-medium">{actionLabel}</h3>
       <p className="mt-1 text-sm">
-        {humanize(item.payload.from)} to {humanize(item.payload.to)}
+        Status: {humanize(item.payload.from)} → {humanize(item.payload.to)}
       </p>
-      <p className="mt-1 text-sm text-muted-foreground">
-        {item.payload.reason}
-      </p>
+      {item.payload.reason ? (
+        <p className="mt-1 text-sm text-muted-foreground">
+          {item.payload.reason}
+        </p>
+      ) : null}
     </ActivityFrame>
   );
 }
@@ -263,6 +360,8 @@ function WorkStateActivity({
     <ActivityFrame
       item={item}
       label="Work state change"
+      category="Workflow"
+      categoryClassName="border-primary/30 bg-primary/5 text-primary"
       className="border-l-slate-400"
     >
       <h3 className="font-medium">Work state updated</h3>
@@ -294,6 +393,8 @@ function AttachmentActivity({
     <ActivityFrame
       item={item}
       label="Attachment added"
+      category="Attachment"
+      categoryClassName="border-violet-300/70 bg-violet-50 text-violet-800 dark:border-violet-800 dark:bg-violet-950/30 dark:text-violet-300"
       className="border-l-violet-400"
     >
       <h3 className="font-medium">Attachment added</h3>
@@ -314,6 +415,8 @@ function RelationshipActivity({
     <ActivityFrame
       item={item}
       label="Ticket relationship"
+      category="Relationship"
+      categoryClassName="border-slate-300 bg-slate-50 text-slate-700 dark:border-slate-700 dark:bg-slate-900/40 dark:text-slate-300"
       className="border-l-emerald-500"
     >
       <h3 className="font-medium">Ticket relationship added</h3>
@@ -335,16 +438,74 @@ function CustodyActivity({
 }: {
   item: Extract<TypedActivityItem, { type: "custody_event" }>;
 }) {
+  const actionLabels: Record<string, string> = {
+    created: "Ticket created",
+    assigned: "Assigned",
+    reassigned: "Reassigned",
+    unassigned: "Unassigned",
+    queue_changed: "Queue changed",
+    escalated: "Escalated",
+  };
+  const actionLabel =
+    actionLabels[item.payload.action] ?? humanize(item.payload.action);
+  const ownerActions = new Set(["assigned", "reassigned", "unassigned"]);
+  const showsOwner =
+    ownerActions.has(item.payload.action) ||
+    item.payload.previous_owner !== null ||
+    item.payload.new_owner !== null;
+  const showsQueue =
+    item.payload.action === "queue_changed" ||
+    item.payload.previous_queue !== null ||
+    item.payload.new_queue !== null;
+  const showsStatus =
+    item.payload.previous_status !== null || item.payload.new_status !== null;
+
+  const ownerLabel = (owner: AssignmentParty | null) => {
+    if (!owner) return "Unassigned";
+    const context = [...new Set([...owner.designations, ...owner.team_labels])];
+    return context.length
+      ? `${owner.display_name} (${context.join(" · ")})`
+      : owner.display_name;
+  };
   return (
     <ActivityFrame
       item={item}
-      label="Custody event"
-      className="border-l-emerald-500"
+      label={`Custody event: ${actionLabel}`}
+      category="Chain of custody"
+      categoryClassName="border-emerald-300/70 bg-emerald-50 text-emerald-800 dark:border-emerald-800 dark:bg-emerald-950/30 dark:text-emerald-300"
+      className="border-l-emerald-500 bg-slate-50/40 pr-3 dark:bg-slate-950/20"
     >
-      <h3 className="font-medium">Custody event</h3>
-      <p className="mt-1 text-sm">
-        {humanize(text(item.payload.action, "Recorded"))}
-      </p>
+      <h3 className="font-medium">{actionLabel}</h3>
+      <div className="mt-2 space-y-1 text-sm">
+        {showsOwner ? (
+          <p>
+            Owner: {ownerLabel(item.payload.previous_owner)} →{" "}
+            {ownerLabel(item.payload.new_owner)}
+          </p>
+        ) : null}
+        {showsQueue ? (
+          <p>
+            Queue: {item.payload.previous_queue?.label ?? "Not set"} →{" "}
+            {item.payload.new_queue?.label ?? "Not set"}
+          </p>
+        ) : null}
+        {showsStatus ? (
+          <p>
+            Status: {item.payload.previous_status?.label ?? "Not set"} →{" "}
+            {item.payload.new_status?.label ?? "Not set"}
+          </p>
+        ) : null}
+      </div>
+      {item.payload.actor_kind === "system" && item.payload.source_process ? (
+        <p className="mt-2 text-xs font-medium text-emerald-800 dark:text-emerald-300">
+          System process: {item.payload.source_process}
+        </p>
+      ) : null}
+      {item.payload.reason ? (
+        <p className="mt-2 text-sm text-muted-foreground">
+          {item.payload.reason}
+        </p>
+      ) : null}
     </ActivityFrame>
   );
 }
