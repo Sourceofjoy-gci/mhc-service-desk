@@ -537,6 +537,71 @@ describe("typed ticket activity", () => {
     expect(screen.queryByText("not text")).not.toBeInTheDocument();
   });
 
+  it("falls back safely when a custody actor contains nested fields", async () => {
+    const custody: ActivityItem = {
+      id: "custody:nested-actor",
+      type: "custody_event",
+      category: "custody",
+      occurred_at: "2026-07-27T08:07:00Z",
+      actor: {
+        subject: { nested: "unsafe-subject" },
+        display_name: ["unsafe-name"],
+      } as unknown as ActivityItem["actor"],
+      visibility: "internal",
+      payload: {
+        action: "escalated",
+        actor_kind: "system",
+        source_process: "sla.monitor",
+        reason: "SLA threshold reached",
+      },
+    };
+    harness.activity.mockResolvedValue({ results: [custody] });
+
+    renderWithProviders(<ActivityTimeline ticketNumber="MHC-2026-000001" />);
+
+    const article = await screen.findByRole("article", {
+      name: "Custody event: Escalated",
+    });
+    expect(within(article).getByText("System")).toBeVisible();
+    expect(
+      within(article).getByText("System process: sla.monitor"),
+    ).toBeVisible();
+    expect(article).not.toHaveTextContent("[object Object]");
+    expect(article).not.toHaveTextContent("unsafe-subject");
+    expect(article).not.toHaveTextContent("unsafe-name");
+  });
+
+  it("falls back safely when a message actor contains nested fields", async () => {
+    const message: ActivityItem = {
+      id: "message:nested-actor",
+      type: "message",
+      category: "public_reply",
+      occurred_at: "2026-07-27T08:08:00Z",
+      actor: {
+        subject: ["unsafe-subject"],
+        display_name: { nested: "unsafe-name" },
+      } as unknown as ActivityItem["actor"],
+      visibility: "requester",
+      payload: {
+        body_text: "Safe requester update",
+        direction: "outbound",
+        delivery_status: "sent",
+      },
+    };
+    harness.activity.mockResolvedValue({ results: [message] });
+
+    renderWithProviders(<ActivityTimeline ticketNumber="MHC-2026-000001" />);
+
+    const article = await screen.findByRole("article", {
+      name: "Requester-visible message",
+    });
+    expect(within(article).getByText("System")).toBeVisible();
+    expect(within(article).getByText("Visible to requester")).toBeVisible();
+    expect(article).not.toHaveTextContent("[object Object]");
+    expect(article).not.toHaveTextContent("unsafe-subject");
+    expect(article).not.toHaveTextContent("unsafe-name");
+  });
+
   it("shows a distinct loading state", () => {
     harness.activity.mockReturnValue(new Promise(() => undefined));
 

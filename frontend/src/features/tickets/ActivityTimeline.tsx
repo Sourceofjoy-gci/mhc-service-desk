@@ -126,12 +126,21 @@ function actorKind(value: unknown): "user" | "system" {
   return value === "system" ? "system" : "user";
 }
 
+function activityActor(value: unknown): ActivityItem["actor"] {
+  const actor = nullableRecord(value);
+  if (!actor) return null;
+  const subject = text(actor.subject, "");
+  const displayName = text(actor.display_name, subject);
+  return displayName ? { subject, display_name: displayName } : null;
+}
+
 function typedActivity(item: ActivityItem): TypedActivityItem {
   const payload = record(item.payload);
+  const safeItem = { ...item, actor: activityActor(item.actor) };
   switch (item.type) {
     case "message":
       return {
-        ...item,
+        ...safeItem,
         type: "message",
         payload: {
           body_text: text(payload.body_text),
@@ -141,13 +150,13 @@ function typedActivity(item: ActivityItem): TypedActivityItem {
       };
     case "internal_note":
       return {
-        ...item,
+        ...safeItem,
         type: "internal_note",
         payload: { body: text(payload.body) },
       };
     case "status_transition":
       return {
-        ...item,
+        ...safeItem,
         type: "status_transition",
         payload: {
           action: text(payload.action, "status_changed"),
@@ -158,7 +167,7 @@ function typedActivity(item: ActivityItem): TypedActivityItem {
       };
     case "work_state":
       return {
-        ...item,
+        ...safeItem,
         type: "work_state",
         payload: {
           before: record(payload.before),
@@ -167,7 +176,7 @@ function typedActivity(item: ActivityItem): TypedActivityItem {
       };
     case "attachment":
       return {
-        ...item,
+        ...safeItem,
         type: "attachment",
         payload: {
           filename: text(payload.filename, "Unnamed attachment"),
@@ -176,7 +185,7 @@ function typedActivity(item: ActivityItem): TypedActivityItem {
       };
     case "relationship":
       return {
-        ...item,
+        ...safeItem,
         type: "relationship",
         payload: {
           kind: text(payload.kind, "related"),
@@ -186,7 +195,7 @@ function typedActivity(item: ActivityItem): TypedActivityItem {
       };
     case "custody_event":
       return {
-        ...item,
+        ...safeItem,
         type: "custody_event",
         payload: {
           action: text(payload.action, "recorded"),
