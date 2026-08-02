@@ -94,6 +94,34 @@ def test_security_responder_scopes_are_restricted_only():
     assert not has_unrestricted_domain_scope(user, "operational")
 
 
+@pytest.mark.parametrize(
+    ("role", "expected_scope"),
+    [
+        ("agent-operational", Scope(domain="operational")),
+        ("supervisor-operational", Scope(domain="operational")),
+        ("agent-it", Scope(domain="it")),
+        ("lead-it", Scope(domain="it")),
+        ("admin", Scope(domain="admin")),
+    ],
+)
+def test_realm_role_aliases_are_authorised_without_persisted_assignments(
+    role,
+    expected_scope,
+):
+    user = type(
+        "U",
+        (),
+        {
+            "is_active": True,
+            "is_authenticated": True,
+            "is_superuser": False,
+            "_groups": [role],
+        },
+    )()
+
+    assert get_user_scopes(user) == [expected_scope]
+
+
 def test_broader_group_wins_over_restricted_only_scope():
     user = type(
         "U",
@@ -182,7 +210,8 @@ def test_ticket_queryset_enforces_restricted_only_and_privileged_access(basic_wo
     }
 
 
-def test_auditors_are_read_only():
+@pytest.mark.parametrize("role", ["auditors", "auditor"])
+def test_auditors_are_read_only(role):
     user = type(
         "U",
         (),
@@ -190,7 +219,7 @@ def test_auditors_are_read_only():
             "is_active": True,
             "is_authenticated": True,
             "is_superuser": False,
-            "_groups": ["auditors"],
+            "_groups": [role],
         },
     )()
     permission = ScopePermission()

@@ -55,18 +55,21 @@ def test_walk_views_reports_function_wrapper_methods_and_permissions():
     )
 
 
-def test_walk_views_marks_allow_any_routes_public():
-    """Catch public metadata being lost by DRF's generated WrappedAPIView class."""
-    public_intake = [
+def test_walk_views_marks_intake_as_authenticated_only():
+    """Prevent anonymous access from being restored to the intake endpoint."""
+    intake = [
         route
         for route in permission_audit._walk_views()
         if route.path == "api/v1/tickets/public/intake/"
         and getattr(route, "method", None) == "POST"
     ]
 
-    assert len(public_intake) == 1
-    assert public_intake[0].is_public is True
-    assert public_intake[0].permission_classes == ("AllowAny",)
+    assert len(intake) == 1
+    assert intake[0].is_public is False
+    assert intake[0].permission_classes == (
+        "IsAuthenticated",
+        "ScopePermission",
+    )
 
 
 def test_main_fails_closed_when_no_api_routes_are_found(monkeypatch, capsys):
@@ -109,7 +112,13 @@ def test_main_reports_actions_and_authentication_deterministically(capsys):
     assert "AUTH=KeycloakJWTAuthentication" in first
     assert "PERMISSIONS=IsAuthenticated, ScopePermission" in first
     assert "POST tickets-public-intake api/v1/tickets/public/intake/" in first
-    assert "ACCESS=PUBLIC" in first
+    intake_line = next(
+        line
+        for line in first.splitlines()
+        if "POST tickets-public-intake api/v1/tickets/public/intake/" in line
+    )
+    assert "PERMISSIONS=IsAuthenticated, ScopePermission" in intake_line
+    assert "ACCESS=PUBLIC" not in intake_line
     assert "audit passed:" in first
 
 

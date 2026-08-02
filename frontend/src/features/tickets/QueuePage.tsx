@@ -46,7 +46,11 @@ import {
   EmptyTitle,
 } from "@/components/ui/empty";
 import { Field, FieldGroup, FieldLabel } from "@/components/ui/field";
-import { Input } from "@/components/ui/input";
+import {
+  InputGroup,
+  InputGroupAddon,
+  InputGroupInput,
+} from "@/components/ui/input-group";
 import {
   Select,
   SelectContent,
@@ -411,19 +415,17 @@ function FilterBar({
         <FieldLabel htmlFor="queue-search" className="sr-only">
           Search tickets
         </FieldLabel>
-        <div className="relative">
-          <Search
-            className="pointer-events-none absolute left-3 top-1/2 size-4 -translate-y-1/2 text-muted-foreground"
-            aria-hidden
-          />
-          <Input
+        <InputGroup>
+          <InputGroupAddon>
+            <Search aria-hidden />
+          </InputGroupAddon>
+          <InputGroupInput
             id="queue-search"
             placeholder="Search by number, title, matter reference…"
             value={search}
             onChange={(event) => onSearch(event.target.value)}
-            className="pl-9"
           />
-        </div>
+        </InputGroup>
       </Field>
       {domains.length > 1 ? (
         <Field>

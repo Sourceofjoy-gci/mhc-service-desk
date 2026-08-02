@@ -165,6 +165,15 @@ function deferred<T>() {
   return { promise, resolve, reject };
 }
 
+async function chooseSelectOption(
+  user: ReturnType<typeof userEvent.setup>,
+  name: string,
+  option: string,
+) {
+  await user.click(screen.getByRole("combobox", { name }));
+  await user.click(await screen.findByRole("option", { name: option }));
+}
+
 function renderPanel(
   ticket: TicketDetail = TICKET,
   onUpdated = vi.fn(),
@@ -243,6 +252,9 @@ describe("server-driven ticket operations", () => {
     expect(
       screen.getByText("Work state and the next planned action."),
     ).toBeVisible();
+    expect(
+      screen.getByRole("combobox", { name: "Waiting reason" }),
+    ).toHaveAttribute("data-slot", "select-trigger");
     expect(
       screen.queryByRole("combobox", { name: "Assignee" }),
     ).not.toBeInTheDocument();
@@ -339,7 +351,7 @@ describe("server-driven ticket operations", () => {
     await user.type(team, "Pending finance review");
     await user.clear(nextAction);
     await user.type(nextAction, "Call the accountant with the signed file");
-    await user.selectOptions(confidentiality, "sensitive");
+    await chooseSelectOption(user, "Confidentiality", "Sensitive");
     await user.click(screen.getByRole("button", { name: "Save" }));
 
     expect(
@@ -364,7 +376,7 @@ describe("server-driven ticket operations", () => {
     );
     expect(team).toHaveValue("Pending finance review");
     expect(nextAction).toHaveValue("Call the accountant with the signed file");
-    expect(confidentiality).toHaveValue("sensitive");
+    expect(confidentiality).toHaveTextContent("Sensitive");
     expect(screen.getByText("Next action needs more detail.")).toBeVisible();
     expect(screen.getByRole("button", { name: "Save" })).toBeEnabled();
     expect(onUpdated).toHaveBeenCalledWith(assignmentOnlyRefresh);
@@ -400,10 +412,7 @@ describe("server-driven ticket operations", () => {
       screen.getByRole("textbox", { name: "Team" }),
       "Pending finance review",
     );
-    await user.selectOptions(
-      screen.getByRole("combobox", { name: "Confidentiality" }),
-      "sensitive",
-    );
+    await chooseSelectOption(user, "Confidentiality", "Sensitive");
 
     result.rerender(
       <OperationsPanel
@@ -416,7 +425,7 @@ describe("server-driven ticket operations", () => {
     await waitFor(() =>
       expect(
         screen.getByRole("combobox", { name: "Waiting reason" }),
-      ).toHaveValue("internal"),
+      ).toHaveTextContent("Internal dependency"),
     );
     expect(screen.getByRole("textbox", { name: "Blocked reason" })).toHaveValue(
       "Server-side records check",
@@ -426,7 +435,7 @@ describe("server-driven ticket operations", () => {
     );
     expect(
       screen.getByRole("combobox", { name: "Confidentiality" }),
-    ).toHaveValue("sensitive");
+    ).toHaveTextContent("Sensitive");
     expect(screen.getByRole("button", { name: "Save" })).toBeEnabled();
   });
 
@@ -476,10 +485,7 @@ describe("server-driven ticket operations", () => {
       screen.getByRole("textbox", { name: "Next action" }),
       "Invalid old-ticket action",
     );
-    await user.selectOptions(
-      screen.getByRole("combobox", { name: "Confidentiality" }),
-      "sensitive",
-    );
+    await chooseSelectOption(user, "Confidentiality", "Sensitive");
     await user.click(screen.getByRole("button", { name: "Save" }));
     expect(
       await screen.findByText("Next action needs more detail."),
@@ -503,7 +509,7 @@ describe("server-driven ticket operations", () => {
     );
     expect(
       screen.getByRole("combobox", { name: "Confidentiality" }),
-    ).toHaveValue(nextTicket.confidentiality);
+    ).toHaveTextContent("Restricted");
     expect(
       screen.queryByText("Next action needs more detail."),
     ).not.toBeInTheDocument();
@@ -825,10 +831,7 @@ describe("server-driven ticket operations", () => {
       screen.getByRole("textbox", { name: "Team" }),
       "Escalations",
     );
-    await user.selectOptions(
-      screen.getByRole("combobox", { name: "Waiting reason" }),
-      "third_party",
-    );
+    await chooseSelectOption(user, "Waiting reason", "Third party");
     await user.clear(screen.getByRole("textbox", { name: "Blocked reason" }));
     await user.type(
       screen.getByRole("textbox", { name: "Blocked reason" }),
@@ -842,10 +845,7 @@ describe("server-driven ticket operations", () => {
     fireEvent.change(screen.getByLabelText("Next action time"), {
       target: { value: "2026-07-30T12:45" },
     });
-    await user.selectOptions(
-      screen.getByRole("combobox", { name: "Confidentiality" }),
-      "sensitive",
-    );
+    await chooseSelectOption(user, "Confidentiality", "Sensitive");
     await user.click(screen.getByRole("button", { name: "Save" }));
 
     const expectedNextActionAt = new Date("2026-07-30T12:45").toISOString();
@@ -888,7 +888,7 @@ describe("server-driven ticket operations", () => {
     expect(
       screen.getByRole("combobox", { name: "Waiting reason" }),
     ).toBeDisabled();
-    expect(screen.getByRole("button", { name: "Saving…" })).toBeDisabled();
+    expect(screen.getByRole("button", { name: "Save" })).toBeDisabled();
 
     pending.resolve(TICKET);
   });

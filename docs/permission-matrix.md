@@ -55,7 +55,6 @@ view are separate from DRF authentication.
 | Path | Methods | Implemented access |
 |---|---|---|
 | `/api/v1/health` and `/api/v1/health/live` | GET | Public readiness and liveness |
-| `/api/v1/tickets/public/intake/` | POST | Public, anonymous rate throttle |
 | `/api/v1/public/requester/{token}/` | GET | Public route; valid requester token required by the view |
 | `/api/v1/public/requester/{token}/reply/` | POST | Public route; valid requester token required by the view |
 | `/api/v1/public/knowledge/` | GET | Public published knowledge |
@@ -65,7 +64,10 @@ view are separate from DRF authentication.
 | `/api/v1/integrations/monitoring/events/` | POST | Public DRF route |
 | `/api/v1/integrations/whatsapp/webhook/` | GET, POST | Public transport route; GET requires the configured Meta verification token, while POST requires the native body signature, fresh message timestamps, active WABA/phone binding, and per-message replay claims |
 
-The site root `/` is also public. `/api/v1/` is the authenticated DRF router
+The staff application root `/` requires authentication. The legacy
+`/api/v1/tickets/public/intake/` route requires authentication and an
+Operational scope, and auditor writes are denied. The public web form is not
+exposed during the current phase. `/api/v1/` is the authenticated DRF router
 root and is not the same route.
 
 ## Protected integration helpers

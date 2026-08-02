@@ -125,6 +125,11 @@ _GROUP_FALLBACK_ROLE_KEYS = {
     "it-leads",
     "system-admins",
 }
+# Actor authority accepts both Keycloak realm-role names and their legacy group
+# aliases. Ownership candidate discovery deliberately continues to use
+# _GROUP_FALLBACK_ROLE_KEYS through _functional_matches, so a realm role alone
+# cannot make an identity assignable.
+_ACTOR_GROUP_ROLE_KEYS = frozenset(_ROLE_ALIASES)
 
 
 @dataclass(frozen=True)
@@ -292,7 +297,8 @@ def _functional_matches(
     if allow_group_fallback:
         for role_key, (display_name, team_label) in _LEGACY_ROLE_DETAILS.items():
             if (
-                role_key not in groups
+                role_key not in _GROUP_FALLBACK_ROLE_KEYS
+                or role_key not in groups
                 or _ROLE_FAMILY_DOMAIN[role_key] != ticket.domain
             ):
                 continue
@@ -499,8 +505,8 @@ def matching_actor_role_aliases(
         return frozenset()
 
     aliases: set[str] = set()
-    for role_key in _GROUP_FALLBACK_ROLE_KEYS & authority.group_role_keys:
-        if role_key == "system-admins":
+    for role_key in _ACTOR_GROUP_ROLE_KEYS & authority.group_role_keys:
+        if role_key in {"admin", "system-admins"}:
             aliases.update(_ROLE_ALIASES[role_key])
             continue
         if _ROLE_FAMILY_DOMAIN[role_key] == ticket.domain:

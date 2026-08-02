@@ -2,20 +2,14 @@ import { useQuery } from "@tanstack/react-query";
 import {
   Activity,
   ArrowRight,
-  Globe,
-  HeartPulse,
   KanbanSquare,
-  LayoutDashboard,
   ListChecks,
-  Mail,
   Phone,
-  Shield,
-  Smartphone,
-  Users,
-  Workflow,
+  ShieldCheck,
+  UserRound,
 } from "lucide-react";
 import { Link } from "react-router-dom";
-import { BrandLockup } from "@/components/brand";
+import { Alert, AlertDescription, AlertTitle } from "@/components/ui/alert";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import {
@@ -27,9 +21,10 @@ import {
 } from "@/components/ui/card";
 import { Separator } from "@/components/ui/separator";
 import { Skeleton } from "@/components/ui/skeleton";
+import { useAuth } from "@/features/auth/AuthProvider";
+import { api } from "@/lib/api";
 import { cn } from "@/lib/utils";
 
-// health fetch is inline to avoid pulling the api lib here
 interface HealthResponse {
   status: string;
   environment: string;
@@ -37,99 +32,149 @@ interface HealthResponse {
   checks: Record<string, { ok: boolean; latency_ms: number }>;
 }
 
+const WORK_ACTIONS = [
+  {
+    label: "Open queue",
+    description: "Triage, filter, and assign active tickets.",
+    to: "/tickets",
+    icon: ListChecks,
+  },
+  {
+    label: "View Kanban",
+    description: "Move work through the approved workflow.",
+    to: "/kanban",
+    icon: KanbanSquare,
+  },
+  {
+    label: "Capture a call",
+    description: "Record a phone enquiry while speaking to the requester.",
+    to: "/intake/call",
+    icon: Phone,
+  },
+  {
+    label: "Capture a walk-in",
+    description: "Create a ticket for an in-person request.",
+    to: "/intake/walk-in",
+    icon: UserRound,
+  },
+] as const;
+
+const SYSTEM_ADMINISTRATOR_MEMBERSHIPS = new Set(["system-admins", "admin"]);
+
 async function fetchHealth(): Promise<HealthResponse> {
-  const r = await fetch("/api/v1/health");
-  if (!r.ok) throw new Error(`HTTP ${r.status}`);
-  return r.json();
+  return api<HealthResponse>("/health");
 }
 
 export default function HomePage() {
+  const { user } = useAuth();
+  const canViewPlatformStatus =
+    user?.groups.some((membership) => {
+      const name = membership.split("/").filter(Boolean).at(-1) ?? membership;
+      return SYSTEM_ADMINISTRATOR_MEMBERSHIPS.has(name);
+    }) ?? false;
   const { data, isLoading } = useQuery({
     queryKey: ["health", "home"],
     queryFn: fetchHealth,
+    enabled: canViewPlatformStatus,
     refetchInterval: 30_000,
   });
 
   return (
-    <div className="flex flex-col gap-10">
-      <Hero data={data} isLoading={isLoading} />
-      <DomainSeparation />
-      <Channels />
-      <Operations />
-      <Cta />
-    </div>
-  );
-}
+    <div className="flex flex-col gap-8">
+      <header className="flex max-w-3xl flex-col gap-2">
+        <h1 className="text-2xl font-semibold tracking-tight">
+          Staff workspace
+        </h1>
+        <p className="text-pretty text-sm text-muted-foreground sm:text-base">
+          Start the next staff task, then use the queue and board to keep work
+          moving.
+        </p>
+      </header>
 
-function Hero({
-  data,
-  isLoading,
-}: {
-  data?: HealthResponse;
-  isLoading: boolean;
-}) {
-  return (
-    <section className="relative overflow-hidden rounded-2xl bg-primary p-6 text-primary-foreground sm:p-10">
       <div
-        aria-hidden
-        className="pointer-events-none absolute inset-0 opacity-30"
-        style={{
-          backgroundImage:
-            "radial-gradient(circle at 85% 15%, var(--gold), transparent 38%), radial-gradient(circle at 10% 100%, var(--background), transparent 45%)",
-        }}
-      />
-      <div className="relative grid gap-8 lg:grid-cols-[1.4fr_1fr] lg:items-center">
-        <div className="flex flex-col gap-6">
-          <Badge variant="secondary" className="w-fit">
-            <Shield data-icon="inline-start" />
-            MHC Unified e-Ticketing · M2–M6 ready
-          </Badge>
-          <div className="flex flex-col gap-3">
-            <h1 className="text-balance text-3xl font-semibold tracking-tight sm:text-4xl lg:text-5xl">
-              Capture every request.
-              <br />
-              <span className="text-gold">Route with rigour.</span>
-            </h1>
-            <p className="max-w-2xl text-pretty text-base text-primary-foreground/80 sm:text-lg">
-              Operational and IT service desks with strict separation. Every
-              request becomes a traceable ticket with Kanban workflow, SLA
-              tracking, audit trail, and a requester-safe public entry point.
-            </p>
-          </div>
-          <div className="flex flex-wrap items-center gap-2">
-            <Button
-              render={<Link to="/tickets" />}
-              nativeButton={false}
-              variant="secondary"
-              className="no-underline hover:no-underline"
-            >
-              Open the queue
-              <ArrowRight data-icon="inline-end" />
-            </Button>
-            <Button
-              render={<Link to="/kanban" />}
-              nativeButton={false}
-              variant="outline"
-              className="no-underline hover:no-underline"
-            >
-              <KanbanSquare data-icon="inline-start" />
-              Kanban board
-            </Button>
-            <Button
-              render={<Link to="/public" />}
-              nativeButton={false}
-              variant="ghost"
-              className="text-primary-foreground no-underline hover:bg-primary-foreground/10 hover:text-primary-foreground hover:no-underline"
-            >
-              <Globe data-icon="inline-start" />
-              Public form
-            </Button>
-          </div>
-        </div>
+        className={cn(
+          "grid items-start gap-6",
+          canViewPlatformStatus &&
+            "lg:grid-cols-[minmax(0,1.6fr)_minmax(18rem,0.8fr)]",
+        )}
+      >
+        <Card role="region" aria-labelledby="start-work-heading">
+          <CardHeader>
+            <CardTitle>
+              <h2 id="start-work-heading">Start work</h2>
+            </CardTitle>
+            <CardDescription>
+              Choose the workflow that matches what you need to do now.
+            </CardDescription>
+          </CardHeader>
+          <CardContent className="flex flex-col">
+            {WORK_ACTIONS.map((action, index) => (
+              <div key={action.to}>
+                {index > 0 ? <Separator /> : null}
+                <Link
+                  to={action.to}
+                  aria-label={action.label}
+                  className="group flex min-h-16 items-center gap-3 rounded-lg px-2 py-3 text-foreground no-underline transition-colors hover:bg-muted hover:no-underline focus-visible:outline-none focus-visible:ring-3 focus-visible:ring-ring/50"
+                >
+                  <span className="grid size-9 shrink-0 place-items-center rounded-lg bg-primary/10 text-primary">
+                    <action.icon className="size-4" aria-hidden />
+                  </span>
+                  <span className="min-w-0 flex-1">
+                    <span className="block text-sm font-medium">
+                      {action.label}
+                    </span>
+                    <span className="block text-sm text-muted-foreground">
+                      {action.description}
+                    </span>
+                  </span>
+                  <ArrowRight
+                    className="size-4 shrink-0 text-muted-foreground transition-transform group-hover:translate-x-0.5"
+                    aria-hidden
+                  />
+                </Link>
+              </div>
+            ))}
+          </CardContent>
+        </Card>
 
-        <PlatformStatus data={data} isLoading={isLoading} />
+        {canViewPlatformStatus ? (
+          <PlatformStatus data={data} isLoading={isLoading} />
+        ) : null}
       </div>
-    </section>
+
+      <Alert className="border-primary/20 bg-primary/5">
+        <ShieldCheck aria-hidden />
+        <AlertTitle>
+          <h2>Operational and IT work stay separate</h2>
+        </AlertTitle>
+        <AlertDescription>
+          Staff only see tickets for their authorised service desk. Referrals
+          pass a sanitised summary to IT without exposing operational messages
+          or attachments.
+        </AlertDescription>
+      </Alert>
+
+      <div className="flex flex-wrap gap-2">
+        <Button
+          render={<Link to="/dashboard" />}
+          nativeButton={false}
+          variant="outline"
+          className="no-underline hover:no-underline"
+        >
+          View dashboard
+        </Button>
+        {canViewPlatformStatus ? (
+          <Button
+            render={<Link to="/health" />}
+            nativeButton={false}
+            variant="ghost"
+            className="no-underline hover:no-underline"
+          >
+            Service health
+          </Button>
+        ) : null}
+      </div>
+    </div>
   );
 }
 
@@ -149,7 +194,7 @@ function PlatformStatus({
   ];
 
   return (
-    <Card size="sm" className="self-start lg:self-center">
+    <Card size="sm">
       <CardHeader>
         <div className="flex items-center justify-between gap-4">
           <CardTitle>
@@ -176,12 +221,23 @@ function PlatformStatus({
           )}
         </div>
         <CardDescription>
-          {data ? `${data.environment} · v${data.version}` : "Pinging API…"}
+          {data
+            ? `${data.environment} · v${data.version}`
+            : isLoading
+              ? "Checking API…"
+              : "Platform status unavailable"}
         </CardDescription>
       </CardHeader>
       <CardContent className="flex flex-col gap-3">
         {entries.map((entry) => {
           const check = checks[entry.key];
+          const statusLabel = check
+            ? check.ok
+              ? "Healthy"
+              : "Failed"
+            : isLoading
+              ? "Checking"
+              : "Unknown";
           return (
             <div
               key={entry.key}
@@ -201,244 +257,33 @@ function PlatformStatus({
                 />
                 <span>{entry.label}</span>
               </div>
-              {check ? (
-                <span className="font-mono text-xs text-muted-foreground">
-                  {check.latency_ms.toFixed(1)} ms
+              <div className="flex shrink-0 items-center gap-2">
+                <span
+                  className={cn(
+                    "text-xs font-medium",
+                    check?.ok
+                      ? "text-success-foreground"
+                      : check
+                        ? "text-destructive"
+                        : "text-muted-foreground",
+                  )}
+                >
+                  {statusLabel}
                 </span>
-              ) : isLoading ? (
-                <Skeleton className="h-3 w-12" />
-              ) : (
-                <span className="text-xs text-muted-foreground">—</span>
-              )}
+                {check ? (
+                  <span className="font-mono text-xs text-muted-foreground">
+                    {check.latency_ms.toFixed(1)} ms
+                  </span>
+                ) : isLoading ? (
+                  <Skeleton className="h-3 w-12" />
+                ) : (
+                  <span className="text-xs text-muted-foreground">—</span>
+                )}
+              </div>
             </div>
           );
         })}
       </CardContent>
     </Card>
-  );
-}
-
-function DomainSeparation() {
-  return (
-    <section className="flex flex-col gap-4">
-      <SectionHeader
-        eyebrow="Two service desks, one platform"
-        title="Strict OP/IT separation"
-        description="Operational agents and IT engineers work in the same application, but they never see each other's tickets. The sanitised IT-child pattern lets a referrer pass context without leaking content."
-      />
-      <div className="grid gap-6 md:grid-cols-2">
-        <article className="flex items-start gap-3 py-2">
-          <Users
-            className="mt-1 size-5 shrink-0 text-info-foreground"
-            aria-hidden
-          />
-          <div className="flex flex-col gap-2">
-            <div>
-              <h3 className="font-medium">Operational desk</h3>
-              <p className="text-sm text-muted-foreground">
-                Estates, wills, walk-ins, calls
-              </p>
-            </div>
-            <p className="text-sm text-muted-foreground">
-              Front-of-house work. Requesters see only this surface. Tickets
-              start here, are triaged by ops, and either resolve or hand off to
-              IT via a sanitised child.
-            </p>
-          </div>
-        </article>
-        <article className="flex items-start gap-3 py-2">
-          <Workflow className="mt-1 size-5 shrink-0 text-gold" aria-hidden />
-          <div className="flex flex-col gap-2">
-            <div>
-              <h3 className="font-medium">IT desk</h3>
-              <p className="text-sm text-muted-foreground">
-                Internal work orders, monitoring alerts
-              </p>
-            </div>
-            <p className="text-sm text-muted-foreground">
-              Technical work, isolated from the operational parent. The child
-              receives a sanitised summary — never the parent's message body or
-              attachments. Status only syncs back as a safe summary.
-            </p>
-          </div>
-        </article>
-      </div>
-    </section>
-  );
-}
-
-function Channels() {
-  const channels = [
-    { label: "Public form", icon: Globe, to: "/public" },
-    { label: "Call centre", icon: Phone, to: "/intake/call" },
-    { label: "Walk-in", icon: Users, to: "/intake/walk-in" },
-    { label: "Email", icon: Mail, to: "/tickets" },
-    { label: "WhatsApp", icon: Smartphone, to: "/tickets" },
-    { label: "Monitoring", icon: Activity, to: "/tickets" },
-  ];
-
-  return (
-    <section className="flex flex-col gap-4">
-      <SectionHeader
-        eyebrow="One platform, every channel"
-        title="Multi-channel intake"
-        description="Each originating channel is recorded on the ticket. Idempotency and threading ensure a noisy email thread or a flapping alert never produces duplicates."
-      />
-      <div className="grid grid-cols-2 gap-2 sm:grid-cols-3 md:grid-cols-6">
-        {channels.map((channel) => (
-          <Button
-            key={channel.label}
-            render={<Link to={channel.to} />}
-            nativeButton={false}
-            variant="outline"
-            className="h-auto min-h-16 flex-col items-start gap-1 py-3 text-left no-underline hover:no-underline"
-          >
-            <channel.icon data-icon="inline-start" />
-            <span>{channel.label}</span>
-          </Button>
-        ))}
-      </div>
-    </section>
-  );
-}
-
-function Operations() {
-  const cards = [
-    {
-      title: "Queue",
-      description:
-        "Filter by status, priority, channel, office. Saved filters in URL.",
-      to: "/tickets",
-      icon: ListChecks,
-    },
-    {
-      title: "Kanban",
-      description:
-        "Drag-and-drop board with dnd-kit. Keyboard accessible. Server-validated transitions.",
-      to: "/kanban",
-      icon: KanbanSquare,
-    },
-    {
-      title: "Dashboard",
-      description:
-        "Open totals, today's volume, by-priority breakdown, breach count, unassigned backlog.",
-      to: "/dashboard",
-      icon: LayoutDashboard,
-    },
-    {
-      title: "Health",
-      description:
-        "DB, Redis, MinIO, Keycloak latencies. Liveness + readiness probes for the platform.",
-      to: "/health",
-      icon: HeartPulse,
-    },
-  ];
-
-  return (
-    <section className="flex flex-col gap-4">
-      <SectionHeader
-        eyebrow="Day-to-day operations"
-        title="Built for triage"
-        description="Information-dense screens, keyboard-first, and a curated action set. No decoration that doesn't earn its place."
-      />
-      <div className="grid gap-3 md:grid-cols-2 lg:grid-cols-4">
-        {cards.map((card) => (
-          <Link
-            key={card.to}
-            to={card.to}
-            className="group block text-card-foreground no-underline hover:no-underline focus-visible:outline-none"
-          >
-            <Card className="h-full transition-[transform,box-shadow] group-hover:-translate-y-1 group-hover:shadow-sm group-focus-visible:ring-3 group-focus-visible:ring-ring/50">
-              <CardHeader>
-                <div className="flex items-center justify-between text-primary">
-                  <card.icon className="size-5" aria-hidden />
-                  <ArrowRight
-                    className="size-4 text-muted-foreground"
-                    aria-hidden
-                  />
-                </div>
-                <CardTitle>
-                  <h3>{card.title}</h3>
-                </CardTitle>
-              </CardHeader>
-              <CardContent>
-                <p className="text-xs text-muted-foreground">
-                  {card.description}
-                </p>
-              </CardContent>
-            </Card>
-          </Link>
-        ))}
-      </div>
-    </section>
-  );
-}
-
-function Cta() {
-  return (
-    <>
-      <Separator />
-      <section className="relative overflow-hidden py-8">
-        <div
-          aria-hidden
-          className="pointer-events-none absolute inset-0 opacity-10"
-          style={{
-            backgroundImage:
-              "linear-gradient(135deg, var(--primary) 0%, transparent 50%, var(--gold) 100%)",
-          }}
-        />
-        <div className="relative flex flex-col items-start gap-4 sm:flex-row sm:items-center sm:justify-between">
-          <div className="flex flex-col gap-2">
-            <BrandLockup size="md" />
-            <p className="text-sm text-muted-foreground">
-              Judiciary of Eswatini · Operational and IT service desks
-            </p>
-          </div>
-          <div className="flex flex-wrap gap-2">
-            <Button
-              render={<Link to="/login" />}
-              nativeButton={false}
-              className="no-underline hover:no-underline"
-            >
-              <Shield data-icon="inline-start" />
-              Sign in
-            </Button>
-            <Button
-              render={<Link to="/health" />}
-              nativeButton={false}
-              variant="outline"
-              className="no-underline hover:no-underline"
-            >
-              <Activity data-icon="inline-start" />
-              Health
-            </Button>
-          </div>
-        </div>
-      </section>
-    </>
-  );
-}
-
-function SectionHeader({
-  eyebrow,
-  title,
-  description,
-}: {
-  eyebrow: string;
-  title: string;
-  description: string;
-}) {
-  return (
-    <div className="flex flex-col gap-2">
-      <span className="text-xs font-semibold uppercase tracking-wider text-primary">
-        {eyebrow}
-      </span>
-      <h2 className="text-xl font-semibold tracking-tight sm:text-2xl">
-        {title}
-      </h2>
-      <p className="max-w-3xl text-sm text-muted-foreground sm:text-base">
-        {description}
-      </p>
-    </div>
   );
 }

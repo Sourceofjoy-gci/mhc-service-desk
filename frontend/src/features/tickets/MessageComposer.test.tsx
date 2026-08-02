@@ -45,6 +45,9 @@ describe("reply and internal-note composition", () => {
     );
 
     expect(screen.getByRole("button", { name: "Send reply" })).toBeDisabled();
+    expect(
+      screen.getByRole("textbox", { name: "Reply message" }),
+    ).toHaveAccessibleDescription("This message is visible to the requester.");
     await user.type(
       screen.getByRole("textbox", { name: "Reply message" }),
       "Requester update",
@@ -54,6 +57,11 @@ describe("reply and internal-note composition", () => {
     expect(
       screen.getByText("Internal notes are not visible to the requester."),
     ).toBeVisible();
+    expect(
+      screen.getByRole("textbox", { name: "Internal note" }),
+    ).toHaveAccessibleDescription(
+      "Internal notes are not visible to the requester.",
+    );
     expect(
       screen.getByRole("button", { name: "Add internal note" }),
     ).toBeDisabled();
@@ -97,7 +105,7 @@ describe("reply and internal-note composition", () => {
       "A single reply",
     );
     expect(onCreated).not.toHaveBeenCalled();
-    expect(screen.getByRole("button", { name: "Sending…" })).toBeDisabled();
+    expect(screen.getByRole("button", { name: "Send reply" })).toBeDisabled();
     expect(
       screen.getByRole("textbox", { name: "Reply message" }),
     ).toBeDisabled();
@@ -131,7 +139,7 @@ describe("reply and internal-note composition", () => {
     expect(screen.getByRole("textbox", { name: "Reply message" })).toHaveValue(
       "Ready for requester",
     );
-    expect(screen.getByRole("button", { name: "Sending…" })).toBeDisabled();
+    expect(screen.getByRole("button", { name: "Send reply" })).toBeDisabled();
 
     refreshed.resolve();
     await waitFor(() =>

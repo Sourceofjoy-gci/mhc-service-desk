@@ -89,7 +89,6 @@ beforeEach(() => {
 describe("App route boundaries", () => {
   it.each([
     ["/login", "Agent sign-in"],
-    ["/public", "Submit a request"],
     ["/health", "System health"],
   ])(
     "%s renders its public content without staff navigation",
@@ -108,6 +107,22 @@ describe("App route boundaries", () => {
     },
   );
 
+  it("does not expose the public intake form", () => {
+    renderApp("/public", makeAuth());
+
+    expect(
+      screen.getByRole("heading", { name: /page not found/i }),
+    ).toBeInTheDocument();
+    expect(
+      screen.queryByRole("heading", { name: /submit a request/i }),
+    ).not.toBeInTheDocument();
+    expect(
+      within(screen.getByRole("main")).getByRole("link", {
+        name: /staff sign-in/i,
+      }),
+    ).toBeInTheDocument();
+  });
+
   it("protects the ticket queue, preserves its return path, and redirects once in StrictMode", async () => {
     const auth = makeAuth();
 
@@ -122,6 +137,21 @@ describe("App route boundaries", () => {
     ).not.toBeInTheDocument();
     expect(
       screen.queryByRole("navigation", { name: /ticket workspace/i }),
+    ).not.toBeInTheDocument();
+  });
+
+  it("protects ticket tracking and preserves the requested reference", async () => {
+    const auth = makeAuth();
+
+    renderApp("/ticket-tracking?reference=O00123", auth);
+
+    await waitFor(() =>
+      expect(auth.login).toHaveBeenCalledWith(
+        "/ticket-tracking?reference=O00123",
+      ),
+    );
+    expect(
+      screen.queryByRole("heading", { name: "Track a ticket" }),
     ).not.toBeInTheDocument();
   });
 
@@ -258,6 +288,11 @@ describe("App route boundaries", () => {
     expect(
       screen.getByRole("navigation", { name: /ticket workspace/i }),
     ).toBeInTheDocument();
+    expect(
+      within(
+        screen.getByRole("navigation", { name: /ticket workspace/i }),
+      ).getByRole("link", { name: "Track ticket" }),
+    ).toHaveAttribute("href", "/ticket-tracking");
     const menu = screen.getByRole("button", {
       name: /user menu for anele agent/i,
     });
@@ -492,7 +527,7 @@ describe("App route boundaries", () => {
     ).toBeInTheDocument();
     expect(
       within(screen.getByRole("main")).getByRole("link", {
-        name: /submit a request/i,
+        name: /staff sign-in/i,
       }),
     ).toBeInTheDocument();
     expect(

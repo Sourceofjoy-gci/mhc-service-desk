@@ -30,7 +30,7 @@ def test_unauthenticated_me_is_401(client):
     assert r.status_code == 401
 
 
-def test_public_form_requires_consent(client):
+def test_intake_rejects_anonymous_submissions(client):
     r = client.post(
         "/api/v1/tickets/public/intake/",
         data=json.dumps({
@@ -40,44 +40,17 @@ def test_public_form_requires_consent(client):
             "title": "Test",
             "description": "Test",
             "requester_name": "Tester",
-            "consent": False,
+            "consent": True,
         }),
         content_type="application/json",
     )
-    assert r.status_code == 400
-
-
-def test_public_form_rate_limit_returns_429_after_threshold(client, settings, monkeypatch):
-    """Hammer the public intake and assert that 429 kicks in within the limit."""
-    from django.core.cache import cache
-    cache.clear()
-    body = {
-        "request_type_code": "HOURS",
-        "service_code": "GEN-INFO",
-        "office_code": "MHC-MBA",
-        "title": "Test",
-        "description": "Test",
-        "requester_name": "Tester",
-        "consent": True,
-    }
-    last = None
-    for _ in range(20):
-        r = client.post(
-            "/api/v1/tickets/public/intake/",
-            data=json.dumps(body),
-            content_type="application/json",
-        )
-        last = r
-        if r.status_code == 429:
-            break
-    assert last is not None
-    # The first 5 should succeed (or 4xx on validation), then 429 should kick in.
-    assert any(r2.status_code == 429 for r2 in [last])
+    assert r.status_code == 401
 
 
 def test_attachments_size_limit(monkeypatch):
     """Verify we refuse huge payloads at the body-parsing stage."""
     from rest_framework.test import APIClient
+
     from apps.identity_access.models import User
     user, _ = User.objects.get_or_create(
         username="attachee",

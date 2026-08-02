@@ -5,6 +5,8 @@ Views handle authorisation; the two responsibilities are kept separate.
 """
 from __future__ import annotations
 
+import re
+
 from rest_framework import serializers
 
 from apps.contacts.api import ContactSerializer
@@ -29,7 +31,39 @@ from .permissions import (
     can_change_confidentiality,
     can_update_work_state,
 )
+from .tracking import TrackingStatus
 from .workflow import available_transitions
+
+
+class TicketTrackingLookupSerializer(serializers.Serializer[dict[str, str]]):
+    reference = serializers.CharField()
+
+    def validate_reference(self, value: str) -> str:
+        normalized = value.strip().upper()
+        if not re.fullmatch(r"[A-Z][0-9]{5}", normalized):
+            raise serializers.ValidationError("Enter a valid ticket reference.")
+        return normalized
+
+
+class TrackingProgressSerializer(serializers.Serializer[dict[str, object]]):
+    status = serializers.ChoiceField(
+        choices=[status.value for status in TrackingStatus]
+    )
+    occurred_at = serializers.DateTimeField()
+
+
+class TicketTrackingSerializer(serializers.Serializer[dict[str, object]]):
+    reference = serializers.CharField()
+    title = serializers.CharField()
+    tracking_status = serializers.ChoiceField(
+        choices=[status.value for status in TrackingStatus]
+    )
+    status_updated_at = serializers.DateTimeField()
+    created_at = serializers.DateTimeField()
+    updated_at = serializers.DateTimeField()
+    office = serializers.CharField()
+    service = serializers.CharField()
+    progress = TrackingProgressSerializer(many=True)
 
 
 class StatusRefSerializer(serializers.ModelSerializer[Status]):
@@ -400,12 +434,13 @@ class RoutingReceiptSerializer(serializers.Serializer[RoutingReceipt]):
 
 
 class PublicIntakeSerializer(serializers.Serializer[dict[str, object]]):
-    """Public form intake (FR-002, FR-003, FR-005, FR-073).
+    """Staff-assisted intake while the public form is disabled.
 
-    No authentication required. Rate-limited at the view layer.
+    Authentication and an applicable Operational scope are required.
 
     ``channel`` lets the agent SPA pass the originating channel (call, walk_in,
-    web, email) when creating a ticket on behalf of a requester.
+    web, email) when creating a ticket on behalf of a requester. The web form
+    route is not exposed in the current phase.
     """
 
     request_type_code = serializers.CharField()

@@ -1,4 +1,4 @@
-import { useState } from "react";
+import { useRef, useState } from "react";
 import { useMutation } from "@tanstack/react-query";
 import { Link } from "react-router-dom";
 import {
@@ -27,6 +27,7 @@ import {
   Field,
   FieldContent,
   FieldDescription,
+  FieldError,
   FieldGroup,
   FieldLabel,
   FieldLegend,
@@ -44,6 +45,11 @@ import {
 import { Spinner } from "@/components/ui/spinner";
 import { Textarea } from "@/components/ui/textarea";
 import { ticketsApi } from "@/lib/api";
+import {
+  getFirstInvalidFieldId,
+  hasContent,
+  isOptionalEmailValid,
+} from "@/lib/form-validation";
 
 const SERVICES = [
   { value: "GEN-INFO", label: "General information" },
@@ -97,12 +103,16 @@ export default function PublicFormPage() {
     number: string;
     priority: string;
   } | null>(null);
+  const submissionLock = useRef(false);
 
   const submit = useMutation({
     mutationFn: (data: FormState) =>
       ticketsApi.publicIntake({ ...data, channel: "web" }),
     onSuccess: (r) =>
       setSubmitted({ number: r.ticket_number, priority: r.priority }),
+    onSettled: () => {
+      submissionLock.current = false;
+    },
   });
 
   if (submitted) {
@@ -113,6 +123,7 @@ export default function PublicFormPage() {
           setSubmitted(null);
           setForm(EMPTY_FORM);
           setSubmitAttempted(false);
+          submissionLock.current = false;
         }}
       />
     );
@@ -123,11 +134,21 @@ export default function PublicFormPage() {
     (value: FormState[K]) =>
       setForm((prev) => ({ ...prev, [key]: value }));
 
-  const canSubmit =
-    form.consent &&
-    form.title.length > 0 &&
-    form.description.length > 0 &&
-    form.requester_name.length > 0;
+  const validation = {
+    title: hasContent(form.title),
+    description: hasContent(form.description),
+    requesterName: hasContent(form.requester_name),
+    requesterEmail: isOptionalEmailValid(form.requester_email),
+    consent: form.consent,
+  };
+  const firstInvalidFieldId = getFirstInvalidFieldId([
+    { id: "public-title", valid: validation.title },
+    { id: "public-desc", valid: validation.description },
+    { id: "public-name", valid: validation.requesterName },
+    { id: "public-email", valid: validation.requesterEmail },
+    { id: "public-consent", valid: validation.consent },
+  ]);
+  const canSubmit = firstInvalidFieldId === null;
 
   return (
     <div className="grid gap-8 lg:grid-cols-[1.4fr_1fr]">
@@ -135,7 +156,7 @@ export default function PublicFormPage() {
         <CardHeader>
           <Badge variant="secondary" className="w-fit gap-2 text-xs">
             <Shield aria-hidden />
-            Public intake · No sign-in required
+            Public intake · Currently disabled
           </Badge>
           <CardTitle>
             <h1 className="text-2xl">Submit a request</h1>
@@ -146,11 +167,18 @@ export default function PublicFormPage() {
           </CardDescription>
         </CardHeader>
         <form
-          onInvalid={() => setSubmitAttempted(true)}
+          noValidate
           onSubmit={(e) => {
             e.preventDefault();
             setSubmitAttempted(true);
-            if (!canSubmit) return;
+            if (!canSubmit) {
+              if (firstInvalidFieldId) {
+                document.getElementById(firstInvalidFieldId)?.focus();
+              }
+              return;
+            }
+            if (submissionLock.current) return;
+            submissionLock.current = true;
             submit.mutate(form);
           }}
         >
@@ -253,21 +281,35 @@ export default function PublicFormPage() {
             <FieldSet>
               <FieldLegend>Your request</FieldLegend>
               <FieldGroup className="grid grid-cols-1 gap-4 md:grid-cols-2">
-                <Field data-invalid={submitAttempted && !form.title}>
-                  <FieldLabel htmlFor="public-title">Title *</FieldLabel>
+                <Field data-invalid={submitAttempted && !validation.title}>
+                  <FieldLabel htmlFor="public-title">
+                    Title (required)
+                  </FieldLabel>
                   <Input
                     id="public-title"
                     value={form.title}
                     onChange={(e) => update("title")(e.target.value)}
                     maxLength={255}
                     required
-                    aria-invalid={submitAttempted && !form.title}
+                    aria-invalid={submitAttempted && !validation.title}
+                    aria-describedby={
+                      submitAttempted && !validation.title
+                        ? "public-title-error"
+                        : undefined
+                    }
                     placeholder="A short summary"
                   />
+                  {submitAttempted && !validation.title ? (
+                    <FieldError id="public-title-error">
+                      Enter a short title.
+                    </FieldError>
+                  ) : null}
                 </Field>
-                <Field data-invalid={submitAttempted && !form.description}>
+                <Field
+                  data-invalid={submitAttempted && !validation.description}
+                >
                   <FieldLabel htmlFor="public-desc">
-                    Describe your request *
+                    Describe your request (required)
                   </FieldLabel>
                   <Textarea
                     id="public-desc"
@@ -275,9 +317,19 @@ export default function PublicFormPage() {
                     value={form.description}
                     onChange={(e) => update("description")(e.target.value)}
                     required
-                    aria-invalid={submitAttempted && !form.description}
+                    aria-invalid={submitAttempted && !validation.description}
+                    aria-describedby={
+                      submitAttempted && !validation.description
+                        ? "public-description-error"
+                        : undefined
+                    }
                     placeholder="What is the request about? Include dates, people, and any context that helps us respond."
                   />
+                  {submitAttempted && !validation.description ? (
+                    <FieldError id="public-description-error">
+                      Describe the request.
+                    </FieldError>
+                  ) : null}
                 </Field>
               </FieldGroup>
             </FieldSet>
@@ -285,18 +337,35 @@ export default function PublicFormPage() {
             <FieldSet>
               <FieldLegend>Your details</FieldLegend>
               <FieldGroup className="grid grid-cols-1 gap-4 md:grid-cols-2">
-                <Field data-invalid={submitAttempted && !form.requester_name}>
-                  <FieldLabel htmlFor="public-name">Your name *</FieldLabel>
+                <Field
+                  data-invalid={submitAttempted && !validation.requesterName}
+                >
+                  <FieldLabel htmlFor="public-name">
+                    Your name (required)
+                  </FieldLabel>
                   <Input
                     id="public-name"
                     value={form.requester_name}
                     onChange={(e) => update("requester_name")(e.target.value)}
                     maxLength={255}
                     required
-                    aria-invalid={submitAttempted && !form.requester_name}
+                    aria-invalid={submitAttempted && !validation.requesterName}
+                    aria-describedby={
+                      submitAttempted && !validation.requesterName
+                        ? "public-name-error"
+                        : undefined
+                    }
+                    autoComplete="name"
                   />
+                  {submitAttempted && !validation.requesterName ? (
+                    <FieldError id="public-name-error">
+                      Enter your name.
+                    </FieldError>
+                  ) : null}
                 </Field>
-                <Field>
+                <Field
+                  data-invalid={submitAttempted && !validation.requesterEmail}
+                >
                   <FieldLabel htmlFor="public-email">Email</FieldLabel>
                   <Input
                     id="public-email"
@@ -304,13 +373,26 @@ export default function PublicFormPage() {
                     value={form.requester_email}
                     onChange={(e) => update("requester_email")(e.target.value)}
                     placeholder="you@example.com"
+                    autoComplete="email"
+                    aria-invalid={submitAttempted && !validation.requesterEmail}
+                    aria-describedby={
+                      submitAttempted && !validation.requesterEmail
+                        ? "public-email-error"
+                        : undefined
+                    }
                   />
+                  {submitAttempted && !validation.requesterEmail ? (
+                    <FieldError id="public-email-error">
+                      Enter a valid email address.
+                    </FieldError>
+                  ) : null}
                 </Field>
                 <Field>
                   <FieldLabel htmlFor="public-phone">Phone</FieldLabel>
                   <Input
                     id="public-phone"
                     type="tel"
+                    autoComplete="tel"
                     value={form.requester_phone}
                     onChange={(e) => update("requester_phone")(e.target.value)}
                     maxLength={32}
@@ -325,14 +407,19 @@ export default function PublicFormPage() {
               <FieldGroup className="gap-4">
                 <Field
                   orientation="horizontal"
-                  data-invalid={submitAttempted && !form.consent}
+                  data-invalid={submitAttempted && !validation.consent}
                 >
                   <Checkbox
                     id="public-consent"
                     checked={form.consent}
                     onCheckedChange={(v) => update("consent")(v === true)}
                     required
-                    aria-invalid={submitAttempted && !form.consent}
+                    aria-invalid={submitAttempted && !validation.consent}
+                    aria-describedby={
+                      submitAttempted && !validation.consent
+                        ? "public-consent-error"
+                        : undefined
+                    }
                   />
                   <FieldContent>
                     <FieldLabel htmlFor="public-consent">
@@ -344,6 +431,11 @@ export default function PublicFormPage() {
                     </FieldLabel>
                   </FieldContent>
                 </Field>
+                {submitAttempted && !validation.consent ? (
+                  <FieldError id="public-consent-error">
+                    Consent is required.
+                  </FieldError>
+                ) : null}
                 {submit.isError ? (
                   <Alert variant="destructive">
                     <AlertCircle aria-hidden />
@@ -365,11 +457,11 @@ export default function PublicFormPage() {
             </p>
             <Button type="submit" disabled={submit.isPending}>
               {submit.isPending ? (
-                <Spinner data-icon="inline-start" />
+                <Spinner aria-hidden data-icon="inline-start" />
               ) : (
                 <Send data-icon="inline-start" />
               )}
-              {submit.isPending ? "Submitting…" : "Submit request"}
+              Submit request
             </Button>
           </CardFooter>
         </form>
@@ -442,9 +534,8 @@ function ReassurancePanel() {
             <h2>What happens next</h2>
           </CardTitle>
           <CardDescription>
-            This form is the public front door to the Master of the High Court
-            Service Desk. It is rate-limited, monitored, and recorded for audit
-            purposes.
+            Public submission is disabled during the current phase. Requests are
+            captured by authorised staff and recorded for audit purposes.
           </CardDescription>
         </CardHeader>
         <CardContent>

@@ -149,7 +149,7 @@ services:
       keycloak:
         condition: service_healthy
     ports:
-      - "8000:8000"
+      - "${BACKEND_PORT:-8000}:8000"
     command: ["./scripts/dev.sh"]
     volumes:
       - ./backend:/app
@@ -201,6 +201,9 @@ services:
     build:
       context: ./frontend
       dockerfile: Dockerfile
+      target: dev
+      args:
+        NPM_CONFIG_STRICT_SSL: ${NPM_CONFIG_STRICT_SSL:-true}
     restart: unless-stopped
     env_file: .env
     environment:
@@ -208,14 +211,17 @@ services:
       VITE_KEYCLOAK_URL: ${KEYCLOAK_PUBLIC_URL}
       VITE_KEYCLOAK_REALM: ${KEYCLOAK_REALM}
       VITE_KEYCLOAK_CLIENT_ID: ${KEYCLOAK_CLIENT_ID}
+      VITE_DEV_AUTH: ${VITE_DEV_AUTH:-0}
+      NPM_CONFIG_STRICT_SSL: ${NPM_CONFIG_STRICT_SSL:-true}
     depends_on:
       backend:
         condition: service_started
     ports:
       - "5173:5173"
-    command: ["sh", "-c", "if [ ! -d node_modules/@dnd-kit ]; then npm install --no-audit --no-fund --legacy-peer-deps; fi; npm run dev -- --host 0.0.0.0"]
+    command: ["sh", "-c", "set -eu; LOCK_HASH=$$(sha256sum package-lock.json | cut -d ' ' -f 1); if [ ! -f node_modules/.mhc-package-lock-hash ] || [ \"$$(cat node_modules/.mhc-package-lock-hash 2>/dev/null)\" != \"$$LOCK_HASH\" ]; then npm install --no-audit --no-fund --legacy-peer-deps; printf '%s' \"$$LOCK_HASH\" > node_modules/.mhc-package-lock-hash; fi; exec npm run dev -- --host 0.0.0.0"]
     volumes:
-      - ./frontend:/app
+      # Keep source and dependencies on Docker's Linux filesystem. Bind mounts
+      # from Windows can leave Vite blocked in uninterruptible file I/O.
       - frontend-node-modules:/app/node_modules
 
   prometheus:

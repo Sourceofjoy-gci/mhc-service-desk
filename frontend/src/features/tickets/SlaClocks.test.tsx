@@ -29,7 +29,9 @@ describe("server-provided SLA clocks", () => {
     });
     expect(within(firstResponse).getByText("First response")).toBeVisible();
     expect(within(firstResponse).getByText("Running")).toBeVisible();
-    expect(within(firstResponse).getByText("1 hour 30 minutes remaining")).toBeVisible();
+    expect(
+      within(firstResponse).getByText("1 hour 30 minutes remaining"),
+    ).toBeVisible();
     expect(within(firstResponse).getByText(/^Due /)).toHaveAttribute(
       "datetime",
       "2026-07-28T10:30:00Z",
@@ -39,7 +41,9 @@ describe("server-provided SLA clocks", () => {
       name: "Resolution SLA: breached",
     });
     expect(within(resolution).getByText("Breached")).toBeVisible();
-    expect(within(resolution).getByText("2 hours 30 minutes overdue")).toBeVisible();
+    expect(
+      within(resolution).getByText("2 hours 30 minutes overdue"),
+    ).toBeVisible();
     expect(resolution).toHaveClass("text-destructive");
   });
 
@@ -65,7 +69,7 @@ describe("server-provided SLA clocks", () => {
     });
     expect(within(paused).getByText("Paused")).toBeVisible();
     expect(within(paused).getByText("30 minutes remaining")).toBeVisible();
-    expect(paused).toHaveClass("text-amber-700");
+    expect(paused).toHaveClass("text-warning-foreground");
     expect(within(paused).queryByText(/^Due /)).not.toBeInTheDocument();
   });
 });

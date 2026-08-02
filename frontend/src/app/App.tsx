@@ -9,8 +9,8 @@ import { ProtectedRoute } from "@/features/auth/ProtectedRoute";
 import QueuePage from "@/features/tickets/QueuePage";
 import KanbanPage from "@/features/tickets/KanbanPage";
 import TicketDetailPage from "@/features/tickets/TicketDetailPage";
+import TicketTrackingPage from "@/features/tickets/TicketTrackingPage";
 import DashboardPage from "@/features/reports/DashboardPage";
-import PublicFormPage from "@/features/public/PublicFormPage";
 import NotFoundPage from "@/features/public/NotFoundPage";
 import ChannelIntakePage from "@/features/tickets/ChannelIntakePage";
 import HomePage from "@/features/home/HomePage";
@@ -20,7 +20,6 @@ export default function App() {
     <TooltipProvider>
       <Routes>
         <Route element={<PublicShell />}>
-          <Route path="/public" element={<PublicFormPage />} />
           <Route path="/health" element={<HealthPage />} />
           <Route path="/login" element={<LoginPage />} />
           <Route path="/forbidden" element={<PermissionPage />} />
@@ -30,6 +29,7 @@ export default function App() {
           <Route element={<AppShell />}>
             <Route path="/" element={<HomePage />} />
             <Route path="/tickets" element={<QueuePage />} />
+            <Route path="/ticket-tracking" element={<TicketTrackingPage />} />
             <Route path="/tickets/:number" element={<TicketDetailPage />} />
             <Route path="/kanban" element={<KanbanPage />} />
             <Route path="/dashboard" element={<DashboardPage />} />

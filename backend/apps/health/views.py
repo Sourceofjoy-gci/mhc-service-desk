@@ -9,7 +9,8 @@ from __future__ import annotations
 
 import socket
 import time
-from typing import Callable, NotRequired, TypedDict
+from collections.abc import Callable
+from typing import NotRequired, TypedDict
 
 import redis
 from django.conf import settings

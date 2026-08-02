@@ -5,16 +5,16 @@ import {
   KanbanSquare,
   Phone,
   User,
-  Globe,
   HeartPulse,
   LogOut,
   Scale,
   AlertCircle,
+  SearchCheck,
 } from "lucide-react";
 import { useAuth, type AuthUser } from "@/features/auth/AuthProvider";
 import { useAuthAction } from "@/features/auth/useAuthAction";
 import { cn } from "@/lib/utils";
-import { BrandLockup } from "./brand";
+import { BrandLockup, BrandMark } from "./brand";
 import { ThemeToggle } from "./theme-toggle";
 import { Button } from "./ui/button";
 import {
@@ -41,6 +41,7 @@ interface NavItem {
 
 const PRIMARY_NAV: NavItem[] = [
   { to: "/tickets", end: true, label: "Queue", icon: ListChecks },
+  { to: "/ticket-tracking", label: "Track ticket", icon: SearchCheck },
   { to: "/kanban", label: "Kanban", icon: KanbanSquare },
   { to: "/dashboard", label: "Dashboard", icon: LayoutDashboard },
 ];
@@ -48,7 +49,6 @@ const PRIMARY_NAV: NavItem[] = [
 const INTAKE_NAV: NavItem[] = [
   { to: "/intake/call", label: "Call", icon: Phone },
   { to: "/intake/walk-in", label: "Walk-in", icon: User },
-  { to: "/public", label: "Public form", icon: Globe },
 ];
 
 const UTILITY_NAV: NavItem[] = [
@@ -59,7 +59,7 @@ function navLinkClass(active: boolean, touchSafe = false) {
   return cn(
     "inline-flex min-h-9 shrink-0 items-center gap-2 rounded-lg px-3 text-sm transition-colors",
     "focus-visible:outline-none focus-visible:ring-3 focus-visible:ring-ring/50",
-    touchSafe && "min-h-11",
+    touchSafe && "min-h-11 w-full justify-center px-2",
     active
       ? "bg-accent font-medium text-accent-foreground"
       : "text-muted-foreground hover:bg-accent/70 hover:text-foreground",
@@ -93,15 +93,20 @@ export function AppShell() {
   return (
     <div className="flex min-h-full flex-col bg-background">
       <header className="sticky top-0 z-40 border-b border-border/60 bg-background/80 backdrop-blur supports-[backdrop-filter]:bg-background/60">
-        <div className="mx-auto flex w-full max-w-7xl items-center gap-4 px-4 py-2 sm:px-6">
+        <div className="mx-auto flex w-full max-w-7xl items-center gap-2 px-4 py-2 sm:gap-4 sm:px-6">
           <Link
             to="/"
-            className="flex items-center gap-2 text-foreground no-underline"
+            aria-label="MHC Service Desk home"
+            className="flex shrink-0 items-center gap-2 text-foreground no-underline"
           >
-            <BrandLockup size="sm" />
+            <BrandMark className="sm:hidden" size={24} />
+            <BrandLockup className="hidden sm:flex" size="sm" />
           </Link>
 
-          <Separator orientation="vertical" className="mx-1 h-6" />
+          <Separator
+            orientation="vertical"
+            className="mx-1 hidden h-6 md:block"
+          />
 
           <div className="hidden flex-1 items-center gap-4 md:flex">
             <NavGroup label="Ticket workspace" items={PRIMARY_NAV} />
@@ -111,7 +116,10 @@ export function AppShell() {
 
           <div className="ml-auto flex items-center gap-2">
             {isDevAuth ? (
-              <Badge variant="secondary">Development access</Badge>
+              <Badge variant="secondary">
+                <span className="sm:hidden">Dev</span>
+                <span className="hidden sm:inline">Development access</span>
+              </Badge>
             ) : null}
             <ThemeToggle />
             <Separator orientation="vertical" className="mx-1 h-6" />
@@ -126,7 +134,7 @@ export function AppShell() {
 
         <nav
           aria-label="Mobile navigation"
-          className="flex gap-1 overflow-x-auto border-t border-border/40 px-4 py-2 md:hidden"
+          className="grid grid-cols-2 gap-1 border-t border-border/40 px-4 py-2 sm:grid-cols-4 md:hidden"
         >
           {[...PRIMARY_NAV, ...INTAKE_NAV, ...UTILITY_NAV].map((item) => (
             <NavLink

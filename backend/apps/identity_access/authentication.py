@@ -28,6 +28,30 @@ logger = logging.getLogger(__name__)
 _JWKS_CACHE_KEY = "keycloak_jwks"
 _JWKS_TTL = 3600
 
+# Keycloak groups are allowed to grant authority only when they match one of
+# the configured MHC groups. Realm roles are separately allowlisted because
+# their names overlap with privileged group aliases such as ``admin``.
+_KEYCLOAK_GROUPS = frozenset(
+    {
+        "ops-agents",
+        "ops-supervisors",
+        "it-agents",
+        "it-leads",
+        "security-responders",
+        "system-admins",
+        "auditors",
+    }
+)
+_KEYCLOAK_GROUP_PATHS = {f"/{group}": group for group in _KEYCLOAK_GROUPS}
+_KEYCLOAK_REALM_ROLES = _KEYCLOAK_GROUPS | {
+    "agent-operational",
+    "supervisor-operational",
+    "agent-it",
+    "lead-it",
+    "admin",
+    "auditor",
+}
+
 type JSONScalar = str | int | float | bool | None
 type JSONValue = JSONScalar | list[JSONValue] | dict[str, JSONValue]
 type JSONObject = dict[str, JSONValue]
@@ -171,7 +195,10 @@ class KeycloakJWTAuthentication(authentication.BaseAuthentication):
             user.save(update_fields=["email"])
         # Persist the IdP snapshot and retain a request-local copy for scope
         # calculation so one request cannot observe an in-flight refresh.
-        groups = _normalize_groups(payload.get("groups"))
+        # Keycloak normally emits staff roles under ``realm_access.roles``;
+        # installations that use a groups mapper may instead populate
+        # ``groups``. Treat both sources as one set of effective memberships.
+        groups = _effective_groups(payload)
         _synchronize_groups(user, groups)
         return user, payload
 
@@ -212,10 +239,46 @@ def _resolve_local_user(
     return user
 
 
+def _effective_groups(payload: JSONObject) -> list[str]:
+    """Return the canonical staff memberships carried by a Keycloak token."""
+    realm_access = payload.get("realm_access")
+    realm_roles = (
+        realm_access.get("roles") if isinstance(realm_access, dict) else None
+    )
+    return _deduplicate_memberships(
+        _normalize_groups(payload.get("groups")),
+        _normalize_realm_roles(realm_roles),
+    )
+
+
 def _normalize_groups(raw_groups: object) -> list[str]:
+    """Return authority-bearing Keycloak groups without flattening paths."""
+    normalized: list[str] = []
     if not isinstance(raw_groups, list | tuple):
+        return normalized
+    for raw_group in raw_groups:
+        if not isinstance(raw_group, str):
+            continue
+        group = raw_group.strip()
+        normalized_group = _KEYCLOAK_GROUP_PATHS.get(group, group)
+        if normalized_group in _KEYCLOAK_GROUPS:
+            normalized.append(normalized_group)
+    return normalized
+
+
+def _normalize_realm_roles(raw_roles: object) -> list[str]:
+    if not isinstance(raw_roles, list | tuple):
         return []
-    return [str(group) for group in raw_groups if group is not None]
+    return [
+        role
+        for raw_role in raw_roles
+        if isinstance(raw_role, str)
+        and (role := raw_role.strip()) in _KEYCLOAK_REALM_ROLES
+    ]
+
+
+def _deduplicate_memberships(*memberships: list[str]) -> list[str]:
+    return list(dict.fromkeys(member for values in memberships for member in values))
 
 
 def _synchronize_groups(user: User, groups: list[str]) -> None:

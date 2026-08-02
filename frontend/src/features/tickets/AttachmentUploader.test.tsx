@@ -287,12 +287,10 @@ describe("AttachmentUploader", () => {
       expect(harness.download).toHaveBeenCalledWith("attachment-clean");
       expect(harness.download).toHaveBeenCalledWith("attachment-clean-2");
       expect(
-        await screen.findByRole("button", {
-          name: "Preparing evidence.pdf…",
-        }),
+        await screen.findByRole("button", { name: "Download evidence.pdf" }),
       ).toBeDisabled();
       expect(
-        screen.getByRole("button", { name: "Preparing transcript.docx…" }),
+        screen.getByRole("button", { name: "Download transcript.docx" }),
       ).toBeDisabled();
 
       first.resolve({
@@ -448,7 +446,7 @@ describe("AttachmentUploader", () => {
 
     await waitFor(() => expect(harness.upload).toHaveBeenCalledTimes(1));
     expect(
-      await screen.findByRole("button", { name: "Uploading…" }),
+      await screen.findByRole("button", { name: "Upload" }),
     ).toBeDisabled();
 
     pending.resolve({ results: [] });
@@ -474,7 +472,7 @@ describe("AttachmentUploader", () => {
     await waitFor(() => expect(harness.download).toHaveBeenCalledTimes(1));
     expect(harness.download).toHaveBeenCalledWith("attachment-clean");
     expect(
-      await screen.findByRole("button", { name: "Preparing evidence.pdf…" }),
+      await screen.findByRole("button", { name: "Download evidence.pdf" }),
     ).toBeDisabled();
 
     const assign = vi

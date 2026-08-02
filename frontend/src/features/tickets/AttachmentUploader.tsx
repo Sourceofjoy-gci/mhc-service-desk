@@ -18,7 +18,12 @@ import {
   EmptyHeader,
   EmptyTitle,
 } from "@/components/ui/empty";
-import { Field, FieldGroup, FieldLabel } from "@/components/ui/field";
+import {
+  Field,
+  FieldDescription,
+  FieldGroup,
+  FieldLabel,
+} from "@/components/ui/field";
 import { Input } from "@/components/ui/input";
 import { Spinner } from "@/components/ui/spinner";
 import {
@@ -154,11 +159,7 @@ function AttachmentRow({ attachment }: { attachment: AttachmentMetadata }) {
           variant="outline"
           size="sm"
           className="ml-6.5 self-start"
-          aria-label={
-            download.isPending
-              ? `Preparing ${attachment.filename}…`
-              : `Download ${attachment.filename}`
-          }
+          aria-label={`Download ${attachment.filename}`}
           disabled={download.isPending}
           onClick={requestDownload}
         >
@@ -167,7 +168,7 @@ function AttachmentRow({ attachment }: { attachment: AttachmentMetadata }) {
           ) : (
             <Download data-icon="inline-start" aria-hidden />
           )}
-          {download.isPending ? "Preparing…" : "Download"}
+          Download
         </Button>
       ) : null}
 
@@ -276,10 +277,18 @@ export default function AttachmentUploader({
         </section>
 
         {canUpload ? (
-          <div className="border-t pt-4">
+          <form
+            className="border-t pt-4"
+            onSubmit={(event) => {
+              event.preventDefault();
+              submitFiles();
+            }}
+          >
             <FieldGroup className="gap-3">
               <Field>
-                <FieldLabel htmlFor="ticket-attachments">Choose files</FieldLabel>
+                <FieldLabel htmlFor="ticket-attachments">
+                  Choose files
+                </FieldLabel>
                 <Input
                   key={inputKey}
                   id="ticket-attachments"
@@ -291,6 +300,10 @@ export default function AttachmentUploader({
                     upload.reset();
                   }}
                 />
+                <FieldDescription>
+                  Choose one or more files. Downloads remain unavailable until
+                  scanning is complete.
+                </FieldDescription>
               </Field>
             </FieldGroup>
 
@@ -308,8 +321,8 @@ export default function AttachmentUploader({
             ) : null}
 
             <Button
+              type="submit"
               className="mt-3"
-              onClick={submitFiles}
               disabled={files.length === 0 || upload.isPending}
             >
               {upload.isPending ? (
@@ -317,9 +330,9 @@ export default function AttachmentUploader({
               ) : (
                 <Upload data-icon="inline-start" aria-hidden />
               )}
-              {upload.isPending ? "Uploading…" : "Upload"}
+              Upload
             </Button>
-          </div>
+          </form>
         ) : null}
 
         {canUpload && upload.isError ? (

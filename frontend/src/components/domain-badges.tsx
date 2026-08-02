@@ -164,7 +164,7 @@ export function PriorityBadge({
       data-slot="priority-badge"
       data-priority={code}
       className={cn(
-        "border-border/60 font-mono text-[10px] font-semibold tracking-wider",
+        "border-border/60 font-mono text-xs font-semibold tracking-wider",
         className,
       )}
       {...rest}
@@ -202,7 +202,7 @@ export function ChannelBadge({
     <Badge
       variant="secondary"
       data-slot="channel-badge"
-      className={cn("text-[11px] font-normal", className)}
+      className={cn("text-xs font-normal", className)}
     >
       {CHANNEL_LABELS[channel] ?? channel}
     </Badge>

@@ -3,8 +3,8 @@ from __future__ import annotations
 
 import pytest
 
-from apps.email_channel.services import process_inbound_email
 from apps.email_channel.models import Mailbox
+from apps.email_channel.services import process_inbound_email
 from apps.tickets.models import TicketMessage
 
 pytestmark = pytest.mark.django_db
@@ -24,7 +24,7 @@ def test_new_email_creates_ticket(basic_world, mailbox):
         message_id="<m1@example.com>",
     )
     assert r["status"] == "created", r
-    assert r["ticket_number"].startswith("OP-")
+    assert r["ticket_number"] == "O00001"
 
 
 def test_duplicate_message_id_returns_duplicate(basic_world, mailbox):

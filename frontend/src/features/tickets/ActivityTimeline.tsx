@@ -1,6 +1,7 @@
 import { useQuery } from "@tanstack/react-query";
 import { Link } from "react-router-dom";
 import { Alert, AlertDescription, AlertTitle } from "@/components/ui/alert";
+import { Badge } from "@/components/ui/badge";
 import {
   Empty,
   EmptyDescription,
@@ -15,6 +16,7 @@ import {
   type AssignmentParty,
   ticketsApi,
 } from "@/lib/api";
+import { cn } from "@/lib/utils";
 
 interface ActivityTimelineProps {
   ticketNumber: string;
@@ -252,7 +254,7 @@ function ActivityFrame({
   category,
   categoryClassName,
   children,
-  className = "",
+  className,
 }: {
   item: TypedActivityItem;
   label: string;
@@ -266,14 +268,12 @@ function ActivityFrame({
     <article
       aria-label={label}
       data-visibility={item.visibility}
-      className={`border-l-2 py-3 pl-4 ${className}`}
+      className={cn("border-l py-3 pl-4", className)}
     >
       <div className="mb-2">
-        <span
-          className={`inline-flex rounded-full border px-2 py-0.5 text-[11px] font-medium ${categoryClassName}`}
-        >
+        <Badge variant="secondary" className={categoryClassName}>
           {category}
-        </span>
+        </Badge>
       </div>
       {children}
       <footer className="mt-3 flex flex-wrap items-center gap-x-2 text-xs text-muted-foreground">
@@ -299,8 +299,8 @@ function MessageActivity({
       item={item}
       label="Requester-visible message"
       category="Visible to requester"
-      categoryClassName="border-sky-300/70 bg-sky-100/70 text-sky-800 dark:border-sky-700 dark:bg-sky-950/50 dark:text-sky-300"
-      className="border-l-sky-500 bg-sky-50/60 pr-3 dark:bg-sky-950/20"
+      categoryClassName="bg-info/15 text-info-foreground"
+      className="border-l-info bg-info/10 pr-3"
     >
       <h3 className="font-medium">Message</h3>
       <p className="mt-2 whitespace-pre-wrap text-sm">
@@ -324,8 +324,8 @@ function NoteActivity({
       item={item}
       label="Internal note"
       category="Internal only"
-      categoryClassName="border-amber-300/70 bg-amber-100/70 text-amber-900 dark:border-amber-700 dark:bg-amber-950/50 dark:text-amber-300"
-      className="border-l-amber-500 bg-amber-50/60 pr-3 dark:bg-amber-950/20"
+      categoryClassName="bg-warning/20 text-warning-foreground"
+      className="border-l-warning bg-warning/10 pr-3"
     >
       <h3 className="font-medium">Internal note</h3>
       <p className="mt-2 whitespace-pre-wrap text-sm">{item.payload.body}</p>
@@ -386,11 +386,11 @@ function WorkStateActivity({
       label="Work state change"
       category="Workflow"
       categoryClassName="border-primary/30 bg-primary/5 text-primary"
-      className="border-l-slate-400"
+      className="border-l-muted-foreground/50"
     >
       <h3 className="font-medium">Work state updated</h3>
       {keys.length ? (
-        <div className="mt-2 space-y-1 text-sm">
+        <div className="mt-2 flex flex-col gap-1 text-sm">
           {keys.map((key) => (
             <p key={key}>
               {humanize(key)} changed from{" "}
@@ -418,8 +418,8 @@ function AttachmentActivity({
       item={item}
       label="Attachment added"
       category="Attachment"
-      categoryClassName="border-violet-300/70 bg-violet-50 text-violet-800 dark:border-violet-800 dark:bg-violet-950/30 dark:text-violet-300"
-      className="border-l-violet-400"
+      categoryClassName="bg-accent text-accent-foreground"
+      className="border-l-primary/50"
     >
       <h3 className="font-medium">Attachment added</h3>
       <p className="mt-1 text-sm">{item.payload.filename}</p>
@@ -440,8 +440,8 @@ function RelationshipActivity({
       item={item}
       label="Ticket relationship"
       category="Relationship"
-      categoryClassName="border-slate-300 bg-slate-50 text-slate-700 dark:border-slate-700 dark:bg-slate-900/40 dark:text-slate-300"
-      className="border-l-emerald-500"
+      categoryClassName="bg-muted text-muted-foreground"
+      className="border-l-success"
     >
       <h3 className="font-medium">Ticket relationship added</h3>
       <p className="mt-1 text-sm">
@@ -496,11 +496,11 @@ function CustodyActivity({
       item={item}
       label={`Custody event: ${actionLabel}`}
       category="Chain of custody"
-      categoryClassName="border-emerald-300/70 bg-emerald-50 text-emerald-800 dark:border-emerald-800 dark:bg-emerald-950/30 dark:text-emerald-300"
-      className="border-l-emerald-500 bg-slate-50/40 pr-3 dark:bg-slate-950/20"
+      categoryClassName="bg-success/15 text-success-foreground"
+      className="border-l-success bg-muted/40 pr-3"
     >
       <h3 className="font-medium">{actionLabel}</h3>
-      <div className="mt-2 space-y-1 text-sm">
+      <div className="mt-2 flex flex-col gap-1 text-sm">
         {showsOwner ? (
           <p>
             Owner: {ownerLabel(item.payload.previous_owner)} →{" "}
@@ -521,7 +521,7 @@ function CustodyActivity({
         ) : null}
       </div>
       {item.payload.actor_kind === "system" && item.payload.source_process ? (
-        <p className="mt-2 text-xs font-medium text-emerald-800 dark:text-emerald-300">
+        <p className="mt-2 text-xs font-medium text-success-foreground">
           System process: {item.payload.source_process}
         </p>
       ) : null}

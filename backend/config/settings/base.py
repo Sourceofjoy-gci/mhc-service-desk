@@ -6,7 +6,6 @@ between base / dev / prod mirrors the deployment profile described in the PRD.
 """
 from __future__ import annotations
 
-import os
 from pathlib import Path
 
 import environ
@@ -170,7 +169,6 @@ REST_FRAMEWORK = {
     "DEFAULT_THROTTLE_RATES": {
         "user": "600/minute",
         "anon": "60/minute",
-        "public_intake": "5/minute",  # per-IP web form cap
     },
 }
 
@@ -325,8 +323,10 @@ OTEL_EXPORTER_OTLP_ENDPOINT = env("OTEL_EXPORTER_OTLP_ENDPOINT", default="")
 # -----------------------------------------------------------------------------
 APP_CONFIG = {
     "BUSINESS_TIMEZONE": "Africa/Mbabane",
-    "TICKET_NUMBER_FORMAT_OPERATIONAL": "OP-{YYYY}{MM}-{seq:06d}",
-    "TICKET_NUMBER_FORMAT_IT": "IT-{YYYY}{MM}-{seq:06d}",
+    "TICKET_REFERENCE_PREFIX_OPERATIONAL": env(
+        "TICKET_REFERENCE_PREFIX_OPERATIONAL", default="O"
+    ),
+    "TICKET_REFERENCE_PREFIX_IT": env("TICKET_REFERENCE_PREFIX_IT", default="I"),
     "SLA_EVALUATION_INTERVAL_SECONDS": 60,
     "ATTACHMENT_QUARANTINE_PATH": "quarantine/",
     "AUDIT_LOG_RETENTION_DAYS": 2555,  # 7 years; pending records retention review

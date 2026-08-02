@@ -47,7 +47,6 @@ class ContactViewSet(viewsets.ModelViewSet[Contact]):
     @action(detail=False, methods=["get"], url_path="duplicates")
     def duplicates(self, request: Request) -> Response:
         """Suggest possible duplicate contacts (FR-007) without merging."""
-        from django.db.models import Q
         params = request.query_params
         email = params.get("email", "").strip()
         phone = params.get("phone", "").strip()

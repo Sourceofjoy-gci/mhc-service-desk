@@ -16,6 +16,15 @@ import {
   FieldLabel,
 } from "@/components/ui/field";
 import { Input } from "@/components/ui/input";
+import {
+  Select,
+  SelectContent,
+  SelectGroup,
+  SelectItem,
+  SelectTrigger,
+  SelectValue,
+} from "@/components/ui/select";
+import { Spinner } from "@/components/ui/spinner";
 import { Textarea } from "@/components/ui/textarea";
 import {
   apiProblem,
@@ -72,14 +81,17 @@ const WAITING_REASONS = [
   { value: "internal", label: "Internal dependency" },
 ];
 
+const NO_WAITING_REASON = "__none__";
+const WAITING_REASON_SELECT_ITEMS = WAITING_REASONS.map((option) => ({
+  ...option,
+  value: option.value || NO_WAITING_REASON,
+}));
+
 const CONFIDENTIALITY_OPTIONS = [
   { value: "normal", label: "Normal" },
   { value: "sensitive", label: "Sensitive" },
   { value: "restricted", label: "Restricted" },
 ];
-
-const controlClassName =
-  "h-8 w-full rounded-lg border border-input bg-transparent px-2.5 text-sm outline-none focus-visible:border-ring focus-visible:ring-3 focus-visible:ring-ring/50 disabled:cursor-not-allowed disabled:opacity-50";
 
 function humanize(value: string) {
   if (!value) return "None";
@@ -294,16 +306,28 @@ function ScopedOperationsPanel({
   const waitingReasonIsKnown = WAITING_REASONS.some(
     (option) => option.value === values.waiting_reason,
   );
+  const waitingReasonItems = waitingReasonIsKnown
+    ? WAITING_REASON_SELECT_ITEMS
+    : [
+        {
+          value: values.waiting_reason,
+          label: humanize(values.waiting_reason),
+        },
+        ...WAITING_REASON_SELECT_ITEMS,
+      ];
 
   return (
-    <div className="space-y-5">
+    <div className="flex flex-col gap-5">
       <AssignmentControl
         ticket={ticket}
         onUpdated={onUpdated}
         onReload={onReload}
         onActivityChanged={onActivityChanged}
       />
-      <section className="space-y-4" aria-labelledby="operations-heading">
+      <section
+        className="flex flex-col gap-4"
+        aria-labelledby="operations-heading"
+      >
         <div>
           <h2 id="operations-heading" className="text-base font-semibold">
             Operations
@@ -314,7 +338,7 @@ function ScopedOperationsPanel({
         </div>
 
         {hasEditableFields ? (
-          <form onSubmit={submit} className="space-y-4">
+          <form onSubmit={submit} className="flex flex-col gap-4">
             <FieldGroup className="gap-3">
               {canEditWorkState ? (
                 <>
@@ -336,27 +360,35 @@ function ScopedOperationsPanel({
                     <FieldLabel htmlFor="operations-waiting-reason">
                       Waiting reason
                     </FieldLabel>
-                    <select
-                      id="operations-waiting-reason"
-                      className={controlClassName}
-                      value={values.waiting_reason}
+                    <Select
+                      items={waitingReasonItems}
+                      value={values.waiting_reason || NO_WAITING_REASON}
                       disabled={disabled}
-                      aria-invalid={Boolean(fieldErrors.waiting_reason)}
-                      onChange={(event) =>
-                        change("waiting_reason", event.target.value)
-                      }
+                      onValueChange={(value) => {
+                        if (value == null) return;
+                        change(
+                          "waiting_reason",
+                          value === NO_WAITING_REASON ? "" : value,
+                        );
+                      }}
                     >
-                      {!waitingReasonIsKnown ? (
-                        <option value={values.waiting_reason}>
-                          {humanize(values.waiting_reason)}
-                        </option>
-                      ) : null}
-                      {WAITING_REASONS.map((reason) => (
-                        <option key={reason.value} value={reason.value}>
-                          {reason.label}
-                        </option>
-                      ))}
-                    </select>
+                      <SelectTrigger
+                        id="operations-waiting-reason"
+                        className="w-full"
+                        aria-invalid={Boolean(fieldErrors.waiting_reason)}
+                      >
+                        <SelectValue />
+                      </SelectTrigger>
+                      <SelectContent>
+                        <SelectGroup>
+                          {waitingReasonItems.map((reason) => (
+                            <SelectItem key={reason.value} value={reason.value}>
+                              {reason.label}
+                            </SelectItem>
+                          ))}
+                        </SelectGroup>
+                      </SelectContent>
+                    </Select>
                     <FieldError
                       errors={fieldErrors.waiting_reason?.map((message) => ({
                         message,
@@ -457,22 +489,32 @@ function ScopedOperationsPanel({
                   <FieldLabel htmlFor="operations-confidentiality">
                     Confidentiality
                   </FieldLabel>
-                  <select
-                    id="operations-confidentiality"
-                    className={controlClassName}
+                  <Select
+                    items={CONFIDENTIALITY_OPTIONS}
                     value={values.confidentiality}
                     disabled={disabled}
-                    aria-invalid={Boolean(fieldErrors.confidentiality)}
-                    onChange={(event) =>
-                      change("confidentiality", event.target.value)
-                    }
+                    onValueChange={(value) => {
+                      if (value == null) return;
+                      change("confidentiality", value);
+                    }}
                   >
-                    {CONFIDENTIALITY_OPTIONS.map((option) => (
-                      <option key={option.value} value={option.value}>
-                        {option.label}
-                      </option>
-                    ))}
-                  </select>
+                    <SelectTrigger
+                      id="operations-confidentiality"
+                      className="w-full"
+                      aria-invalid={Boolean(fieldErrors.confidentiality)}
+                    >
+                      <SelectValue />
+                    </SelectTrigger>
+                    <SelectContent>
+                      <SelectGroup>
+                        {CONFIDENTIALITY_OPTIONS.map((option) => (
+                          <SelectItem key={option.value} value={option.value}>
+                            {option.label}
+                          </SelectItem>
+                        ))}
+                      </SelectGroup>
+                    </SelectContent>
+                  </Select>
                   <FieldError
                     errors={fieldErrors.confidentiality?.map((message) => ({
                       message,
@@ -515,6 +557,9 @@ function ScopedOperationsPanel({
             <div className="flex justify-end">
               {stale ? (
                 <Button type="button" disabled={disabled} onClick={onReload}>
+                  {disabled ? (
+                    <Spinner aria-hidden data-icon="inline-start" />
+                  ) : null}
                   Reload
                 </Button>
               ) : (
@@ -522,7 +567,10 @@ function ScopedOperationsPanel({
                   type="submit"
                   disabled={disabled || Object.keys(dirty).length === 0}
                 >
-                  {disabled ? "Saving…" : "Save"}
+                  {disabled ? (
+                    <Spinner aria-hidden data-icon="inline-start" />
+                  ) : null}
+                  Save
                 </Button>
               )}
             </div>

@@ -52,17 +52,17 @@ function durationLabel(clock: SlaClock) {
 function stateClassName(state: SlaClock["state"]) {
   if (state === "breached") return "border-destructive/30 text-destructive";
   if (state === "paused") {
-    return "border-amber-300 bg-amber-50/70 text-amber-700 dark:border-amber-800 dark:bg-amber-950/30 dark:text-amber-300";
+    return "border-warning/30 bg-warning/10 text-warning-foreground";
   }
   if (state === "met") {
-    return "border-emerald-300 text-emerald-700 dark:border-emerald-800 dark:text-emerald-300";
+    return "border-success/30 bg-success/10 text-success-foreground";
   }
   return "border-border text-foreground";
 }
 
 export function SlaClocks({ clocks }: SlaClocksProps) {
   return (
-    <section className="space-y-3" aria-labelledby="sla-heading">
+    <section className="flex flex-col gap-3" aria-labelledby="sla-heading">
       <div>
         <h2 id="sla-heading" className="text-base font-semibold">
           Service targets
@@ -81,7 +81,7 @@ export function SlaClocks({ clocks }: SlaClocksProps) {
               key={key}
               aria-label={`${label} SLA: ${clock.state}`}
               className={cn(
-                "flex items-start justify-between gap-4 border-l-2 px-3 py-3 first:border-t-0",
+                "flex items-start justify-between gap-4 border-l px-3 py-3 first:border-t-0",
                 stateClassName(clock.state),
               )}
             >

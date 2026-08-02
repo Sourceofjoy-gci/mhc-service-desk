@@ -71,6 +71,7 @@ export default function LoginPage() {
                   "Signed-in user"
                 }
                 expiresAt={auth.expiresAt}
+                isDevAuth={auth.isDevAuth}
               />
             )}
           </CardContent>
@@ -212,18 +213,22 @@ function DevelopmentAuthPanel({ username }: { username: string }) {
 function SignedInPanel({
   username,
   expiresAt,
+  isDevAuth,
 }: {
   username: string;
   expiresAt: number | null;
+  isDevAuth: boolean;
 }) {
   return (
     <Alert>
       <CheckCircle2 className="text-success-foreground" />
       <AlertTitle>Signed in as {username}</AlertTitle>
       <AlertDescription>
-        {expiresAt
-          ? `Token expires ${new Date(expiresAt * 1000).toLocaleString()}`
-          : "Session expiry is managed by the identity provider."}
+        {isDevAuth
+          ? "Local development authentication is active."
+          : expiresAt
+            ? `Token expires ${new Date(expiresAt * 1000).toLocaleString()}`
+            : "Session expiry is managed by the identity provider."}
       </AlertDescription>
     </Alert>
   );
@@ -238,6 +243,10 @@ function AuthAction({
   pending: boolean;
   run: (action: () => Promise<void>) => Promise<void>;
 }) {
+  if (auth.isDevAuth) {
+    return <Badge variant="secondary">Development access active</Badge>;
+  }
+
   if (auth.state === "loading") {
     return <Skeleton className="h-10 w-full" />;
   }

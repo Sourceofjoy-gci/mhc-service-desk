@@ -23,6 +23,9 @@ const lifecycle =
     initialization: null,
   });
 
+export const DEV_AUTH_ENABLED =
+  import.meta.env.VITE_DEV_AUTH === "1" && import.meta.env.MODE === "development";
+
 export function isDevAuthEnabled(): boolean {
   return (
     import.meta.env.VITE_DEV_AUTH === "1" &&
@@ -58,6 +61,14 @@ export function initKeycloak(): Promise<AuthState> {
 }
 
 async function initializeKeycloak(): Promise<AuthState> {
+  if (DEV_AUTH_ENABLED) {
+    return {
+      status: "authenticated",
+      token: "dev",
+      profile: { username: "demo" },
+    };
+  }
+
   const kc = getKeycloak();
   try {
     const authenticated = await kc.init({
@@ -76,6 +87,12 @@ async function initializeKeycloak(): Promise<AuthState> {
     };
   } catch (err) {
     lifecycle.keycloak = null;
-    return { status: "error", error: err instanceof Error ? err.message : String(err) };
+    return { status: "error", error: authErrorMessage(err) };
   }
+}
+
+function authErrorMessage(error: unknown): string {
+  if (error instanceof Error && error.message.trim()) return error.message;
+  if (typeof error === "string" && error.trim()) return error;
+  return "Keycloak authentication failed. Please try again.";
 }

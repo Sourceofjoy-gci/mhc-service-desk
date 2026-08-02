@@ -5,7 +5,23 @@ import {
   configureApiAuth,
   ticketsApi,
   type ApiAuthAdapter,
+  type TicketTrackingResult,
 } from "./api";
+
+const TRACKING_RESULT: TicketTrackingResult = {
+  reference: "O00123",
+  title: "Estate status enquiry",
+  tracking_status: "In Progress",
+  status_updated_at: "2026-08-02T10:15:00Z",
+  created_at: "2026-08-02T09:00:00Z",
+  updated_at: "2026-08-02T10:15:00Z",
+  office: "Mbabane (Main)",
+  service: "Estate registration or reference",
+  progress: [
+    { status: "Submitted", occurred_at: "2026-08-02T09:00:00Z" },
+    { status: "In Progress", occurred_at: "2026-08-02T10:15:00Z" },
+  ],
+};
 
 function jsonResponse(status: number, body: unknown = {}) {
   return new Response(status === 204 ? null : JSON.stringify(body), {
@@ -102,6 +118,48 @@ describe("API authentication", () => {
       false,
     );
     expect(adapter.getAccessToken).not.toHaveBeenCalled();
+  });
+
+  it("authenticates staff intake submissions", async () => {
+    const fetchMock = vi.spyOn(globalThis, "fetch").mockResolvedValueOnce(
+      jsonResponse(201, {
+        ticket_number: "OP-260730-000001",
+        domain: "operational",
+        title: "Callback request",
+        priority: "P3",
+        message: "Created",
+      }),
+    );
+
+    await ticketsApi.publicIntake({
+      request_type_code: "CALLBACK",
+      service_code: "GEN-INFO",
+      office_code: "MHC-MBA",
+      title: "Callback request",
+      description: "Please call the requester",
+      requester_name: "Tester",
+      consent: true,
+      channel: "call",
+    });
+
+    expect(requestHeaders(fetchMock.mock.calls[0]).get("Authorization")).toBe(
+      "Bearer old-token",
+    );
+  });
+
+  it("encodes the ticket reference for authenticated tracking lookup", async () => {
+    const fetchMock = vi
+      .spyOn(globalThis, "fetch")
+      .mockResolvedValueOnce(jsonResponse(200, TRACKING_RESULT));
+
+    await ticketsApi.track("O00123");
+
+    expect(fetchMock.mock.calls[0][0]).toBe(
+      "/api/v1/tickets/tracking/?reference=O00123",
+    );
+    expect(requestHeaders(fetchMock.mock.calls[0]).get("Authorization")).toBe(
+      "Bearer old-token",
+    );
   });
 
   it("lets the browser set multipart boundaries for FormData", async () => {

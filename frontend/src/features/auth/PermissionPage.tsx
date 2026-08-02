@@ -19,13 +19,13 @@ export default function PermissionPage() {
         </p>
       </div>
       <Button
-        render={<Link to="/public" />}
+        render={<Link to="/login" />}
         nativeButton={false}
         variant="outline"
         className="w-fit"
       >
         <ArrowLeft data-icon="inline-start" />
-        Return to public services
+        Return to sign-in
       </Button>
     </section>
   );

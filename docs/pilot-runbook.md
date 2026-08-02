@@ -199,15 +199,14 @@ mitigations, the key-rotation schedule, and the access-review cadence.
 * Fix: check `docker compose logs backend | grep ImproperlyConfigured`.
   Add the missing env var, redeploy.
 
-### 5.2 Public intake returns 429s to legitimate users
+### 5.2 Intake returns 401
 
-* Symptom: callers see "Too many requests" even when sending 1 per minute.
-* Cause: a single IP is behind a NAT; the `public_intake` zone is
-  5/min/IP.
-* Fix: have the caller authenticate via Keycloak (the rate limit
-  switches to per-user). For one-off campaigns, temporarily raise
-  `NGINX_intake_rate` in `infrastructure/nginx/conf.d/app.conf` and
-  redeploy Nginx.
+* Symptom: a call-centre or walk-in submission returns "Authentication
+  credentials were not provided."
+* Cause: public intake is disabled for this phase and the staff session or
+  access token is missing or expired.
+* Fix: sign in through Keycloak and retry the staff intake. Do not expose or
+  bypass the intake endpoint for anonymous callers.
 
 ### 5.3 SLA evaluator stopped
 

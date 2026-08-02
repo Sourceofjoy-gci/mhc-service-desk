@@ -14,28 +14,56 @@ def seed_workflow_for_tests() -> None:
         ("operational", "triage"): ("Triage", False, False, 20, "Being reviewed"),
         ("operational", "assigned"): ("Assigned", False, False, 30, "Assigned"),
         ("operational", "in_progress"): ("In Progress", False, False, 40, "Being worked on"),
+        ("operational", "escalated"): (
+            "Escalated",
+            False,
+            False,
+            85,
+            "Escalated for attention",
+        ),
         ("operational", "resolved"): ("Resolved", False, False, 90, "Response provided"),
         ("operational", "closed"): ("Closed", False, True, 100, "Closed"),
     }
     sm = {}
     for (domain, code), (name, is_initial, is_terminal, order, public_label) in statuses.items():
-        sm[(domain, code)] = Status.objects.create(
-            code=code, domain=domain, name=name, is_initial=is_initial,
-            is_terminal=is_terminal, order=order, public_label=public_label,
+        sm[(domain, code)], _ = Status.objects.update_or_create(
+            code=code,
+            domain=domain,
+            defaults={
+                "name": name,
+                "is_initial": is_initial,
+                "is_terminal": is_terminal,
+                "order": order,
+                "public_label": public_label,
+            },
         )
     transitions = [
         ("operational", "new", "triage", "Begin triage", False),
         ("operational", "triage", "assigned", "Assign", False),
         ("operational", "triage", "in_progress", "Start work", False),
         ("operational", "assigned", "in_progress", "Start work", False),
+        ("operational", "triage", "escalated", "Escalate", False),
+        ("operational", "assigned", "escalated", "Escalate", False),
+        ("operational", "in_progress", "escalated", "Escalate", False),
+        (
+            "operational",
+            "escalated",
+            "in_progress",
+            "Resume escalated work",
+            False,
+        ),
         ("operational", "in_progress", "resolved", "Resolve", True),
         ("operational", "resolved", "closed", "Close", False),
     ]
     for domain, frm, to, name, sets_res in transitions:
-        Transition.objects.create(
+        Transition.objects.update_or_create(
             domain=domain,
             from_status=sm[(domain, frm)],
             to_status=sm[(domain, to)],
-            name=name,
-            sets_resolution=sets_res,
+            defaults={
+                "name": name,
+                "sets_resolution": sets_res,
+                "required_fields": ["reason"] if to == "escalated" else [],
+                "is_active": True,
+            },
         )

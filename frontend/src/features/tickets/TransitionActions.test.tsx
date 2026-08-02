@@ -1,4 +1,4 @@
-import { screen, waitFor } from "@testing-library/react";
+import { act, screen, waitFor } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import { ApiError, type TicketDetail } from "@/lib/api";
@@ -42,11 +42,7 @@ const TICKET: TicketDetail = {
   updated_at: "2026-07-27T09:15:00Z",
   age_hours: 1.25,
   sla_health: "on_track",
-  available_transition_codes: [
-    "in_progress",
-    "waiting_requester",
-    "resolved",
-  ],
+  available_transition_codes: ["in_progress", "waiting_requester", "resolved"],
   description: "Please confirm the estate status.",
   requester: {
     id: "requester-1",
@@ -134,10 +130,7 @@ function deferred<T>() {
   return { promise, resolve, reject };
 }
 
-function renderActions(
-  onUpdated = vi.fn(),
-  onActivityChanged = vi.fn(),
-) {
+function renderActions(onUpdated = vi.fn(), onActivityChanged = vi.fn()) {
   renderWithProviders(
     <TransitionActions
       ticket={TICKET}
@@ -176,7 +169,11 @@ describe("server-driven transition actions", () => {
   });
 
   it("renders conditional required fields and submits the observed timestamp", async () => {
-    const refreshed = { ...TICKET, status_code: "resolved", status_name: "Resolved" };
+    const refreshed = {
+      ...TICKET,
+      status_code: "resolved",
+      status_name: "Resolved",
+    };
     harness.transition.mockResolvedValue(refreshed);
     const user = userEvent.setup();
     renderActions();
@@ -217,12 +214,26 @@ describe("server-driven transition actions", () => {
     const fields = await openResolve(user);
     await user.type(fields.code, "completed");
     await user.type(fields.summary, "Verified");
-    await user.click(screen.getByRole("button", { name: "Confirm Resolve" }));
+    const submitButton = screen.getByRole("button", {
+      name: "Confirm Resolve",
+    });
+    const form = submitButton.closest("form");
+    expect(form).not.toBeNull();
+    act(() => {
+      form?.dispatchEvent(
+        new Event("submit", { bubbles: true, cancelable: true }),
+      );
+      form?.dispatchEvent(
+        new Event("submit", { bubbles: true, cancelable: true }),
+      );
+    });
 
     await waitFor(() => expect(harness.transition).toHaveBeenCalledTimes(1));
     expect(fields.code).toBeDisabled();
     expect(fields.summary).toBeDisabled();
-    expect(screen.getByRole("button", { name: "Updating…" })).toBeDisabled();
+    expect(
+      screen.getByRole("button", { name: "Confirm Resolve" }),
+    ).toBeDisabled();
     expect(screen.getByRole("button", { name: "Cancel" })).toBeDisabled();
     expect(screen.getByText("Start work").closest("button")).toBeDisabled();
 
@@ -304,7 +315,9 @@ describe("server-driven transition actions", () => {
     ).toBeVisible();
     await user.click(screen.getByRole("button", { name: "Reload" }));
 
-    await waitFor(() => expect(harness.get).toHaveBeenCalledWith(TICKET.number));
+    await waitFor(() =>
+      expect(harness.get).toHaveBeenCalledWith(TICKET.number),
+    );
     expect(onUpdated).toHaveBeenCalledWith(refreshed);
     expect(onActivityChanged).toHaveBeenCalledTimes(1);
   });

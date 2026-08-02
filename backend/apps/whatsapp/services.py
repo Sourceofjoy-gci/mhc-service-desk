@@ -277,6 +277,7 @@ def process_inbound_whatsapp(
     text. We attribute the message to the contact by phone number.
     """
     from apps.contacts.models import Contact
+
     from .models import WhatsappMessage
 
     try:

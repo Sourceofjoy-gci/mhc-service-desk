@@ -8,7 +8,7 @@ from __future__ import annotations
 import json
 import logging
 import re
-from datetime import datetime, timezone
+from datetime import UTC, datetime
 
 REDACT_KEYS = {
     "password", "secret", "token", "authorization", "cookie",
@@ -41,7 +41,7 @@ def _scrub(value: object) -> object:
 class JSONFormatter(logging.Formatter):
     def format(self, record: logging.LogRecord) -> str:
         payload: dict[str, object] = {
-            "ts": datetime.now(tz=timezone.utc).isoformat(),
+            "ts": datetime.now(tz=UTC).isoformat(),
             "level": record.levelname,
             "logger": record.name,
             "msg": record.getMessage(),

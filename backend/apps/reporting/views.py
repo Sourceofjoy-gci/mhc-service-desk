@@ -11,7 +11,6 @@ from rest_framework.permissions import IsAuthenticated
 from rest_framework.request import Request
 from rest_framework.response import Response
 
-from apps.identity_access.authentication import KeycloakJWTAuthentication
 from apps.identity_access.scope import (
     ScopePermission,
     attach_scopes,
@@ -77,9 +76,10 @@ def export_tickets_csv(request: Request) -> StreamingHttpResponse:
 @permission_classes([IsAuthenticated, ScopePermission])
 def operational_dashboard(request: Request) -> Response:
     """Live KPIs for the operational service desk."""
-    from django.db.models import Count, Q
-    from django.utils import timezone
     from datetime import timedelta
+
+    from django.db.models import Count
+    from django.utils import timezone
 
     attach_scopes(request)
     if not has_unrestricted_domain_scope(
@@ -119,9 +119,10 @@ def operational_dashboard(request: Request) -> Response:
 @permission_classes([IsAuthenticated, ScopePermission])
 def it_dashboard(request: Request) -> Response:
     """Live KPIs for the IT service desk."""
-    from django.db.models import Count, Q
-    from django.utils import timezone
     from datetime import timedelta
+
+    from django.db.models import Count
+    from django.utils import timezone
 
     attach_scopes(request)
     if not has_unrestricted_domain_scope(request.user, "it", request=request):

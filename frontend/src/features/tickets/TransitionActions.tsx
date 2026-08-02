@@ -1,5 +1,5 @@
 import { useMutation } from "@tanstack/react-query";
-import { useState, type FormEvent } from "react";
+import { useRef, useState, type FormEvent } from "react";
 import { AlertCircle } from "lucide-react";
 import { Alert, AlertDescription, AlertTitle } from "@/components/ui/alert";
 import { Button } from "@/components/ui/button";
@@ -11,9 +11,15 @@ import {
   DialogHeader,
   DialogTitle,
 } from "@/components/ui/dialog";
-import { Field, FieldError, FieldGroup, FieldLabel } from "@/components/ui/field";
+import {
+  Field,
+  FieldError,
+  FieldGroup,
+  FieldLabel,
+} from "@/components/ui/field";
 import { Input } from "@/components/ui/input";
 import { Textarea } from "@/components/ui/textarea";
+import { Spinner } from "@/components/ui/spinner";
 import {
   apiProblem,
   ticketsApi,
@@ -53,9 +59,12 @@ export function TransitionActions({
 }: TransitionActionsProps) {
   const [chosen, setChosen] = useState<AvailableTransition | null>(null);
   const [values, setValues] = useState<FormValues>(EMPTY_VALUES);
-  const [clientErrors, setClientErrors] = useState<Record<string, string[]>>({});
+  const [clientErrors, setClientErrors] = useState<Record<string, string[]>>(
+    {},
+  );
   const [isReloading, setIsReloading] = useState(false);
   const [reloadError, setReloadError] = useState<unknown>(null);
+  const submitLock = useRef(false);
 
   const transition = useMutation({
     mutationFn: (submitted: TransitionValues) =>
@@ -67,6 +76,9 @@ export function TransitionActions({
       onUpdated(refreshedTicket);
       setChosen(null);
       await onActivityChanged?.();
+    },
+    onSettled: () => {
+      submitLock.current = false;
     },
   });
 
@@ -86,7 +98,7 @@ export function TransitionActions({
 
   const submit = (event: FormEvent<HTMLFormElement>) => {
     event.preventDefault();
-    if (!chosen || transition.isPending) return;
+    if (!chosen || submitLock.current) return;
 
     const errors: Record<string, string[]> = {};
     if (chosen.requires_reason && !values.reason.trim()) {
@@ -107,6 +119,7 @@ export function TransitionActions({
       submitted.resolution_code = values.resolution_code.trim();
       submitted.resolution_summary = values.resolution_summary.trim();
     }
+    submitLock.current = true;
     transition.mutate(submitted);
   };
 
@@ -134,7 +147,11 @@ export function TransitionActions({
   const disabled = transition.isPending || isReloading;
 
   return (
-    <div className="flex flex-wrap gap-2" role="group" aria-label="Ticket actions">
+    <div
+      className="flex flex-wrap gap-2"
+      role="group"
+      aria-label="Ticket actions"
+    >
       {ticket.available_transitions.map((available) => (
         <Button
           key={available.to_status}
@@ -182,7 +199,9 @@ export function TransitionActions({
                       }
                     />
                     <FieldError
-                      errors={fieldErrors.reason?.map((message) => ({ message }))}
+                      errors={fieldErrors.reason?.map((message) => ({
+                        message,
+                      }))}
                     />
                   </Field>
                 ) : null}
@@ -213,7 +232,9 @@ export function TransitionActions({
                         }))}
                       />
                     </Field>
-                    <Field data-invalid={Boolean(fieldErrors.resolution_summary)}>
+                    <Field
+                      data-invalid={Boolean(fieldErrors.resolution_summary)}
+                    >
                       <FieldLabel htmlFor="transition-resolution-summary">
                         Resolution summary
                       </FieldLabel>
@@ -232,9 +253,11 @@ export function TransitionActions({
                         }
                       />
                       <FieldError
-                        errors={fieldErrors.resolution_summary?.map((message) => ({
+                        errors={fieldErrors.resolution_summary?.map(
+                          (message) => ({
                             message,
-                        }))}
+                          }),
+                        )}
                       />
                     </Field>
                   </>
@@ -244,7 +267,9 @@ export function TransitionActions({
               {stale ? (
                 <Alert variant="destructive">
                   <AlertCircle data-icon="inline-start" aria-hidden />
-                  <AlertTitle>This ticket changed since you opened it</AlertTitle>
+                  <AlertTitle>
+                    This ticket changed since you opened it
+                  </AlertTitle>
                   <AlertDescription>
                     Reload the current ticket before choosing another action.
                   </AlertDescription>
@@ -289,13 +314,17 @@ export function TransitionActions({
                 </Button>
                 {stale ? (
                   <Button type="button" disabled={disabled} onClick={reload}>
-                    {isReloading ? "Reloading…" : "Reload"}
+                    {isReloading ? (
+                      <Spinner aria-hidden data-icon="inline-start" />
+                    ) : null}
+                    Reload
                   </Button>
                 ) : (
                   <Button type="submit" disabled={disabled}>
-                    {transition.isPending
-                      ? "Updating…"
-                      : `Confirm ${chosen.label}`}
+                    {transition.isPending ? (
+                      <Spinner aria-hidden data-icon="inline-start" />
+                    ) : null}
+                    Confirm {chosen.label}
                   </Button>
                 )}
               </DialogFooter>

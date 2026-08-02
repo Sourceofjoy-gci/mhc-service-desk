@@ -2,7 +2,7 @@ import { useState } from "react";
 import { screen, waitFor } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { useQuery } from "@tanstack/react-query";
-import type { KeycloakProfile, KeycloakTokenParsed } from "keycloak-js";
+import type { KeycloakTokenParsed } from "keycloak-js";
 import { useLocation } from "react-router-dom";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { renderWithProviders } from "@/test/render";
@@ -47,22 +47,13 @@ function makeKeycloak(): FakeKeycloak {
     token: "access-token",
     tokenParsed: {
       sub: "subject-123",
-      preferred_username: "ignored-claim-name",
+      preferred_username: "a.agent",
+      given_name: "Anele",
+      family_name: "Agent",
       groups: ["ops-agents", "report-viewers"],
       exp: 1_900_000_000,
     },
-    loadUserProfile: vi.fn().mockResolvedValue({
-      id: "subject-123",
-      username: "a.agent",
-      firstName: "Anele",
-      lastName: "Agent",
-      email: "anele@example.test",
-      enabled: true,
-      emailVerified: true,
-      totp: false,
-      createdTimestamp: 1_700_000_000,
-      attributes: {},
-    } satisfies KeycloakProfile),
+    loadUserProfile: vi.fn().mockRejectedValue(undefined),
     updateToken: vi.fn().mockResolvedValue(true),
     login: vi.fn().mockResolvedValue(undefined),
     logout: vi.fn().mockResolvedValue(undefined),
@@ -190,11 +181,77 @@ describe("AuthProvider", () => {
         subject: "subject-123",
         username: "a.agent",
         displayName: "Anele Agent",
-        groups: ["ops-agents", "report-viewers"],
+        groups: ["ops-agents"],
       }),
     );
     expect(screen.getByLabelText("expiry")).toHaveTextContent("1900000000");
-    expect(keycloak.loadUserProfile).toHaveBeenCalledOnce();
+  });
+
+  it("builds the authenticated identity when the account profile endpoint is unavailable", async () => {
+    vi.mocked(initKeycloak).mockResolvedValue({
+      status: "authenticated",
+      token: "access-token",
+    });
+    keycloak.tokenParsed = {
+      sub: "subject-123",
+      preferred_username: "a.agent",
+      given_name: "Anele",
+      family_name: "Agent",
+      groups: ["ops-agents"],
+      exp: 1_900_000_000,
+    };
+    keycloak.loadUserProfile.mockRejectedValue(undefined);
+
+    renderWithProviders(
+      <AuthProvider>
+        <AuthProbe />
+      </AuthProvider>,
+    );
+
+    await waitFor(() =>
+      expect(screen.getByLabelText("state")).toHaveTextContent("authenticated"),
+    );
+    expect(screen.getByLabelText("user")).toHaveTextContent(
+      JSON.stringify({
+        subject: "subject-123",
+        username: "a.agent",
+        displayName: "Anele Agent",
+        groups: ["ops-agents"],
+      }),
+    );
+  });
+
+  it("uses Keycloak realm roles as staff memberships", async () => {
+    vi.mocked(initKeycloak).mockResolvedValue({
+      status: "authenticated",
+      token: "access-token",
+    });
+    keycloak.tokenParsed = {
+      sub: "subject-123",
+      preferred_username: "a.agent",
+      given_name: "Anele",
+      family_name: "Agent",
+      groups: ["/ops-agents", "/department/admin"],
+      realm_access: { roles: ["agent-it", "ops-agents"] },
+    };
+
+    renderWithProviders(
+      <AuthProvider>
+        <AuthProbe />
+      </AuthProvider>,
+    );
+
+    await waitFor(() =>
+      expect(screen.getByLabelText("state")).toHaveTextContent("authenticated"),
+    );
+    expect(screen.getByLabelText("user")).toHaveTextContent(
+      JSON.stringify({
+        subject: "subject-123",
+        username: "a.agent",
+        displayName: "Anele Agent",
+        groups: ["ops-agents", "agent-it"],
+      }),
+    );
   });
 
   it.each(PRIMARY_DESIGNATION_ROLES)(

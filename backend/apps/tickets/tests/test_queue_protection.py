@@ -118,6 +118,7 @@ def test_0010_changes_queue_deletion_from_set_null_to_protect_and_rolls_back() -
 
     previous = "0009_protect_ticket_assignee"
     leaf = "0010_protect_ticket_queue"
+    current_leaf = "0013_escalated_workflow"
     try:
         executor = MigrationExecutor(connection)
         executor.migrate([("tickets", previous)])
@@ -137,4 +138,4 @@ def test_0010_changes_queue_deletion_from_set_null_to_protect_and_rolls_back() -
         rollback_field = rollback_apps.get_model("tickets", "Ticket")._meta.get_field("queue")
         assert rollback_field.remote_field.on_delete is SET_NULL
     finally:
-        MigrationExecutor(connection).migrate([("tickets", leaf)])
+        MigrationExecutor(connection).migrate([("tickets", current_leaf)])

@@ -116,25 +116,26 @@ def create_it_child_ticket(
     requester = parent.requester
     office = parent.office
 
-    # Find next IT number
-    from .services import next_ticket_number
-    number = next_ticket_number("it")
+    from .references import create_referenced_ticket
 
-    child = Ticket.objects.create(
-        number=number,
+    child = create_referenced_ticket(
         domain="it",
-        title=summary.strip()[:255],
-        description="",  # the operational parent's body is never copied
-        status=initial_status,
-        priority=technical_priority,
-        channel="internal",
-        source_account=actor.keycloak_subject,
-        requester=requester,  # the same requester for context; agent can override
-        service=service,
-        request_type=request_type,
-        office=office,
-        matter_reference=parent.matter_reference if carry_matter_reference else "",
-        confidentiality="sensitive",
+        values={
+            "title": summary.strip()[:255],
+            "description": "",  # the operational parent's body is never copied
+            "status": initial_status,
+            "priority": technical_priority,
+            "channel": "internal",
+            "source_account": actor.keycloak_subject,
+            "requester": requester,  # the same requester for context; agent can override
+            "service": service,
+            "request_type": request_type,
+            "office": office,
+            "matter_reference": (
+                parent.matter_reference if carry_matter_reference else ""
+            ),
+            "confidentiality": "sensitive",
+        },
     )
 
     event_actor = actor.keycloak_subject
@@ -144,6 +145,7 @@ def create_it_child_ticket(
         action="ticket.created",
         before={},
         after={
+            "reference": child.number,
             "domain": "it",
             "channel": "internal",
             "priority": technical_priority,

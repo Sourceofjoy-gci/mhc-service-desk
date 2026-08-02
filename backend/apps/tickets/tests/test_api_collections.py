@@ -12,6 +12,7 @@ from rest_framework.permissions import AllowAny
 from rest_framework.test import APIClient, APIRequestFactory
 
 from apps.identity_access.models import Role, User
+from apps.tickets import services
 from apps.tickets.models import Ticket
 from apps.workflow.models import Status
 
@@ -216,6 +217,39 @@ def test_ticket_domain_filter_rejects_an_unknown_domain(
     assert response.data["fields"] == {
         "domain": ['"finance" is not a valid choice.'],
     }
+
+
+def test_reference_search_returns_only_the_in_scope_ticket(basic_world):
+    request_type = basic_world["gen_info"].request_types.get()
+    operational = services.create_ticket(
+        domain="operational",
+        title="Searchable operational reference",
+        description="",
+        requester=basic_world["contact"],
+        service=basic_world["gen_info"],
+        request_type=request_type,
+        office=basic_world["office"],
+        channel="call",
+    )
+    it_ticket = services.create_ticket(
+        domain="it",
+        title="Hidden IT reference",
+        description="",
+        requester=basic_world["contact"],
+        service=basic_world["it_inc"],
+        request_type=basic_world["it_inc"].request_types.get(),
+        office=basic_world["office"],
+        channel="internal",
+    )
+    client = _client_for_groups(["ops-agents"])
+
+    visible = client.get(reverse("tickets-list"), {"search": operational.number})
+    hidden = client.get(reverse("tickets-list"), {"search": it_ticket.number})
+
+    assert [item["number"] for item in visible.data["results"]] == [
+        operational.number
+    ]
+    assert hidden.data["results"] == []
 
 
 def test_ticket_list_uses_cursor_envelope_without_losing_boundary_rows(collection_tickets):

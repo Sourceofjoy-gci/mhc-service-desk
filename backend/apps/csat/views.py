@@ -2,13 +2,13 @@
 from __future__ import annotations
 
 import hashlib
-from datetime import datetime, timezone
+from datetime import UTC, datetime
 
+from rest_framework import status
 from rest_framework.decorators import api_view, permission_classes
 from rest_framework.permissions import AllowAny
 from rest_framework.request import Request
 from rest_framework.response import Response
-from rest_framework import status
 
 from .models import CsatResponse
 
@@ -32,6 +32,6 @@ def submit_csat(request: Request, token: str) -> Response:
         return Response({"detail": "rating must be 1..5"}, status=status.HTTP_400_BAD_REQUEST)
     csat.rating = rating
     csat.comment = (request.data.get("comment") or "")[:4000]
-    csat.submitted_at = datetime.now(tz=timezone.utc)
+    csat.submitted_at = datetime.now(tz=UTC)
     csat.save(update_fields=["rating", "comment", "submitted_at"])
     return Response({"status": "thanks"})

@@ -76,3 +76,28 @@ def test_keycloak_realm_declares_primary_roles_without_default_assignments():
     }
     assert set(PRIMARY_STAFF_ROLES).isdisjoint(default_group_roles)
     assert set(PRIMARY_STAFF_ROLES).isdisjoint(default_user_roles)
+
+
+def test_frontend_client_includes_realm_roles_in_staff_tokens():
+    realm_path = Path(__file__).resolve().parents[2] / "infrastructure/keycloak/realm-mhc.json"
+    realm = json.loads(realm_path.read_text(encoding="utf-8"))
+    frontend_client = next(
+        client for client in realm["clients"] if client["clientId"] == "mhc-frontend"
+    )
+
+    assert "roles" in frontend_client["defaultClientScopes"]
+
+    roles_scope = next(scope for scope in realm["clientScopes"] if scope["name"] == "roles")
+    realm_roles_mapper = next(
+        mapper
+        for mapper in roles_scope["protocolMappers"]
+        if mapper["protocolMapper"] == "oidc-usermodel-realm-role-mapper"
+    )
+    assert realm_roles_mapper["config"] == {
+        "user.attribute": "foo",
+        "introspection.token.claim": "true",
+        "access.token.claim": "true",
+        "claim.name": "realm_access.roles",
+        "jsonType.label": "String",
+        "multivalued": "true",
+    }

@@ -397,6 +397,8 @@ def verify_custody_chain(ticket: Ticket) -> bool:
 
 
 def custody_event_type_for_transition(code: str) -> str:
+    if code == "escalated":
+        return TicketCustodyEvent.EventType.ESCALATED
     if code == "reopened":
         return TicketCustodyEvent.EventType.REOPENED
     if code == "closed":

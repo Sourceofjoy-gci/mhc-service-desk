@@ -7,21 +7,24 @@
 # =============================================================================
 
 # ---- dev stage: used by docker-compose dev profile (npm run dev) -------
-FROM node:22-alpine AS dev
+FROM node:22.14.0-alpine AS dev
 WORKDIR /app
-COPY package.json ./
-RUN npm install --no-audit --no-fund --legacy-peer-deps
+COPY package.json package-lock.json ./
+ARG NPM_CONFIG_STRICT_SSL=true
+RUN npm_config_strict_ssl=$NPM_CONFIG_STRICT_SSL npm install --no-audit --no-fund --legacy-peer-deps
+RUN sha256sum package-lock.json | cut -d ' ' -f 1 > node_modules/.mhc-package-lock-hash
 COPY . .
 EXPOSE 5173
 CMD ["npm", "run", "dev", "--", "--host", "0.0.0.0"]
 
 # ---- production target -----------------------------------------------
-FROM node:22-alpine AS production
+FROM node:22.14.0-alpine AS production
 WORKDIR /app
 ENV NODE_ENV=production
 
-COPY package.json ./
-RUN npm install --no-audit --no-fund --legacy-peer-deps
+COPY package.json package-lock.json ./
+ARG NPM_CONFIG_STRICT_SSL=true
+RUN npm_config_strict_ssl=$NPM_CONFIG_STRICT_SSL npm install --no-audit --no-fund --legacy-peer-deps
 
 COPY . .
 

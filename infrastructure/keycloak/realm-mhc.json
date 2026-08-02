@@ -98,7 +98,7 @@
       "attributes": {
         "pkce.code.challenge.method": "S256"
       },
-      "defaultClientScopes": ["openid", "profile", "email", "groups"],
+      "defaultClientScopes": ["openid", "profile", "email", "groups", "roles"],
       "protocolMappers": [
         {
           "name": "mhc-backend-audience",
@@ -134,6 +134,30 @@
             "id.token.claim": "true",
             "access.token.claim": "true",
             "claim.name": "groups"
+          }
+        }
+      ]
+    },
+    {
+      "name": "roles",
+      "protocol": "openid-connect",
+      "attributes": {
+        "include.in.token.scope": "false",
+        "display.on.consent.screen": "false"
+      },
+      "protocolMappers": [
+        {
+          "name": "realm roles",
+          "protocol": "openid-connect",
+          "protocolMapper": "oidc-usermodel-realm-role-mapper",
+          "consentRequired": false,
+          "config": {
+            "user.attribute": "foo",
+            "introspection.token.claim": "true",
+            "access.token.claim": "true",
+            "claim.name": "realm_access.roles",
+            "jsonType.label": "String",
+            "multivalued": "true"
           }
         }
       ]

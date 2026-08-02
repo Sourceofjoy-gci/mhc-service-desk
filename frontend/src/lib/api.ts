@@ -36,6 +36,34 @@ export function configureApiAuth(adapter: ApiAuthAdapter): () => void {
 export type Domain = "operational" | "it";
 export type Priority = "P1" | "P2" | "P3" | "P4";
 
+export type TrackingStatus =
+  | "Submitted"
+  | "Acknowledged"
+  | "Assigned"
+  | "In Progress"
+  | "Awaiting Information"
+  | "Escalated"
+  | "Resolved"
+  | "Closed"
+  | "Reopened";
+
+export interface TicketTrackingProgress {
+  status: TrackingStatus;
+  occurred_at: string;
+}
+
+export interface TicketTrackingResult {
+  reference: string;
+  title: string;
+  tracking_status: TrackingStatus;
+  status_updated_at: string;
+  created_at: string;
+  updated_at: string;
+  office: string;
+  service: string;
+  progress: TicketTrackingProgress[];
+}
+
 export interface TicketCapabilities {
   can_update_work_state: boolean;
   can_self_assign: boolean;
@@ -451,6 +479,10 @@ export const ticketsApi = {
     );
     return normalizePage(value);
   },
+  track: (reference: string) => {
+    const query = new URLSearchParams({ reference }).toString();
+    return api<TicketTrackingResult>(`/tickets/tracking/?${query}`);
+  },
   get: (number: string) => api<TicketDetail>(`/tickets/${number}/`),
   kanban: (domain: Domain) => api<KanbanData>(`/tickets/kanban/?domain=${domain}`),
   updateWorkState: (number: string, values: TicketWorkStateUpdate) =>
@@ -506,7 +538,7 @@ export const ticketsApi = {
       title: string;
       priority: string;
       message: string;
-    }>(`/tickets/public/intake/`, { method: "POST", body: data, auth: false }),
+    }>(`/tickets/public/intake/`, { method: "POST", body: data }),
 };
 
 export const servicesApi = {

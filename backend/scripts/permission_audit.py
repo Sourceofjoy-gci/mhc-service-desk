@@ -24,12 +24,13 @@ sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 os.environ.setdefault("DJANGO_SETTINGS_MODULE", "config.settings.dev")
 
 import django  # noqa: I001
+
 django.setup()
 
 # These imports consume configured Django/DRF settings and must follow setup.
+from django.urls import URLPattern, URLResolver, get_resolver  # noqa: E402
 from rest_framework.permissions import AllowAny  # noqa: E402, I001
 from rest_framework.views import APIView  # noqa: E402
-from django.urls import URLPattern, URLResolver, get_resolver  # noqa: E402
 
 
 @dataclass(frozen=True)

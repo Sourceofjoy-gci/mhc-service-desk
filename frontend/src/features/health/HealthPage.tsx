@@ -24,6 +24,7 @@ import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
 import { Skeleton } from "@/components/ui/skeleton";
 import { Spinner } from "@/components/ui/spinner";
+import { api } from "@/lib/api";
 import { cn } from "@/lib/utils";
 
 const SUCCESS_BADGE_CLASS = "bg-success text-success-foreground";
@@ -44,9 +45,7 @@ interface HealthResponse {
 }
 
 async function fetchHealth(): Promise<HealthResponse> {
-  const r = await fetch("/api/v1/health");
-  if (!r.ok) throw new Error(`Health check failed: ${r.status}`);
-  return r.json();
+  return api<HealthResponse>("/health");
 }
 
 const CHECK_META: Record<

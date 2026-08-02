@@ -44,7 +44,7 @@ export function TicketCard({ ticket, draggable = false }: TicketCardProps) {
         <CardHeader className="gap-2">
           <div className="flex items-center justify-between gap-2">
             <CardDescription>
-              <span className="font-mono text-[11px] font-medium tracking-tight">
+              <span className="font-mono text-xs font-medium tracking-tight">
                 {ticket.number}
               </span>
             </CardDescription>

@@ -106,6 +106,16 @@ describe("Keycloak initialization lifecycle", () => {
     expect(keycloakMock.instance.init).toHaveBeenCalledTimes(2);
   });
 
+  it("returns a useful message when the Keycloak adapter rejects without an error", async () => {
+    keycloakMock.instance.init.mockRejectedValue(undefined);
+    const { initKeycloak } = await import("./keycloak");
+
+    await expect(initKeycloak()).resolves.toEqual({
+      status: "error",
+      error: "Keycloak authentication failed. Please try again.",
+    });
+  });
+
   it("reuses a successful lifecycle after a module reload", async () => {
     keycloakMock.instance.init.mockResolvedValue(false);
     const firstModule = await import("./keycloak");

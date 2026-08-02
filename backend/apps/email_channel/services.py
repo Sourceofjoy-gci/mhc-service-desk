@@ -12,14 +12,12 @@ from datetime import datetime
 
 import bleach
 from django.db import transaction
-from django.utils import timezone
 
 from apps.catalogue.models import RequestType, Service
 from apps.contacts.models import Contact
 from apps.organisations.models import Office
 from apps.tickets import services as ticket_services
-from apps.tickets.models import OutboxEvent, Ticket, TicketMessage
-from apps.workflow.models import Status
+from apps.tickets.models import Ticket, TicketMessage
 
 from .models import Mailbox
 
@@ -41,8 +39,11 @@ def _parse_address(value: str) -> tuple[str, str | None]:
 
 
 def _thread_token_in_subject(subject: str) -> str | None:
-    """Look for the platform-issued ``[OP-202607-000001]`` token in the subject."""
-    m = re.search(r"\[((?:OP|IT)-\d{6}-\d{6})\]", subject or "")
+    """Find a current or immutable legacy ticket token in an email subject."""
+    m = re.search(
+        r"\[([A-Z][0-9]{5}|[A-Z][A-Z0-9]{1,7}-[0-9]{6}-[0-9]{6})\]",
+        subject or "",
+    )
     return m.group(1) if m else None
 
 

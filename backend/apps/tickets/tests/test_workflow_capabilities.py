@@ -131,6 +131,7 @@ def test_required_role_hides_transition_but_administrators_bypass_it(basic_world
     assert not available_transitions(ticket, _user(["ops-agents"])).exists()
     assert available_transitions(ticket, _user(["ops-supervisors"])).get() == transition
     assert available_transitions(ticket, _user(["system-admins"])).get() == transition
+    assert available_transitions(ticket, _user(["admin"])).get() == transition
 
 
 @pytest.mark.parametrize("role_key", DESIGNATION_KEYS)

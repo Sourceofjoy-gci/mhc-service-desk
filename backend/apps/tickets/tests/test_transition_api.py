@@ -149,6 +149,27 @@ def test_role_restricted_transition_returns_forbidden_without_side_effects(basic
     _assert_no_transition_side_effects(ticket, previous_updated_at)
 
 
+def test_realm_role_supervisor_can_execute_a_legacy_role_transition(basic_world):
+    actor = _user(["supervisor-operational"])
+    ticket = _ticket(basic_world)
+    transition = Transition.objects.get(
+        domain=ticket.domain,
+        from_status=ticket.status,
+        to_status__code="triage",
+    )
+    transition.required_role = "ops-supervisors"
+    transition.save(update_fields=["required_role"])
+
+    response = _post(
+        actor,
+        ticket,
+        {"to_status": "triage", "updated_at": ticket.updated_at.isoformat()},
+    )
+
+    assert response.status_code == 200
+    assert response.data["status_code"] == "triage"
+
+
 @pytest.mark.parametrize("missing", ["resolution_code", "resolution_summary"])
 def test_resolution_transition_requires_code_and_summary(basic_world, missing):
     actor = _user(["ops-agents"])
@@ -213,3 +234,40 @@ def test_reason_requirement_and_success_return_refreshed_next_capabilities(basic
     assert OutboxEvent.objects.filter(
         aggregate_id=str(ticket.id), event_type="ticket.transitioned"
     ).count() == 1
+
+
+def test_escalation_requires_a_reason_and_records_the_responsible_actor(basic_world):
+    actor = _user(["ops-agents"])
+    ticket = _ticket(basic_world, status_code="in_progress")
+
+    missing = _post(
+        actor,
+        ticket,
+        {"to_status": "escalated", "updated_at": ticket.updated_at.isoformat()},
+    )
+    assert missing.status_code == 400
+    assert missing.data["fields"] == {"reason": ["This field is required."]}
+
+    response = _post(
+        actor,
+        ticket,
+        {
+            "to_status": "escalated",
+            "updated_at": ticket.updated_at.isoformat(),
+            "reason": "SLA risk",
+        },
+    )
+
+    assert response.status_code == 200
+    ticket.refresh_from_db()
+    event = ticket.custody_events.order_by("sequence").last()
+    assert event is not None
+    assert event.event_type == "escalated"
+    assert event.actor_subject == actor.keycloak_subject
+    assert event.occurred_at is not None
+    assert event.reason == "SLA risk"
+    audit = AuditEvent.objects.get(
+        object_id=str(ticket.id), action="ticket.transitioned"
+    )
+    assert audit.actor_subject == actor.keycloak_subject
+    assert audit.occurred_at is not None

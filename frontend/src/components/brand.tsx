@@ -57,7 +57,7 @@ export function BrandLockup({ className, size = "md" }: BrandLockupProps) {
         <span className={cn("font-semibold tracking-tight", lockupSize.text)}>
           MHC Service Desk
         </span>
-        <span className="text-[10px] font-medium uppercase tracking-wider text-muted-foreground">
+        <span className="text-xs font-medium uppercase tracking-wider text-muted-foreground">
           Master of the High Court
         </span>
       </div>

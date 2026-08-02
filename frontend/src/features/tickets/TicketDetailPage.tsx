@@ -202,7 +202,10 @@ function Relationships({
   relationships: TicketRelationship[];
 }) {
   return (
-    <section aria-labelledby="relationships-heading" className="space-y-3">
+    <section
+      aria-labelledby="relationships-heading"
+      className="flex flex-col gap-3"
+    >
       <div>
         <h2 id="relationships-heading" className="text-base font-semibold">
           Relationships
@@ -424,7 +427,7 @@ export default function TicketDetailPage() {
         data-testid="ticket-workspace-layout"
         className="grid grid-cols-1 gap-6 lg:grid-cols-[minmax(0,2fr)_minmax(18rem,1fr)]"
       >
-        <main className="min-w-0" aria-label="Ticket activity workspace">
+        <section className="min-w-0" aria-label="Ticket activity workspace">
           <Card className="rounded-lg!">
             <CardHeader>
               <CardTitle>
@@ -447,7 +450,7 @@ export default function TicketDetailPage() {
               ) : null}
             </CardContent>
           </Card>
-        </main>
+        </section>
 
         <aside
           className="flex min-w-0 flex-col gap-5"

@@ -24,7 +24,7 @@ def test_0005_table_rolls_back_and_restores_through_current_leaf():
     """The original custody-table migration must reverse and replay cleanly."""
     from django.db.migrations.executor import MigrationExecutor
 
-    leaf = "0009_protect_ticket_assignee"
+    leaf = "0013_escalated_workflow"
     table = "ticket_custody_event"
     try:
         executor = MigrationExecutor(connection)
@@ -350,7 +350,7 @@ def test_0006_rollback_restores_trigger_fk_index_and_legacy_data(basic_world):
             with transaction.atomic(), connection.cursor() as cursor:
                 cursor.execute("DELETE FROM ticket WHERE id = %s", [ticket.pk])
     finally:
-        MigrationExecutor(connection).migrate([("tickets", "0009_protect_ticket_assignee")])
+        MigrationExecutor(connection).migrate([("tickets", "0013_escalated_workflow")])
 
 
 def test_0007_keeps_database_cascade_while_collector_skips_custody():
@@ -416,7 +416,7 @@ def test_0007_keeps_database_cascade_while_collector_skips_custody():
             assert cursor.fetchone() == ("c",)
     finally:
         MigrationExecutor(connection).migrate(
-            [("tickets", "0009_protect_ticket_assignee")]
+            [("tickets", "0013_escalated_workflow")]
         )
 
 
@@ -485,7 +485,7 @@ def test_0007_0008_and_rollback_enforce_their_distinct_delete_contracts(basic_wo
         assert not Ticket._base_manager.filter(pk=rolled_back_0007.pk).exists()
     finally:
         MigrationExecutor(connection).migrate(
-            [("tickets", "0009_protect_ticket_assignee")]
+            [("tickets", "0013_escalated_workflow")]
         )
 
 

@@ -12,22 +12,21 @@ from typing import Never, Protocol, runtime_checkable
 
 from django.db.models import Q, QuerySet
 from rest_framework import mixins, serializers, status, viewsets
-from rest_framework.decorators import action, api_view, permission_classes, throttle_classes
+from rest_framework.decorators import action, api_view, permission_classes
 from rest_framework.exceptions import NotFound, PermissionDenied
-from rest_framework.permissions import AllowAny, IsAuthenticated
+from rest_framework.permissions import IsAuthenticated
 from rest_framework.request import Request
 from rest_framework.response import Response
-from rest_framework.throttling import AnonRateThrottle
 
 from apps.contacts.models import Contact
 from apps.identity_access.authentication import KeycloakJWTAuthentication
 from apps.identity_access.models import User
 from apps.identity_access.pagination import TicketCursorPagination
 from apps.identity_access.scope import (
+    Scope,
     ScopePermission,
     attach_scopes,
     has_unrestricted_domain_scope,
-    public_endpoint,
     scope_ticket_queryset,
 )
 from apps.sla.models import SlaPolicy
@@ -46,6 +45,8 @@ from .api import (
     RoutingReceiptSerializer,
     TicketDetailSerializer,
     TicketListSerializer,
+    TicketTrackingLookupSerializer,
+    TicketTrackingSerializer,
     TransitionRequestSerializer,
     WorkStateRequestSerializer,
 )
@@ -53,6 +54,7 @@ from .assignment import assign_ticket, route_ticket
 from .eligibility import eligible_assignees
 from .models import Ticket
 from .permissions import can_add_ticket_content, can_assign
+from .tracking import build_tracking_projection, tracking_status_for
 
 logger = logging.getLogger(__name__)
 
@@ -108,11 +110,6 @@ def _serializer_error_fields(
     }
 
 
-class PublicIntakeThrottle(AnonRateThrottle):
-    """Tight throttle for the public web form (FR-073 abuse protection)."""
-    scope = "public_intake"
-
-
 class TicketViewSet(
     mixins.ListModelMixin,
     mixins.RetrieveModelMixin,
@@ -126,7 +123,9 @@ class TicketViewSet(
     authentication_classes = [KeycloakJWTAuthentication]
     permission_classes = [IsAuthenticated, ScopePermission]
     lookup_field = "number"
-    lookup_value_regex = "[A-Z]{2}-\\d{6}-\\d{6}"
+    lookup_value_regex = (
+        "[A-Z][0-9]{5}|[A-Z][A-Z0-9]{1,7}-[0-9]{6}-[0-9]{6}"
+    )
     pagination_class = TicketCursorPagination
 
     def permission_denied(
@@ -195,6 +194,40 @@ class TicketViewSet(
                 | Q(matter_reference__icontains=params["search"])
             )
         return qs
+
+    @action(detail=False, methods=["get"], url_path="tracking")
+    def tracking(self, request: Request) -> Response:
+        lookup = TicketTrackingLookupSerializer(data=request.query_params)
+        if not lookup.is_valid():
+            return _ticket_action_error(
+                request,
+                code="invalid_ticket_reference",
+                detail="Enter a valid ticket reference.",
+                fields=_serializer_error_fields(lookup.errors),
+                response_status=status.HTTP_400_BAD_REQUEST,
+            )
+        try:
+            ticket = (
+                self.get_queryset()
+                .select_related("status", "office", "service")
+                .get(number__iexact=lookup.validated_data["reference"])
+            )
+        except Ticket.DoesNotExist as exc:
+            raise NotFound("Ticket not found.") from exc
+
+        projection = build_tracking_projection(ticket)
+        payload = {
+            "reference": ticket.number,
+            "title": ticket.title,
+            "tracking_status": tracking_status_for(ticket.status),
+            "status_updated_at": projection["status_updated_at"],
+            "created_at": ticket.created_at,
+            "updated_at": ticket.updated_at,
+            "office": ticket.office.name,
+            "service": ticket.service.name,
+            "progress": projection["progress"],
+        }
+        return Response(TicketTrackingSerializer(payload).data)
 
     @action(detail=True, methods=["post"])
     def transition(
@@ -699,17 +732,23 @@ class TicketViewSet(
 
 
 @api_view(["POST"])
-@permission_classes([AllowAny])
-@throttle_classes([PublicIntakeThrottle])
-@public_endpoint
+@permission_classes([IsAuthenticated, ScopePermission])
 def public_intake(request: Request) -> Response:
-    """Public web form intake — creates a ticket and returns its number.
-
-    Rate-limited by ``PublicIntakeThrottle`` (5/min per IP).
-    No authentication required.
-    """
+    """Create a ticket from an authenticated staff intake channel."""
     from apps.catalogue.models import RequestType, Service
     from apps.organisations.models import Office
+
+    actor = _authenticated_user(request)
+    attach_scopes(request)
+    if not has_unrestricted_domain_scope(
+        actor,
+        "operational",
+        request=request,
+    ):
+        raise PermissionDenied(
+            detail="Operational intake permission required.",
+            code="intake_forbidden",
+        )
 
     ip = request.META.get("REMOTE_ADDR", "unknown")
     ser = PublicIntakeSerializer(data=request.data)
@@ -729,6 +768,26 @@ def public_intake(request: Request) -> Response:
     except (Service.DoesNotExist, RequestType.DoesNotExist, Office.DoesNotExist) as exc:
         return Response({"detail": "Invalid service or office.", "code": str(exc)},
                         status=status.HTTP_400_BAD_REQUEST)
+
+    required_scope = Scope(
+        domain="operational",
+        office_id=str(office.id),
+        service_id=str(service.id),
+    )
+    actor_scopes = getattr(actor, "_scopes", ())
+    if not any(
+        isinstance(scope, Scope)
+        and scope.queue_id is None
+        and scope.matches(required_scope)
+        for scope in actor_scopes
+    ):
+        raise PermissionDenied(
+            detail=(
+                "Operational intake permission required for this service and office "
+                "without a queue restriction."
+            ),
+            code="intake_forbidden",
+        )
 
     # Create or update requester contact
     contact_kwargs = {"full_name": data["requester_name"]}
@@ -764,8 +823,8 @@ def public_intake(request: Request) -> Response:
         office=office,
         channel=data.get("channel") or "web",
         matter_reference=data.get("matter_reference", ""),
-        actor_subject="public-form",
-        actor=request.user if isinstance(request.user, User) else None,
+        actor_subject=actor.keycloak_subject,
+        actor=actor,
         ip_address=ip,
     )
 

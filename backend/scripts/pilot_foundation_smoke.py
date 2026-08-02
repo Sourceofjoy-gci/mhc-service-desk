@@ -12,7 +12,7 @@ from uuid import uuid4
 
 import requests
 
-API_BASE = os.getenv("PILOT_API_BASE", "http://localhost:8000/api/v1").rstrip("/")
+API_BASE = os.getenv("PILOT_API_BASE", "http://localhost:8001/api/v1").rstrip("/")
 REQUEST_TIMEOUT = 10
 
 OPS_HEADERS: Mapping[str, str] = MappingProxyType(
@@ -292,6 +292,7 @@ def _intake_payload(suffix: str, *, child_parent: bool = False) -> dict[str, Any
         "requester_name": "Pilot Smoke",
         "requester_email": f"pilot-{purpose.replace(' ', '-')}-{suffix}@example.test",
         "consent": True,
+        "channel": "call",
     }
 
 
@@ -305,12 +306,13 @@ def run(session: requests.Session) -> tuple[str, str, str]:
     intake = _post_json(
         session,
         "/tickets/public/intake/",
+        headers=OPS_HEADERS,
         payload=_intake_payload(suffix),
         expected_status=201,
-        label="Operational public intake",
+        label="Operational staff intake",
     )
     operational_number = str(
-        _require_field(intake, "ticket_number", "Operational public intake")
+        _require_field(intake, "ticket_number", "Operational staff intake")
     )
 
     ticket = _get_json(
@@ -445,6 +447,7 @@ def run(session: requests.Session) -> tuple[str, str, str]:
     parent_intake = _post_json(
         session,
         "/tickets/public/intake/",
+        headers=OPS_HEADERS,
         payload=_intake_payload(parent_suffix, child_parent=True),
         expected_status=201,
         label="IT child parent intake",

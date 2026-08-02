@@ -7,7 +7,7 @@ the SPA or Metabase in P2.
 from __future__ import annotations
 
 import statistics
-from datetime import datetime, timezone
+from datetime import UTC, datetime
 
 from django.db.models import Count
 from rest_framework.decorators import api_view, permission_classes
@@ -16,14 +16,12 @@ from rest_framework.permissions import IsAuthenticated
 from rest_framework.request import Request
 from rest_framework.response import Response
 
-from apps.identity_access.authentication import KeycloakJWTAuthentication
 from apps.identity_access.scope import (
     ScopePermission,
     has_unrestricted_domain_scope,
     scope_ticket_queryset,
 )
 from apps.tickets.models import Ticket
-from apps.workflow.models import Status
 
 
 @api_view(["GET"])
@@ -38,7 +36,7 @@ def flow_metrics(request: Request) -> Response:
     ):
         raise PermissionDenied(code="domain_scope_required")
     days = int(request.query_params.get("days", "30"))
-    now = datetime.now(tz=timezone.utc)
+    now = datetime.now(tz=UTC)
     window_start = now.timestamp() - days * 86400
 
     qs = scope_ticket_queryset(
@@ -46,7 +44,7 @@ def flow_metrics(request: Request) -> Response:
         Ticket.objects.all(),
         request=request,
     ).filter(
-        created_at__gte=datetime.fromtimestamp(window_start, tz=timezone.utc)
+        created_at__gte=datetime.fromtimestamp(window_start, tz=UTC)
     )
     if domain:
         qs = qs.filter(domain=domain)

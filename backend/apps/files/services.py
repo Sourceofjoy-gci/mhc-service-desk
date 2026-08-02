@@ -1,18 +1,13 @@
 """File service — ClamAV scan + MinIO upload + signed URL."""
 from __future__ import annotations
 
-import hashlib
-import io
 import logging
 import socket
 from dataclasses import dataclass
-from datetime import timedelta
 from typing import Protocol, TypedDict, Unpack
-from urllib.parse import urlparse
 
 import boto3
 from botocore.client import Config
-from botocore.exceptions import ClientError
 from django.conf import settings
 from django.db import transaction
 from django.utils import timezone

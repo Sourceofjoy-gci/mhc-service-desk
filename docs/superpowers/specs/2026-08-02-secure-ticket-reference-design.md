@@ -26,18 +26,18 @@ The existing unauthenticated intake form remains unavailable. This feature does 
 
 ## 3. Chosen Approach
 
-Use a database-backed, row-locked counter for each domain, configured prefix, and calendar month. A reference keeps the existing readable shape:
+Use a database-backed, row-locked global counter for each domain and configured prefix. Every new reference has exactly six characters:
 
 ```text
-<PREFIX>-<YYYYMM>-<SEQUENCE>
-OP-202608-000123
+<LETTER><FIVE-DIGIT-SEQUENCE>
+O00123
 ```
 
 The allocator and ticket insert run in one outer transaction. A unique counter key and row lock serialize concurrent allocations. The existing unique constraint on `Ticket.number` remains the final integrity boundary.
 
 This is preferred to:
 
-- a global database sequence, which is simpler but does not preserve the current domain/month sequence;
+- one shared database sequence across both domains, which would prevent independent configured prefixes;
 - a random Base32 reference, which is harder to enumerate but less convenient to communicate and unnecessary because lookup is authenticated and scope-restricted.
 
 ## 4. Reference Data Model and Allocation
@@ -46,26 +46,26 @@ Add a `TicketReferenceCounter` model with:
 
 - `domain`: operational or IT;
 - `prefix`: the validated prefix used in the rendered reference;
-- `period`: a six-character `YYYYMM` value;
+- `period`: retained as an internal compatibility field and set to the sentinel `GLOBAL` for new counters;
 - `last_value`: the last committed positive sequence value;
 - a unique constraint across `(domain, prefix, period)`.
 
 Allocation performs these operations inside `transaction.atomic()`:
 
 1. Read the configured prefix for the ticket domain.
-2. Validate and normalise it to uppercase. A prefix must match `[A-Z][A-Z0-9]{1,7}` so the result stays readable and within `Ticket.number`'s maximum length.
-3. Obtain or create the counter row for `(domain, prefix, current period)`. A newly created row starts at the greatest sequence already present among matching legacy references, or zero when none exist.
+2. Validate and normalise it to uppercase. A prefix must be exactly one ASCII letter matching `[A-Z]`.
+3. Obtain or create the `GLOBAL` counter row for `(domain, prefix)`. A newly created row starts at the greatest five-digit sequence already present among matching six-character references, or zero when none exist.
 4. Lock that row with `select_for_update()`.
 5. Increment and persist `last_value`.
-6. Format the reference using a six-digit sequence.
+6. Format the reference using the letter and a zero-padded five-digit sequence. Allocation fails after `99999` rather than wrapping or reusing a reference.
 7. Insert the ticket using that reference before the outer transaction commits.
 
-The counter update rolls back if ticket creation or its required history/audit writes fail. Concurrent first use of a new prefix/month is resolved by the counter's unique constraint and a retry of the locked fetch inside a savepoint.
+The counter update rolls back if ticket creation or its required history/audit writes fail. Concurrent first use of a new prefix is resolved by the counter's unique constraint and a retry of the locked fetch inside a savepoint.
 
 Prefix configuration is loaded from environment-backed Django settings:
 
-- `TICKET_REFERENCE_PREFIX_OPERATIONAL`, default `OP`;
-- `TICKET_REFERENCE_PREFIX_IT`, default `IT`.
+- `TICKET_REFERENCE_PREFIX_OPERATIONAL`, default `O`;
+- `TICKET_REFERENCE_PREFIX_IT`, default `I`.
 
 Changing a prefix affects only newly created tickets. Existing references and their counters remain valid and searchable. Legacy references keep their current values and require no data rewrite.
 
@@ -106,7 +106,7 @@ The mapping is centralised and reused by the API and UI contract tests. It does 
 Add a collection action under the existing ticket viewset:
 
 ```http
-GET /api/v1/tickets/tracking/?reference=OP-202608-000123
+GET /api/v1/tickets/tracking/?reference=O00123
 ```
 
 The endpoint requires the existing Keycloak authentication and ticket scope permission. It normalises surrounding whitespace and letter case, validates the reference length/shape, and performs an exact lookup against `scope_ticket_queryset()`. An out-of-scope and nonexistent reference return the same `404` response so the endpoint does not disclose ticket existence.
@@ -115,7 +115,7 @@ The response is deliberately smaller than `TicketDetailSerializer`:
 
 ```json
 {
-  "reference": "OP-202608-000123",
+  "reference": "O00123",
   "title": "Estate status enquiry",
   "tracking_status": "In Progress",
   "status_updated_at": "2026-08-02T10:15:00Z",
@@ -196,13 +196,13 @@ Every record includes an actor snapshot or actor subject and an occurrence times
 - Unexpected uniqueness conflicts are retried a small, bounded number of times and then surface as an operational error rather than returning a possibly incorrect reference.
 - Tracking errors use the application's structured problem response and correlation identifier conventions.
 - Logs use the ticket reference as a correlation value only after creation succeeds.
-- Prefix changes and month boundaries require no maintenance job.
+- Prefix changes require no maintenance job, but each prefix has a finite range of 99,999 references and must never be reused for a reset sequence.
 
 ## 13. Testing Strategy
 
 Backend tests cover:
 
-- sequential allocation per domain, prefix, and month;
+- global sequential allocation per domain and prefix;
 - configured prefixes and invalid prefix rejection;
 - concurrent transactions allocating distinct references on PostgreSQL;
 - allocation rollback when ticket creation fails;
@@ -228,9 +228,9 @@ Verification runs focused backend and frontend tests first, then the complete ba
 
 ## 14. Rollout and Compatibility
 
-The schema migration creates the counter table and immutability trigger without rewriting ticket numbers. Deployment may occur with existing tickets present. The first allocation for each active prefix/month starts from the maximum matching legacy sequence for that prefix/month, preventing collisions if tickets already exist in the current period.
+The schema migration creates the counter table and immutability trigger without rewriting ticket numbers. Deployment may occur with existing tickets present. The first global allocation for each active one-letter prefix starts from the maximum matching six-character reference, preventing collisions when references in the new format already exist. Older long-form references remain unchanged and their monthly counter rows are not reused.
 
-API additions are backward compatible. Existing ticket detail routes and references keep working. The hard-coded ticket route regex is updated to accept both existing references and validated configured prefixes without turning the route into an unconstrained catch-all.
+Existing ticket detail routes and immutable legacy references keep working. The hard-coded detail-route regex accepts both six-character references and the prior long form without turning the route into an unconstrained catch-all. The focused tracking input accepts only the current six-character format.
 
 ## 15. Out of Scope
 

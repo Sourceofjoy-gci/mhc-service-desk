@@ -417,16 +417,16 @@ def _snapshot_from_groups(user: object) -> AuthoritySnapshot:
         if can_view_restricted_rows:
             restricted_scope_keys.add(_scope_key(scope))
 
-    if "ops-agents" in groups:
+    if groups & {"ops-agents", "agent-operational"}:
         add_scope(Scope(domain="operational"))
-    if "ops-supervisors" in groups:
+    if groups & {"ops-supervisors", "supervisor-operational"}:
         add_scope(
             Scope(domain="operational"),
             can_view_restricted_rows=True,
         )
-    if "it-agents" in groups:
+    if groups & {"it-agents", "agent-it"}:
         add_scope(Scope(domain="it"))
-    if "it-leads" in groups:
+    if groups & {"it-leads", "lead-it"}:
         add_scope(Scope(domain="it"), can_view_restricted_rows=True)
     if "security-responders" in groups:
         add_scope(
@@ -437,9 +437,9 @@ def _snapshot_from_groups(user: object) -> AuthoritySnapshot:
             Scope(domain="it", restricted_only=True),
             can_view_restricted_rows=True,
         )
-    if "system-admins" in groups:
+    if groups & {"system-admins", "admin"}:
         add_scope(Scope(domain="admin"), can_view_restricted_rows=True)
-    if "auditors" in groups:
+    if groups & {"auditors", "auditor"}:
         capabilities.add("auditor")
         add_scope(Scope(domain="operational"), can_view_restricted_rows=True)
         add_scope(Scope(domain="it"), can_view_restricted_rows=True)

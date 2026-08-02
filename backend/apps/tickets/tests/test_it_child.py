@@ -62,7 +62,7 @@ def test_create_it_child_records_link_and_parent_status(world):
         actor=world["actor"],
     )
     assert child.domain == "it"
-    assert child.number.startswith("IT-")
+    assert child.number == "I00001"
     assert TicketLink.objects.filter(from_ticket=child, to_ticket=parent, kind="it_child").exists()
     parent.refresh_from_db()
     assert parent.status.code == "waiting_it"

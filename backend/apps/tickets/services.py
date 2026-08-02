@@ -54,41 +54,6 @@ type WorkStateValue = str | datetime | UUID | None
 
 
 # -----------------------------------------------------------------------------
-# Numbering
-# -----------------------------------------------------------------------------
-
-@dataclass
-class NumberingConfig:
-    operational_prefix: str = "OP"
-    it_prefix: str = "IT"
-    width: int = 6
-
-    def format(self, domain: str, year: int, month: int, seq: int) -> str:
-        prefix = self.operational_prefix if domain == "operational" else self.it_prefix
-        return f"{prefix}-{year:04d}{month:02d}-{seq:0{self.width}d}"
-
-
-def next_ticket_number(domain: str, when: datetime | None = None) -> str:
-    """Atomically allocate the next ticket number for a domain.
-
-    Counts existing tickets in the same year+month to keep numbers sequential
-    and human-readable. For high-throughput write workloads, replace this
-    with a database sequence (M5+).
-    """
-    when = when or timezone.now()
-    cfg = NumberingConfig()
-    prefix = cfg.format(domain, when.year, when.month, 0)[:8]  # e.g. "OP-202607"
-    seq = (
-        Ticket.objects.filter(
-            domain=domain,
-            number__startswith=prefix,
-        ).count()
-        + 1
-    )
-    return cfg.format(domain, when.year, when.month, seq)
-
-
-# -----------------------------------------------------------------------------
 # Creation
 # -----------------------------------------------------------------------------
 
@@ -116,26 +81,28 @@ def create_ticket(
     """Create a ticket, its initial acknowledgement, an outbox event, and
     return the saved aggregate."""
     status = Status.objects.get(domain=domain, code=initial_status_code)
-    number = next_ticket_number(domain)
     initial_custom_fields = custom_fields or {}
     initial_tags: list[JSONValue] = list(tags or [])
-    ticket = Ticket.objects.create(
-        number=number,
+    from .references import create_referenced_ticket
+
+    ticket = create_referenced_ticket(
         domain=domain,
-        title=title,
-        description=description,
-        status=status,
-        priority=priority or request_type.default_priority,
-        channel=channel,
-        source_account=source_account,
-        requester=requester,
-        service=service,
-        request_type=request_type,
-        office=office,
-        matter_reference=matter_reference,
-        custom_fields=initial_custom_fields,
-        tags=initial_tags,
-        acknowledged_at=timezone.now(),
+        values={
+            "title": title,
+            "description": description,
+            "status": status,
+            "priority": priority or request_type.default_priority,
+            "channel": channel,
+            "source_account": source_account,
+            "requester": requester,
+            "service": service,
+            "request_type": request_type,
+            "office": office,
+            "matter_reference": matter_reference,
+            "custom_fields": initial_custom_fields,
+            "tags": initial_tags,
+            "acknowledged_at": timezone.now(),
+        },
     )
     history = TransitionHistory.objects.create(
         ticket=ticket,
@@ -145,6 +112,7 @@ def create_ticket(
         reason="Ticket created",
     )
     created_after: dict[str, JSONValue] = {
+        "reference": ticket.number,
         "domain": domain,
         "channel": channel,
         "requester_id": str(requester.id),
@@ -180,7 +148,7 @@ def create_ticket(
             ),
         ),
     )
-    logger.info("ticket_created", extra={"correlation_id": number})
+    logger.info("ticket_created", extra={"correlation_id": ticket.number})
     return ticket
 
 

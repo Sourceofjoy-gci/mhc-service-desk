@@ -5,7 +5,6 @@ import { ThemeToggle } from "./theme-toggle";
 import { cn } from "@/lib/utils";
 
 const PUBLIC_LINKS = [
-  { to: "/public", label: "Submit a request" },
   { to: "/health", label: "Service health", icon: HeartPulse },
   { to: "/login", label: "Staff sign-in", icon: LogIn },
 ];
@@ -18,7 +17,7 @@ export function PublicShell() {
       <header className="border-b border-border/60">
         <div className="mx-auto flex w-full max-w-7xl flex-wrap items-center gap-4 px-4 py-3 sm:px-6">
           <Link
-            to="/public"
+            to="/login"
             className="text-foreground no-underline focus-visible:rounded-lg focus-visible:outline-none focus-visible:ring-3 focus-visible:ring-ring/50"
           >
             <BrandLockup size="sm" />
@@ -60,7 +59,7 @@ export function PublicShell() {
       </main>
 
       <footer className="border-t border-border/60 py-4 text-center text-xs text-muted-foreground">
-        Master of the High Court · Public services
+        Master of the High Court · Staff access
       </footer>
     </div>
   );

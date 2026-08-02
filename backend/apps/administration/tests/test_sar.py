@@ -2,7 +2,6 @@
 from __future__ import annotations
 
 import json
-import os
 from pathlib import Path
 
 import pytest
@@ -10,9 +9,6 @@ from django.core.management import call_command
 
 from apps.contacts.models import Contact
 from apps.tickets import services
-from apps.catalogue.models import RequestType, Service
-from apps.organisations.models import Office
-from apps.tickets.models import TicketMessage
 
 pytestmark = pytest.mark.django_db
 

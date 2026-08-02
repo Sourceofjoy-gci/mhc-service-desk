@@ -2,11 +2,17 @@ import { useRef, useState } from "react";
 import { useMutation } from "@tanstack/react-query";
 import { Alert, AlertDescription, AlertTitle } from "@/components/ui/alert";
 import { Button } from "@/components/ui/button";
-import { Field, FieldError, FieldLabel } from "@/components/ui/field";
+import {
+  Field,
+  FieldDescription,
+  FieldError,
+  FieldLabel,
+} from "@/components/ui/field";
 import { Spinner } from "@/components/ui/spinner";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { Textarea } from "@/components/ui/textarea";
 import { apiProblem, type ApiProblem, ticketsApi } from "@/lib/api";
+import { cn } from "@/lib/utils";
 
 interface MessageComposerProps {
   ticketNumber: string;
@@ -129,7 +135,7 @@ export function MessageComposer({
         {canAddMessage ? (
           <TabsContent value="reply">
             <form
-              className="space-y-3 pt-3"
+              className="flex flex-col gap-3 pt-3"
               onSubmit={(event) => {
                 event.preventDefault();
                 submitReply();
@@ -142,12 +148,17 @@ export function MessageComposer({
                   value={reply}
                   disabled={replyMutation.isPending}
                   aria-invalid={Boolean(replyProblem?.fields.body_text)}
+                  aria-describedby={cn(
+                    "ticket-reply-description",
+                    replyProblem?.fields.body_text && "ticket-reply-error",
+                  )}
                   onChange={(event) => setReply(event.target.value)}
                 />
-                <p className="text-xs text-muted-foreground">
+                <FieldDescription id="ticket-reply-description">
                   This message is visible to the requester.
-                </p>
+                </FieldDescription>
                 <FieldError
+                  id="ticket-reply-error"
                   errors={replyProblem?.fields.body_text?.map((message) => ({
                     message,
                   }))}
@@ -169,7 +180,7 @@ export function MessageComposer({
                   {replyMutation.isPending ? (
                     <Spinner aria-hidden data-icon="inline-start" />
                   ) : null}
-                  {replyMutation.isPending ? "Sending…" : "Send reply"}
+                  Send reply
                 </Button>
               </div>
             </form>
@@ -179,7 +190,7 @@ export function MessageComposer({
         {canAddNote ? (
           <TabsContent value="note">
             <form
-              className="space-y-3 border-l-2 border-l-amber-500 pt-3 pl-4"
+              className="flex flex-col gap-3 rounded-lg border border-warning/30 bg-warning/10 p-3"
               onSubmit={(event) => {
                 event.preventDefault();
                 submitNote();
@@ -194,12 +205,20 @@ export function MessageComposer({
                   value={note}
                   disabled={noteMutation.isPending}
                   aria-invalid={Boolean(noteProblem?.fields.body)}
+                  aria-describedby={cn(
+                    "ticket-internal-note-description",
+                    noteProblem?.fields.body && "ticket-internal-note-error",
+                  )}
                   onChange={(event) => setNote(event.target.value)}
                 />
-                <p className="text-xs font-medium text-amber-800 dark:text-amber-300">
+                <FieldDescription
+                  id="ticket-internal-note-description"
+                  className="font-medium text-warning-foreground"
+                >
                   Internal notes are not visible to the requester.
-                </p>
+                </FieldDescription>
                 <FieldError
+                  id="ticket-internal-note-error"
                   errors={noteProblem?.fields.body?.map((message) => ({
                     message,
                   }))}
@@ -221,7 +240,7 @@ export function MessageComposer({
                   {noteMutation.isPending ? (
                     <Spinner aria-hidden data-icon="inline-start" />
                   ) : null}
-                  {noteMutation.isPending ? "Saving…" : "Add internal note"}
+                  Add internal note
                 </Button>
               </div>
             </form>

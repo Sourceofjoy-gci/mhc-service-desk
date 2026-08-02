@@ -1,5 +1,5 @@
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
-import { AlertCircle, ShieldAlert } from "lucide-react";
+import { AlertCircle, CheckCircle2, ShieldAlert } from "lucide-react";
 import {
   useEffect,
   useLayoutEffect,
@@ -27,6 +27,7 @@ import {
   FieldLabel,
 } from "@/components/ui/field";
 import { Textarea } from "@/components/ui/textarea";
+import { Spinner } from "@/components/ui/spinner";
 import {
   ApiError,
   apiProblem,
@@ -567,13 +568,16 @@ function ScopedAssignmentControl({
       ) : null}
 
       {receipt ? (
-        <div
+        <Alert
           role="status"
           aria-live="polite"
-          className="border-l-2 border-primary bg-muted/50 px-3 py-2 text-sm text-foreground"
+          className="border-success/30 bg-success/10 text-success-foreground"
         >
-          {receipt}
-        </div>
+          <CheckCircle2 aria-hidden="true" />
+          <AlertDescription className="text-success-foreground">
+            {receipt}
+          </AlertDescription>
+        </Alert>
       ) : null}
 
       <Dialog
@@ -729,6 +733,9 @@ function ScopedAssignmentControl({
                 </Button>
                 {stale || missing || selfProposalBlocked ? (
                   <Button type="button" disabled={disabled} onClick={onReload}>
+                    {disabled ? (
+                      <Spinner aria-hidden data-icon="inline-start" />
+                    ) : null}
                     Reload
                   </Button>
                 ) : (
@@ -741,6 +748,9 @@ function ScopedAssignmentControl({
                       (reasonRequired && !reason.trim())
                     }
                   >
+                    {disabled ? (
+                      <Spinner aria-hidden data-icon="inline-start" />
+                    ) : null}
                     {disabled ? pendingLabels[action] : actionLabels[action]}
                   </Button>
                 )}

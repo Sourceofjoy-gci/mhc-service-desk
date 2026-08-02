@@ -12,15 +12,12 @@ the call site doesn't have to change when production goes live.
 """
 from __future__ import annotations
 
-import secrets
-
 from rest_framework.decorators import api_view, permission_classes
 from rest_framework.exceptions import PermissionDenied
 from rest_framework.permissions import IsAuthenticated
 from rest_framework.request import Request
 from rest_framework.response import Response
 
-from apps.identity_access.authentication import KeycloakJWTAuthentication
 from apps.identity_access.models import User
 from apps.identity_access.scope import scope_ticket_queryset
 from apps.tickets.models import OutboxEvent, Ticket

@@ -17,7 +17,6 @@ from rest_framework.permissions import IsAuthenticated
 from rest_framework.request import Request
 from rest_framework.response import Response
 
-from apps.identity_access.authentication import KeycloakJWTAuthentication
 from apps.identity_access.models import User
 from apps.identity_access.scope import (
     ScopePermission,

@@ -45,6 +45,17 @@ def basic_world(db):
     return {"office": office, "service": service, "request_type": rt, "contact": contact}
 
 
+def test_workflow_test_seed_is_idempotent(db):
+    seed_workflow_for_tests()
+    seed_workflow_for_tests()
+
+    assert Status.objects.filter(domain="operational", code="escalated").count() == 1
+    assert Transition.objects.filter(
+        domain="operational",
+        to_status__code="escalated",
+    ).count() == 3
+
+
 def test_ticket_numbering_is_per_domain_and_sequential(basic_world):
     a = services.create_ticket(
         domain="operational",
@@ -66,8 +77,8 @@ def test_ticket_numbering_is_per_domain_and_sequential(basic_world):
         office=basic_world["office"],
         channel="web",
     )
-    assert a.number.startswith("OP-")
-    assert b.number.startswith("OP-")
+    assert a.number == "O00001"
+    assert b.number == "O00002"
     assert a.number != b.number
 
 

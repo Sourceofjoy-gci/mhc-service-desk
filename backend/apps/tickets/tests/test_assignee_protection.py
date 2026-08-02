@@ -183,7 +183,7 @@ def test_0009_changes_assignee_deletion_from_set_null_to_protect_and_rolls_back(
 
     previous = "0008_harden_ticket_custody_contract"
     leaf = "0009_protect_ticket_assignee"
-    current_leaf = "0010_protect_ticket_queue"
+    current_leaf = "0013_escalated_workflow"
     try:
         executor = MigrationExecutor(connection)
         executor.migrate([("tickets", previous)])

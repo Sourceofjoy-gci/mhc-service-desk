@@ -8,7 +8,8 @@ inside a single DB transaction.
 from __future__ import annotations
 
 import uuid
-from collections.abc import Iterable
+from collections.abc import Collection, Iterable
+from typing import Any
 
 from django.core.exceptions import ValidationError
 from django.db import models
@@ -19,6 +20,25 @@ from django.utils import timezone
 class ProtectedTicketQuerySet(models.QuerySet["Ticket"]):
     """Prevent ordinary application code from deleting ticket aggregates."""
 
+    @staticmethod
+    def _reject_reference_change(fields: Iterable[str]) -> None:
+        if "number" in fields:
+            raise ValidationError("Ticket reference is immutable.")
+
+    def update(self, **kwargs: object) -> int:
+        self._reject_reference_change(kwargs)
+        return super().update(**kwargs)
+
+    def bulk_update(
+        self,
+        objs: Iterable[Ticket],
+        fields: Iterable[str],
+        batch_size: int | None = None,
+    ) -> int:
+        update_fields = tuple(fields)
+        self._reject_reference_change(update_fields)
+        return super().bulk_update(objs, update_fields, batch_size=batch_size)
+
     def delete(self) -> tuple[int, dict[str, int]]:
         raise ValidationError("Tickets may only be deleted by approved retention.")
 
@@ -28,6 +48,8 @@ class ProtectedTicketQuerySet(models.QuerySet["Ticket"]):
 
 class Ticket(models.Model):
     """A unit of work tracked from intake to closure."""
+
+    _loaded_number: str | None = None
 
     class Priority(models.TextChoices):
         P1 = "P1", "P1 Critical"
@@ -152,8 +174,68 @@ class Ticket(models.Model):
     def __str__(self) -> str:  # pragma: no cover
         return self.number
 
-    def delete(self, *args: object, **kwargs: object) -> tuple[int, dict[str, int]]:
+    def save(
+        self,
+        force_insert: bool | tuple[ModelBase, ...] = False,
+        force_update: bool = False,
+        using: str | None = None,
+        update_fields: Iterable[str] | None = None,
+    ) -> None:
+        if not self._state.adding:
+            loaded_number = self._loaded_number
+            if loaded_number is None:
+                loaded_number = (
+                    type(self).objects.only("number").get(pk=self.pk).number
+                )
+            if self.number != loaded_number:
+                raise ValidationError("Ticket reference is immutable.")
+        super().save(
+            force_insert=force_insert,
+            force_update=force_update,
+            using=using,
+            update_fields=update_fields,
+        )
+        self._loaded_number = self.number
+
+    def delete(
+        self,
+        using: str | None = None,
+        keep_parents: bool = False,
+    ) -> tuple[int, dict[str, int]]:
         raise ValidationError("Tickets may only be deleted by approved retention.")
+
+    @classmethod
+    def from_db(
+        cls,
+        db: str | None,
+        field_names: Collection[str],
+        values: Collection[Any],
+    ) -> Ticket:
+        instance = super().from_db(db, field_names, values)
+        if "number" in field_names:
+            instance._loaded_number = instance.number
+        return instance
+
+
+class TicketReferenceCounter(models.Model):
+    """The locked allocation cursor for one domain, prefix, and month."""
+
+    domain = models.CharField(max_length=16, choices=Ticket.Domain.choices)
+    prefix = models.CharField(max_length=8)
+    period = models.CharField(max_length=6)
+    last_value = models.PositiveBigIntegerField(default=0)
+
+    class Meta:
+        db_table = "ticket_reference_counter"
+        constraints = [
+            models.UniqueConstraint(
+                fields=("domain", "prefix", "period"),
+                name="uniq_ticket_reference_counter_scope",
+            )
+        ]
+
+    def __str__(self) -> str:  # pragma: no cover
+        return f"{self.domain}:{self.prefix}-{self.period}:{self.last_value}"
 
 
 class ImmutableCustodyQuerySet(models.QuerySet["TicketCustodyEvent"]):

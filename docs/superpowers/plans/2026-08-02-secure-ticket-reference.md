@@ -1,5 +1,7 @@
 # Secure Ticket Reference Implementation Plan
 
+> Format amendment (2026-08-02): the approved implementation was subsequently changed to exactly one letter followed by five digits (for example, `O00123`). Allocation is global per domain and one-letter prefix; the design specification and implemented tests supersede the historical long-form examples below.
+
 > **For agentic workers:** REQUIRED SUB-SKILL: Use superpowers:subagent-driven-development (recommended) or superpowers:executing-plans to implement this plan task-by-task. Steps use checkbox (`- [ ]`) syntax for tracking.
 
 **Goal:** Generate immutable, configurable, collision-free ticket references and give authenticated, scope-authorised helpdesk staff a focused ticket-tracking page with the required lifecycle vocabulary and auditable escalation.

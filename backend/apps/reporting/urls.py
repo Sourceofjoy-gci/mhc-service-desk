@@ -1,7 +1,6 @@
 from django.urls import path
 
-from . import views
-from . import flow
+from . import flow, views
 
 urlpatterns = [
     path("reports/tickets.csv", views.export_tickets_csv, name="export-tickets-csv"),

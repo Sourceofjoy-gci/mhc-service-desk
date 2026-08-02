@@ -10,14 +10,22 @@ import {
   type ReactNode,
 } from "react";
 import { useNavigate } from "react-router-dom";
-import type { KeycloakProfile } from "keycloak-js";
 import { configureApiAuth } from "@/lib/api";
 import { getKeycloak, initKeycloak, isDevAuthEnabled } from "./keycloak";
 
 const RETURN_TO_KEY = "mhc.auth.returnTo";
 const DEV_TOKEN = "dev:demo:ops-agents";
-
+const KEYCLOAK_GROUPS = new Set([
+  "ops-agents",
+  "ops-supervisors",
+  "it-agents",
+  "it-leads",
+  "security-responders",
+  "system-admins",
+  "auditors",
+]);
 export const KEYCLOAK_REALM_ROLES: ReadonlySet<string> = new Set([
+  ...KEYCLOAK_GROUPS,
   "staff",
   "agent-operational",
   "supervisor-operational",
@@ -212,20 +220,17 @@ async function initializeSession(isDevAuth: boolean): Promise<AuthSnapshot> {
         expiresAt: null,
       };
     }
-    const keycloak = getKeycloak();
-    const profile = await keycloak.loadUserProfile();
-    const claims = keycloak.tokenParsed;
-    const username =
-      profile.username ?? stringClaim(claims?.preferred_username) ?? "";
-    const displayName = profileDisplayName(profile) || username;
+    const claims = getKeycloak().tokenParsed;
+    const username = stringClaim(claims?.preferred_username) ?? "";
+    const displayName = tokenDisplayName(claims) || username;
 
     return {
       state: "authenticated",
       user: {
-        subject: stringClaim(claims?.sub) ?? profile.id ?? "",
+        subject: stringClaim(claims?.sub) ?? "",
         username,
         displayName,
-        groups: authorizationGroups(claims),
+        groups: effectiveMemberships(claims),
       },
       error: null,
       expiresAt: typeof claims?.exp === "number" ? claims.exp : null,
@@ -240,28 +245,56 @@ async function initializeSession(isDevAuth: boolean): Promise<AuthSnapshot> {
   }
 }
 
-function profileDisplayName(profile: KeycloakProfile): string {
-  return [profile.firstName, profile.lastName].filter(Boolean).join(" ").trim();
+function tokenDisplayName(claims: Record<string, unknown> | undefined): string {
+  const fullName = [
+    stringClaim(claims?.given_name),
+    stringClaim(claims?.family_name),
+  ]
+    .filter((name): name is string => name !== null)
+    .join(" ")
+    .trim();
+  return fullName || stringClaim(claims?.name) || "";
 }
 
 function stringClaim(value: unknown): string | null {
   return typeof value === "string" && value.length > 0 ? value : null;
 }
 
-function stringArrayClaim(value: unknown): string[] {
-  return Array.isArray(value)
-    ? value.filter((group): group is string => typeof group === "string")
-    : [];
+function keycloakGroupClaim(value: unknown): string[] {
+  if (!Array.isArray(value)) return [];
+  return value.flatMap((rawMembership) => {
+    if (typeof rawMembership !== "string") return [];
+    const membership = rawMembership.trim();
+    const group = membership.startsWith("/")
+      ? membership.slice(1)
+      : membership;
+    return KEYCLOAK_GROUPS.has(group) ? [group] : [];
+  });
 }
 
-function authorizationGroups(
-  claims: ReturnType<typeof getKeycloak>["tokenParsed"],
+function keycloakRealmRoleClaim(value: unknown): string[] {
+  if (!Array.isArray(value)) return [];
+  return value.flatMap((rawRole) => {
+    if (typeof rawRole !== "string") return [];
+    const role = rawRole.trim();
+    return KEYCLOAK_REALM_ROLES.has(role) ? [role] : [];
+  });
+}
+
+function effectiveMemberships(
+  claims: Record<string, unknown> | undefined,
 ): string[] {
-  const groups = stringArrayClaim(claims?.groups);
-  const realmRoles = stringArrayClaim(claims?.realm_access?.roles).filter(
-    (role) => KEYCLOAK_REALM_ROLES.has(role),
-  );
-  return [...new Set([...groups, ...realmRoles])];
+  const realmAccess = claims?.realm_access;
+  const realmRoles =
+    typeof realmAccess === "object" && realmAccess !== null
+      ? (realmAccess as Record<string, unknown>).roles
+      : undefined;
+  return [
+    ...new Set([
+      ...keycloakGroupClaim(claims?.groups),
+      ...keycloakRealmRoleClaim(realmRoles),
+    ]),
+  ];
 }
 
 function normalizeReturnPath(path: string): string | null {

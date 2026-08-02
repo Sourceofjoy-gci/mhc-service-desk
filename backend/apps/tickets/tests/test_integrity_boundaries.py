@@ -8,6 +8,8 @@ from pathlib import Path
 from uuid import uuid4
 
 import pytest
+from django.core.exceptions import ValidationError
+from django.db import DatabaseError, connection, transaction
 from django.urls import reverse
 from django.utils.dateparse import parse_datetime
 from rest_framework.test import APIClient
@@ -58,6 +60,63 @@ def _client(user: User) -> APIClient:
     client = APIClient()
     client.force_authenticate(user=user)
     return client
+
+
+def _update_ticket_reference_with_raw_sql(ticket: Ticket) -> None:
+    with transaction.atomic():
+        with connection.cursor() as cursor:
+            cursor.execute(
+                "UPDATE ticket SET number = %s WHERE id = %s",
+                ["OP-202608-999994", ticket.pk],
+            )
+
+
+def test_ticket_reference_cannot_be_changed_with_model_save(basic_world) -> None:
+    ticket = _ticket(basic_world)
+    original = ticket.number
+    ticket.number = "OP-202608-999991"
+
+    with pytest.raises(ValidationError, match="reference is immutable"):
+        ticket.save()
+
+    assert Ticket.objects.get(pk=ticket.pk).number == original
+
+
+def test_ticket_reference_cannot_be_changed_with_queryset_update(basic_world) -> None:
+    ticket = _ticket(basic_world)
+
+    with pytest.raises(ValidationError, match="reference is immutable"):
+        Ticket.objects.filter(pk=ticket.pk).update(number="OP-202608-999992")
+
+
+def test_ticket_reference_cannot_be_changed_with_bulk_update(basic_world) -> None:
+    ticket = _ticket(basic_world)
+    ticket.number = "OP-202608-999993"
+
+    with pytest.raises(ValidationError, match="reference is immutable"):
+        Ticket.objects.bulk_update([ticket], ["number"])
+
+
+def test_database_rejects_raw_ticket_reference_update(basic_world) -> None:
+    if connection.vendor != "postgresql":
+        pytest.skip("The immutable reference trigger is PostgreSQL-specific.")
+    ticket = _ticket(basic_world)
+    original = ticket.number
+
+    with pytest.raises(DatabaseError, match="Ticket reference is immutable"):
+        _update_ticket_reference_with_raw_sql(ticket)
+
+    assert Ticket.objects.get(pk=ticket.pk).number == original
+
+
+def test_ticket_reference_guard_allows_unrelated_ticket_updates(basic_world) -> None:
+    ticket = _ticket(basic_world)
+    ticket.title = "Still the same reference"
+
+    ticket.save(update_fields=["title", "updated_at"])
+
+    ticket.refresh_from_db()
+    assert ticket.title == "Still the same reference"
 
 
 @pytest.mark.parametrize("method", ["put", "patch", "delete"])

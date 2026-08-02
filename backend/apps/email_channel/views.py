@@ -3,19 +3,18 @@ from __future__ import annotations
 
 import json
 import logging
-import uuid
 
 from django.db import IntegrityError, transaction
+from rest_framework import status
 from rest_framework.decorators import api_view, permission_classes
 from rest_framework.permissions import AllowAny
 from rest_framework.request import Request
 from rest_framework.response import Response
-from rest_framework import status
 
 from apps.tickets.events import record_ticket_event
 
-from .services import process_inbound_email
 from .models import EmailDelivery, EmailWebhookEvent
+from .services import process_inbound_email
 from .webhook_security import authenticate_email_adapter
 
 logger = logging.getLogger(__name__)

@@ -56,9 +56,13 @@ def _user(*, groups: list[str], active: bool = True) -> User:
         (["ops-agents"], False, False),
         (["it-agents"], False, False),
         (["ops-supervisors"], True, True),
+        (["supervisor-operational"], True, True),
         (["it-leads"], True, True),
+        (["lead-it"], True, True),
         (["system-admins"], True, True),
+        (["admin"], True, True),
         (["auditors"], False, False),
+        (["auditor"], False, False),
         (["auditors", "ops-supervisors"], False, False),
     ],
 )
@@ -91,6 +95,7 @@ def test_eligible_assignees_are_active_and_match_ticket_domain(basic_world):
     operational_agent = _user(groups=["ops-agents"])
     operational_supervisor = _user(groups=["ops-supervisors"])
     administrator = _user(groups=["system-admins"])
+    realm_role_agent = _user(groups=["agent-operational"])
     _user(groups=["it-agents"])
     _user(groups=["ops-agents"], active=False)
     _user(groups=["auditors"])
@@ -118,6 +123,89 @@ def test_eligible_assignees_are_active_and_match_ticket_domain(basic_world):
         operational_supervisor.id,
     }
     assert administrator.id not in eligible_ids
+    assert realm_role_agent.id not in eligible_ids
+
+
+@pytest.mark.parametrize(
+    ("domain", "role"),
+    [
+        ("operational", "agent-operational"),
+        ("it", "agent-it"),
+    ],
+)
+def test_realm_role_agents_can_update_tickets_in_their_domain(
+    basic_world,
+    domain,
+    role,
+):
+    user = _user(groups=[role])
+    service = basic_world["gen_info"] if domain == "operational" else basic_world["it_inc"]
+    ticket = Ticket.objects.create(
+        number=f"{domain[:2].upper()}-202607-900003",
+        domain=domain,
+        title="Realm-role update permission",
+        status=Status.objects.get(domain=domain, code="new"),
+        channel="web",
+        requester=basic_world["contact"],
+        service=service,
+        request_type=service.request_types.get(),
+        office=basic_world["office"],
+    )
+
+    assert can_update_work_state(user, ticket)
+
+
+@pytest.mark.parametrize(
+    ("domain", "role"),
+    [
+        ("operational", "supervisor-operational"),
+        ("it", "lead-it"),
+    ],
+)
+def test_realm_role_leaders_can_assign_in_scope_without_becoming_candidates(
+    basic_world,
+    domain,
+    role,
+):
+    user = _user(groups=[role])
+    service = basic_world["gen_info"] if domain == "operational" else basic_world["it_inc"]
+    ticket = Ticket.objects.create(
+        number=f"{domain[:2].upper()}-202607-900004",
+        domain=domain,
+        title="Realm-role assignment permission",
+        status=Status.objects.get(domain=domain, code="new"),
+        channel="web",
+        requester=basic_world["contact"],
+        service=service,
+        request_type=service.request_types.get(),
+        office=basic_world["office"],
+    )
+
+    assert can_assign(user, ticket=ticket) is True
+    assert can_reassign(user, ticket=ticket) is True
+    assert user.id not in eligible_assignee_queryset(ticket).values_list("id", flat=True)
+
+
+def test_realm_admin_has_ticket_bound_authority_without_becoming_a_candidate(
+    basic_world,
+):
+    user = _user(groups=["admin"])
+    ticket = Ticket.objects.create(
+        number="OP-202607-900005",
+        domain="operational",
+        title="Realm admin ticket authority",
+        status=Status.objects.get(domain="operational", code="new"),
+        channel="web",
+        requester=basic_world["contact"],
+        service=basic_world["gen_info"],
+        request_type=basic_world["gen_info"].request_types.get(),
+        office=basic_world["office"],
+    )
+
+    assert can_update_work_state(user, ticket) is True
+    assert can_assign(user, ticket=ticket) is True
+    assert can_reassign(user, ticket=ticket) is True
+    assert user.id not in eligible_assignee_queryset(ticket).values_list("id", flat=True)
 
 
 def test_inactive_elevated_user_has_no_mutating_permissions(basic_world):
