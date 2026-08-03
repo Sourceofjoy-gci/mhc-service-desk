@@ -51,10 +51,15 @@ from .api import (
     WorkStateRequestSerializer,
 )
 from .assignment import assign_ticket, route_ticket
-from .eligibility import eligible_assignees
+from .eligibility import (
+    AssigneeCandidate,
+    eligible_assignees,
+    eligible_escalation_supervisors,
+)
 from .models import Ticket
 from .permissions import can_add_ticket_content, can_assign
 from .tracking import build_tracking_projection, tracking_status_for
+from .workflow import available_transitions
 
 logger = logging.getLogger(__name__)
 
@@ -107,6 +112,17 @@ def _serializer_error_fields(
     return {
         field: [str(message) for message in messages]
         for field, messages in errors.items()
+    }
+
+
+def _candidate_payload(candidate: AssigneeCandidate) -> dict[str, object]:
+    return {
+        "id": str(candidate.id),
+        "username": candidate.username,
+        "display_name": candidate.display_name,
+        "designations": list(candidate.designations),
+        "team_labels": list(candidate.team_labels),
+        "role_summaries": list(candidate.role_summaries),
     }
 
 
@@ -187,7 +203,10 @@ class TicketViewSet(
             qs = qs.filter(office__code=params["office"])
         if "channel" in params:
             qs = qs.filter(channel=params["channel"])
-        if "search" in params and self.action != "assignees":
+        if "search" in params and self.action not in {
+            "assignees",
+            "escalation_supervisors",
+        }:
             qs = qs.filter(
                 Q(number__icontains=params["search"])
                 | Q(title__icontains=params["search"])
@@ -415,21 +434,43 @@ class TicketViewSet(
             ticket,
             search=search_serializer.validated_data["search"],
         )
-        return Response(
-            {
-                "results": [
-                    {
-                        "id": str(candidate.id),
-                        "username": candidate.username,
-                        "display_name": candidate.display_name,
-                        "designations": list(candidate.designations),
-                        "team_labels": list(candidate.team_labels),
-                        "role_summaries": list(candidate.role_summaries),
-                    }
-                    for candidate in candidates
-                ]
-            }
+        return Response({"results": [_candidate_payload(item) for item in candidates]})
+
+    @action(detail=True, methods=["get"], url_path="escalation-supervisors")
+    def escalation_supervisors(
+        self,
+        request: Request,
+        number: str | None = None,
+    ) -> Response:
+        ticket = self.get_object()
+        actor = _authenticated_user(request)
+        can_escalate = available_transitions(
+            ticket,
+            actor,
+            request=request,
+        ).filter(to_status__code="escalated").exists()
+        if not can_escalate:
+            return _ticket_action_error(
+                request,
+                code="ticket_action_forbidden",
+                detail="You cannot perform this ticket action.",
+                fields={},
+                response_status=status.HTTP_403_FORBIDDEN,
+            )
+        search_serializer = AssigneeSearchSerializer(data=request.query_params)
+        if not search_serializer.is_valid():
+            return _ticket_action_error(
+                request,
+                code="invalid_assignee_search",
+                detail="Supervisor search is invalid.",
+                fields=_serializer_error_fields(search_serializer.errors),
+                response_status=status.HTTP_400_BAD_REQUEST,
+            )
+        candidates = eligible_escalation_supervisors(
+            ticket,
+            search=search_serializer.validated_data["search"],
         )
+        return Response({"results": [_candidate_payload(item) for item in candidates]})
 
     @action(detail=True, methods=["post"], url_path="assignment")
     def assignment(
