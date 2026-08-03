@@ -51,6 +51,9 @@ class AssigneeCandidate:
 
 
 DESIGNATIONS = STAFF_DESIGNATIONS
+ESCALATION_SUPERVISOR_ROLE_KEYS = frozenset(
+    {"assistant-master", "deputy-master", "master"}
+)
 
 _DESIGNATION_BY_KEY = {item.role_key: item for item in DESIGNATIONS}
 _AUDITOR_ROLE_KEYS = {"auditor", "auditors"}
@@ -515,6 +518,7 @@ def _candidate_for_user(
     *,
     authority: AuthoritySnapshot | None = None,
     require_database_scope_check: bool,
+    allowed_designation_role_keys: frozenset[str] | None = None,
 ) -> AssigneeCandidate | None:
     if not user.is_active:
         return None
@@ -565,6 +569,13 @@ def _candidate_for_user(
             and not ({"admin", "system-admins"} & groups)
         ),
     )
+    if allowed_designation_role_keys is not None:
+        matches = tuple(
+            match
+            for match in matches
+            if match.primary_designation
+            and match.role_key in allowed_designation_role_keys
+        )
     if not matches:
         return None
 
@@ -591,12 +602,12 @@ def _candidate_for_user(
     )
 
 
-def eligible_assignees(
+def _eligible_candidates(
     ticket: Ticket,
     *,
-    search: str = "",
+    search: str,
+    allowed_designation_role_keys: frozenset[str] | None,
 ) -> tuple[AssigneeCandidate, ...]:
-    """Return active ownership candidates without per-user database queries."""
     users = User.objects.filter(is_active=True).prefetch_related(
         "user_roles__role",
         "user_roles__office",
@@ -610,6 +621,7 @@ def eligible_assignees(
                 ticket,
                 user,
                 require_database_scope_check=False,
+                allowed_designation_role_keys=allowed_designation_role_keys,
             )
         )
     )
@@ -638,6 +650,50 @@ def eligible_assignees(
                 str(item.id),
             ),
         )
+    )
+
+
+def eligible_assignees(
+    ticket: Ticket,
+    *,
+    search: str = "",
+) -> tuple[AssigneeCandidate, ...]:
+    """Return active ownership candidates without per-user database queries."""
+    return _eligible_candidates(
+        ticket,
+        search=search,
+        allowed_designation_role_keys=None,
+    )
+
+
+def eligible_escalation_supervisors(
+    ticket: Ticket,
+    *,
+    search: str = "",
+) -> tuple[AssigneeCandidate, ...]:
+    if ticket.domain != Ticket.Domain.OPERATIONAL:
+        return ()
+    return _eligible_candidates(
+        ticket,
+        search=search,
+        allowed_designation_role_keys=ESCALATION_SUPERVISOR_ROLE_KEYS,
+    )
+
+
+def eligible_escalation_supervisor_candidate(
+    ticket: Ticket,
+    user: User,
+    *,
+    snapshot: AuthoritySnapshot,
+) -> AssigneeCandidate | None:
+    if ticket.domain != Ticket.Domain.OPERATIONAL:
+        return None
+    return _candidate_for_user(
+        ticket,
+        user,
+        authority=snapshot,
+        require_database_scope_check=False,
+        allowed_designation_role_keys=ESCALATION_SUPERVISOR_ROLE_KEYS,
     )
 
 

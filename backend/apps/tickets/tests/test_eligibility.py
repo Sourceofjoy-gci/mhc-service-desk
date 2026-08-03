@@ -11,7 +11,9 @@ from django.utils import timezone
 
 from apps.catalogue.models import Service
 from apps.identity_access.models import Role, User, UserRole
+from apps.identity_access.scope import get_authority_snapshot
 from apps.organisations.models import Office, ServiceLocation
+from apps.tickets import eligibility as ticket_eligibility
 from apps.tickets.custody import CustodyParty
 from apps.tickets.eligibility import (
     DESIGNATIONS,
@@ -140,6 +142,152 @@ def _candidate(ticket: Ticket, user: User) -> AssigneeCandidate:
 
 def _braced_upper_uuid(value: object) -> str:
     return f"{{{str(value).upper()}}}"
+
+
+def test_escalation_supervisors_include_only_active_scoped_canonical_roles(
+    basic_world,
+):
+    ticket = _ticket(basic_world)
+    assistant = _user(display_name="Assistant Dlamini")
+    deputy = _user(display_name="Deputy Nkosi")
+    master = _user(display_name="Master Mabuza")
+    exact_scope = [{"domain": ticket.domain, "office": str(ticket.office_id)}]
+    for user, role_key, role_name in (
+        (assistant, "assistant-master", "Assistant Master"),
+        (deputy, "deputy-master", "Deputy Master"),
+        (master, "master", "Master"),
+    ):
+        _grant(
+            user,
+            role_key=role_key,
+            role_name=role_name,
+            scopes=exact_scope,
+            office=ticket.office,
+        )
+
+    examiner = _user(display_name="Examiner Ndlovu")
+    _grant(
+        examiner,
+        role_key="examiner",
+        role_name="Examiner",
+        scopes=exact_scope,
+        office=ticket.office,
+    )
+    legacy_supervisor = _user(groups=["ops-supervisors"])
+    master_role = master.user_roles.get().role
+    expired_master = _user()
+    UserRole.objects.create(
+        user=expired_master,
+        role=master_role,
+        office=ticket.office,
+        expires_at=timezone.now() - timedelta(seconds=1),
+    )
+    other_office = Office.objects.create(
+        region=basic_world["region"],
+        code="OTHER-SUPERVISOR",
+        name="Other supervisor office",
+    )
+    cross_office_master = _user()
+    UserRole.objects.create(
+        user=cross_office_master,
+        role=master_role,
+        office=other_office,
+    )
+    inactive_master = _user(active=False)
+    UserRole.objects.create(user=inactive_master, role=master_role, office=ticket.office)
+    realm_role_only_master = _user(groups=["master"])
+    mixed_master_auditor = _user()
+    UserRole.objects.create(
+        user=mixed_master_auditor,
+        role=master_role,
+        office=ticket.office,
+    )
+    _grant(
+        mixed_master_auditor,
+        role_key="auditor",
+        role_name="Auditor",
+        scopes=exact_scope,
+        office=ticket.office,
+    )
+
+    candidates = ticket_eligibility.eligible_escalation_supervisors(ticket)
+
+    assert {candidate.id for candidate in candidates} == {
+        assistant.id,
+        deputy.id,
+        master.id,
+    }
+    assert all(
+        set(candidate.designations)
+        <= {"Assistant Master", "Deputy Master", "Master"}
+        for candidate in candidates
+    )
+    assert {
+        legacy_supervisor.id,
+        expired_master.id,
+        cross_office_master.id,
+        inactive_master.id,
+        realm_role_only_master.id,
+        mixed_master_auditor.id,
+    }.isdisjoint({candidate.id for candidate in candidates})
+
+
+@pytest.mark.parametrize(
+    "search",
+    [
+        "ASSISTANT DLAMINI",
+        "assistant-user",
+        "assistant master",
+        "office leadership",
+        "approve within delegated",
+    ],
+)
+def test_escalation_supervisor_search_matches_each_candidate_field(
+    basic_world,
+    search,
+):
+    ticket = _ticket(basic_world)
+    assistant = _user(
+        username="assistant-user",
+        display_name="Assistant Dlamini",
+    )
+    _grant(
+        assistant,
+        role_key="assistant-master",
+        role_name="Assistant Master",
+        scopes=[{"domain": ticket.domain, "office": str(ticket.office_id)}],
+        office=ticket.office,
+    )
+
+    assert [
+        candidate.id
+        for candidate in ticket_eligibility.eligible_escalation_supervisors(
+            ticket,
+            search=search,
+        )
+    ] == [assistant.id]
+
+
+def test_escalation_supervisor_candidates_are_operational_only(basic_world):
+    it_ticket = _ticket(basic_world, domain=Ticket.Domain.IT)
+    master = _user()
+    _grant(
+        master,
+        role_key="master",
+        role_name="Master",
+        scopes=[{"domain": Ticket.Domain.OPERATIONAL}],
+        office=it_ticket.office,
+    )
+
+    assert ticket_eligibility.eligible_escalation_supervisors(it_ticket) == ()
+    assert (
+        ticket_eligibility.eligible_escalation_supervisor_candidate(
+            it_ticket,
+            master,
+            snapshot=get_authority_snapshot(master),
+        )
+        is None
+    )
 
 
 def test_designation_accepts_canonical_uuid_text_variants_for_exact_scope(
