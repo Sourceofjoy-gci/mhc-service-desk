@@ -17,7 +17,10 @@ from rest_framework.request import Request
 
 from apps.catalogue.models import RequestType, Service
 from apps.contacts.models import Contact, VerificationToken
-from apps.identity_access.authority_lock import lock_user_authorities
+from apps.identity_access.authority_lock import (
+    LockedUserAuthority,
+    lock_user_authorities,
+)
 from apps.identity_access.models import User
 from apps.identity_access.scope import (
     AuthoritySnapshot,
@@ -190,20 +193,21 @@ class _LockedMutationAuthority:
     snapshot: AuthoritySnapshot
 
 
-def _lock_and_revalidate_mutation_actor(
+def _lock_and_revalidate_mutation_authorities(
     *,
     ticket: Ticket,
     actor: User,
     request: Request | None,
     initial_snapshot: AuthoritySnapshot,
+    additional_user_ids: set[UUID],
     scope_failure_is_permission: bool = False,
-) -> _LockedMutationAuthority:
-    """Lock current actor facts after the ticket and re-prove ticket scope."""
+) -> tuple[_LockedMutationAuthority, dict[UUID, LockedUserAuthority]]:
     request_local_auditor = _has_request_local_auditor_claim(
         actor,
         request=request,
     )
-    locked_authority = lock_user_authorities((actor.id,)).get(actor.id)
+    locked_authorities = lock_user_authorities({actor.id, *additional_user_ids})
+    locked_authority = locked_authorities.get(actor.id)
     if locked_authority is None or not locked_authority.user.is_active:
         raise TicketPermissionError
     locked_actor = locked_authority.user
@@ -225,10 +229,33 @@ def _lock_and_revalidate_mutation_actor(
         if scope_failure_is_permission:
             raise TicketPermissionError
         raise TicketScopeError
-    return _LockedMutationAuthority(
-        actor=locked_actor,
-        snapshot=locked_snapshot,
+    return (
+        _LockedMutationAuthority(
+            actor=locked_actor,
+            snapshot=locked_snapshot,
+        ),
+        locked_authorities,
     )
+
+
+def _lock_and_revalidate_mutation_actor(
+    *,
+    ticket: Ticket,
+    actor: User,
+    request: Request | None,
+    initial_snapshot: AuthoritySnapshot,
+    scope_failure_is_permission: bool = False,
+) -> _LockedMutationAuthority:
+    """Lock current actor facts after the ticket and re-prove ticket scope."""
+    locked_actor, _ = _lock_and_revalidate_mutation_authorities(
+        ticket=ticket,
+        actor=actor,
+        request=request,
+        initial_snapshot=initial_snapshot,
+        additional_user_ids=set(),
+        scope_failure_is_permission=scope_failure_is_permission,
+    )
+    return locked_actor
 
 
 WORK_STATE_FIELDS = {
