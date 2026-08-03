@@ -22,6 +22,7 @@ from rest_framework_simplejwt.tokens import AccessToken
 
 from .authority_lock import lock_user_authorities
 from .models import User
+from .staff_roles import STAFF_DESIGNATION_ROLE_KEYS
 
 logger = logging.getLogger(__name__)
 
@@ -50,7 +51,7 @@ _KEYCLOAK_REALM_ROLES = _KEYCLOAK_GROUPS | {
     "lead-it",
     "admin",
     "auditor",
-}
+} | STAFF_DESIGNATION_ROLE_KEYS
 
 type JSONScalar = str | int | float | bool | None
 type JSONValue = JSONScalar | list[JSONValue] | dict[str, JSONValue]

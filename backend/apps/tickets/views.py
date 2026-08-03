@@ -424,6 +424,7 @@ class TicketViewSet(
                         "display_name": candidate.display_name,
                         "designations": list(candidate.designations),
                         "team_labels": list(candidate.team_labels),
+                        "role_summaries": list(candidate.role_summaries),
                     }
                     for candidate in candidates
                 ]

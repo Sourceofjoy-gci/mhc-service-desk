@@ -391,15 +391,17 @@ def test_assignees_are_filtered_by_ticket_domain(basic_world):
                 "id": str(eligible.id),
                 "username": eligible.username,
                 "display_name": "Eligible Agent",
-                "designations": ["Operational Agent"],
-                "team_labels": ["Operational"],
+                    "designations": ["Operational Agent"],
+                    "team_labels": ["Operational"],
+                    "role_summaries": [],
             },
             {
                 "id": str(actor.id),
                 "username": actor.username,
                 "display_name": "Supervisor",
-                "designations": ["Operational Supervisor"],
-                "team_labels": ["Operational"],
+                    "designations": ["Operational Supervisor"],
+                    "team_labels": ["Operational"],
+                    "role_summaries": [],
             },
         ]
     }

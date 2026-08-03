@@ -42,7 +42,9 @@ export const KEYCLOAK_REALM_ROLES: ReadonlySet<string> = new Set([
   "principal-accountant",
   "financial-controller",
   "estate-examiner",
+  "examiner",
   "records-clerk",
+  "records-officer",
   "data-clerk",
 ]);
 

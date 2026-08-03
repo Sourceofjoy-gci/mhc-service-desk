@@ -3,7 +3,31 @@ from __future__ import annotations
 import pytest
 
 from apps.identity_access.models import User
+from apps.organisations.models import Office
 from scripts import seed_dev
+
+
+@pytest.mark.django_db
+def test_seed_dev_creates_every_supported_intake_office():
+    expected = {
+        ("MHC-MBA", "Master's Office — Mbabane (Main)", "Hhohho"),
+        ("MHC-MAN", "Master's Office — Manzini", "Manzini"),
+        ("MHC-LOB", "Master's Office — Lobamba", "Hhohho"),
+        ("MHC-HLA", "Master's Office — Hlathikhulu", "Shiselweni"),
+        ("MHC-NHL", "Master's Office — Nhlangano", "Shiselweni"),
+        ("MHC-SIT", "Master's Office — Siteki", "Lubombo"),
+        ("MHC-SIP", "Master's Office — Siphofaneni", "Lubombo"),
+        ("MHC-SIM", "Master's Office — Simunye", "Lubombo"),
+        ("MHC-PIG", "Master's Office — Pigg's Peak", "Hhohho"),
+    }
+
+    seed_dev.main()
+
+    assert set(
+        Office.objects.filter(code__in={code for code, _, _ in expected}).values_list(
+            "code", "name", "region__code"
+        )
+    ) == expected
 
 
 @pytest.mark.django_db

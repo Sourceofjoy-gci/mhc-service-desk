@@ -131,6 +131,7 @@ export interface TicketAssignee {
   display_name: string;
   designations: string[];
   team_labels: string[];
+  role_summaries?: string[];
 }
 
 export interface AssignmentParty {
@@ -560,7 +561,9 @@ const OPERATIONAL_GROUPS = new Set([
   "principal-accountant",
   "financial-controller",
   "estate-examiner",
+  "examiner",
   "records-clerk",
+  "records-officer",
   "data-clerk",
 ]);
 const IT_GROUPS = new Set(["agent-it", "it-agents", "lead-it", "it-leads"]);

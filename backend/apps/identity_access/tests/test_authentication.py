@@ -227,6 +227,36 @@ def test_verified_token_uses_realm_roles_for_staff_authorisation():
     ]
 
 
+@pytest.mark.parametrize(
+    "role_key",
+    [
+        "records-officer",
+        "examiner",
+        "assistant-master",
+        "deputy-master",
+        "master",
+    ],
+)
+def test_verified_token_retains_internal_staff_realm_roles(role_key):
+    user, _ = _authenticate_verified_payload(
+        {
+            "sub": f"{role_key}-subject",
+            "preferred_username": f"{role_key}-user",
+            "realm_access": {"roles": [role_key, "offline_access"]},
+            "iss": "https://idp.example.test/realms/mhc",
+            "aud": "mhc-ticketing",
+            "iat": 1_750_000_000,
+            "exp": 1_750_000_300,
+        }
+    )
+
+    assert user.keycloak_groups == [role_key]
+    assert user._groups == [role_key]
+    # A token designation is identity context only; scoped UserRole records
+    # remain the source of operational authority.
+    assert get_user_scopes(user) == []
+
+
 def test_nested_keycloak_group_path_cannot_grant_a_privileged_realm_role():
     user, _ = _authenticate_verified_payload(
         {

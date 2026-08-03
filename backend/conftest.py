@@ -11,6 +11,7 @@ import pytest
 from apps.catalogue.models import RequestType, Service
 from apps.contacts.models import Contact
 from apps.identity_access.models import Role
+from apps.identity_access.staff_roles import STAFF_DESIGNATION_ROLE_KEYS
 from apps.organisations.models import Office, Region
 from apps.sla.seed_sla import seed_sla
 from apps.tickets.seed_workflow import seed_workflow
@@ -19,6 +20,10 @@ from apps.tickets.seed_workflow import seed_workflow
 @pytest.fixture
 def basic_world(db):
     """A minimal but complete world for ticket-flow tests."""
+    # Production migrations install the canonical staff-role catalogue. Most
+    # unit tests intentionally construct their own role scopes, so remove only
+    # those bootstrap rows before building an isolated test world.
+    Role.objects.filter(keycloak_role__in=STAFF_DESIGNATION_ROLE_KEYS).delete()
     seed_workflow()
     seed_sla()
 

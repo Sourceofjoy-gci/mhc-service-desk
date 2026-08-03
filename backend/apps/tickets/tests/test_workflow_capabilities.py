@@ -31,9 +31,60 @@ DESIGNATION_KEYS = (
     "principal-accountant",
     "financial-controller",
     "estate-examiner",
+    "examiner",
     "records-clerk",
+    "records-officer",
     "data-clerk",
 )
+
+
+@pytest.mark.parametrize(
+    ("required_role", "allowed_roles", "denied_roles"),
+    [
+        (
+            "assistant-master",
+            ("assistant-master", "deputy-master", "master"),
+            ("examiner", "records-officer"),
+        ),
+        ("deputy-master", ("deputy-master", "master"), ("assistant-master",)),
+        ("master", ("master",), ("deputy-master",)),
+        ("examiner", ("examiner", "estate-examiner"), ("records-officer",)),
+        (
+            "records-officer",
+            ("records-officer", "records-clerk"),
+            ("examiner",),
+        ),
+    ],
+)
+def test_internal_staff_approval_roles_inherit_up_the_court_hierarchy(
+    basic_world,
+    required_role,
+    allowed_roles,
+    denied_roles,
+):
+    ticket = _ticket(basic_world)
+    transition = Transition.objects.get(
+        domain=ticket.domain,
+        from_status=ticket.status,
+        to_status__code="triage",
+    )
+    transition.required_role = required_role
+    transition.save(update_fields=["required_role"])
+
+    def actor_with(role_key: str) -> User:
+        actor = _user([])
+        role = Role.objects.create(
+            keycloak_role=role_key,
+            name=role_key.replace("-", " ").title(),
+            scopes=[{"domain": "operational"}],
+        )
+        UserRole.objects.create(user=actor, role=role, office=ticket.office)
+        return actor
+
+    for role_key in allowed_roles:
+        assert available_transitions(ticket, actor_with(role_key)).exists()
+    for role_key in denied_roles:
+        assert not available_transitions(ticket, actor_with(role_key)).exists()
 
 
 def _user(groups: list[str]) -> User:
@@ -551,8 +602,14 @@ def test_read_only_cross_domain_and_inactive_actors_have_no_transitions(
 
 
 def test_detail_serializes_resolution_requirements_and_list_serializes_codes(basic_world):
-    actor = _user(["ops-agents"])
     ticket = _ticket(basic_world, status_code="in_progress")
+    actor = _user([])
+    role = Role.objects.create(
+        keycloak_role="assistant-master",
+        name="Assistant Master",
+        scopes=[{"domain": "operational"}],
+    )
+    UserRole.objects.create(user=actor, role=role, office=ticket.office)
     Transition.objects.filter(
         domain=ticket.domain,
         from_status=ticket.status,

@@ -10,6 +10,18 @@ type StatusSeed = tuple[str, str, bool, bool, int, str]
 type TransitionSeed = tuple[str, str, str] | tuple[str, str, str, bool]
 type WorkflowSeed = tuple[str, list[StatusSeed], list[TransitionSeed]]
 
+OPERATIONAL_TRANSITION_REQUIRED_ROLES: dict[tuple[str, str], str] = {
+    ("in_progress", "resolved"): "assistant-master",
+    ("quality_review", "resolved"): "assistant-master",
+    ("escalated", "in_progress"): "deputy-master",
+    ("resolved", "reopened"): "deputy-master",
+    ("resolved", "closed"): "master",
+    ("cancelled", "closed"): "master",
+    ("rejected", "closed"): "master",
+    ("duplicate", "closed"): "master",
+    ("spam", "closed"): "master",
+}
+
 OPERATIONAL_STATUSES: list[StatusSeed] = [
     ("new", "New", True, False, 10, "Received"),
     ("triage", "Triage", False, False, 20, "Being reviewed"),
@@ -158,6 +170,11 @@ def seed_workflow() -> None:
                 defaults={
                     "name": name,
                     "sets_resolution": sets_resolution,
+                    "required_role": (
+                        OPERATIONAL_TRANSITION_REQUIRED_ROLES.get((frm, to), "")
+                        if domain == "operational"
+                        else ""
+                    ),
                     "required_fields": ["reason"] if to == "escalated" else [],
                     "is_active": True,
                 },

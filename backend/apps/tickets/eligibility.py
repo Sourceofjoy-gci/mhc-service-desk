@@ -33,6 +33,7 @@ from apps.identity_access.scope import (
 from apps.identity_access.scope import (
     _validated_role_scopes as validated_role_scopes,
 )
+from apps.identity_access.staff_roles import STAFF_DESIGNATIONS
 from apps.organisations.models import ServiceLocation
 
 from .custody import CustodyParty
@@ -46,28 +47,10 @@ class AssigneeCandidate:
     display_name: str
     designations: tuple[str, ...]
     team_labels: tuple[str, ...]
+    role_summaries: tuple[str, ...] = ()
 
 
-@dataclass(frozen=True)
-class Designation:
-    role_key: str
-    display_name: str
-    team_label: str
-
-
-DESIGNATIONS: tuple[Designation, ...] = (
-    Designation("master", "Master", "Office Leadership"),
-    Designation("deputy-master", "Deputy Master", "Office Leadership"),
-    Designation("assistant-master", "Assistant Master", "Office Leadership"),
-    Designation("assistant-accountant", "Assistant Accountant", "Finance"),
-    Designation("accountant", "Accountant", "Finance"),
-    Designation("senior-accountant", "Senior Accountant", "Finance"),
-    Designation("principal-accountant", "Principal Accountant", "Finance"),
-    Designation("financial-controller", "Financial Controller", "Finance"),
-    Designation("estate-examiner", "Estate Examiner", "Estate Administration"),
-    Designation("records-clerk", "Records Clerk", "Records and Data"),
-    Designation("data-clerk", "Data Clerk", "Records and Data"),
-)
+DESIGNATIONS = STAFF_DESIGNATIONS
 
 _DESIGNATION_BY_KEY = {item.role_key: item for item in DESIGNATIONS}
 _AUDITOR_ROLE_KEYS = {"auditor", "auditors"}
@@ -118,6 +101,14 @@ _ROLE_ALIASES: dict[str, frozenset[str]] = {
     "admin": frozenset({"admin", "system-admins"}),
     "system-admins": frozenset({"admin", "system-admins"}),
 }
+_ACTOR_GROUP_ROLE_KEYS = frozenset(_ROLE_ALIASES)
+_ROLE_ALIASES.update(
+    {
+        designation.role_key: designation.authority_aliases
+        for designation in DESIGNATIONS
+        if designation.authority_aliases
+    }
+)
 _GROUP_FALLBACK_ROLE_KEYS = {
     "ops-agents",
     "ops-supervisors",
@@ -125,11 +116,9 @@ _GROUP_FALLBACK_ROLE_KEYS = {
     "it-leads",
     "system-admins",
 }
-# Actor authority accepts both Keycloak realm-role names and their legacy group
-# aliases. Ownership candidate discovery deliberately continues to use
-# _GROUP_FALLBACK_ROLE_KEYS through _functional_matches, so a realm role alone
-# cannot make an identity assignable.
-_ACTOR_GROUP_ROLE_KEYS = frozenset(_ROLE_ALIASES)
+# Actor group fallback accepts only established functional roles. Designation
+# realm roles are identity context; a scoped UserRole is still required before
+# a designation grants ticket authority or makes a user assignable.
 
 
 @dataclass(frozen=True)
@@ -138,6 +127,7 @@ class _FunctionalMatch:
     display_name: str
     team_label: str
     primary_designation: bool
+    role_summary: str = ""
 
 
 def _prefetched_assignments(user: User) -> list[UserRole]:
@@ -281,6 +271,10 @@ def _functional_matches(
                     display_name=persisted_name or designation.display_name,
                     team_label=designation.team_label,
                     primary_designation=True,
+                    role_summary=(
+                        assignment.role.description.strip()
+                        or designation.description
+                    ),
                 )
             )
         elif legacy is not None:
@@ -427,6 +421,7 @@ def _matching_grant_role_aliases(
                         else "agent-it"
                     ]
                 )
+                aliases.update(_ROLE_ALIASES.get(role_key, ()))
             continue
         role_aliases = _ROLE_ALIASES.get(role_key)
         family_domain = _ROLE_FAMILY_DOMAIN.get(role_key)
@@ -580,12 +575,19 @@ def _candidate_for_user(
         )
     )
     team_labels = tuple(sorted({match.team_label for match in matches}))
+    role_summaries = tuple(
+        sorted(
+            {match.role_summary for match in matches if match.role_summary},
+            key=lambda value: (value.casefold(), value),
+        )
+    )
     return AssigneeCandidate(
         id=user.id,
         username=user.username,
         display_name=user.display_name or user.username,
         designations=designations,
         team_labels=team_labels,
+        role_summaries=role_summaries,
     )
 
 
@@ -623,6 +625,7 @@ def eligible_assignees(
                     candidate.username,
                     *candidate.designations,
                     *candidate.team_labels,
+                    *candidate.role_summaries,
                 )
             )
         )

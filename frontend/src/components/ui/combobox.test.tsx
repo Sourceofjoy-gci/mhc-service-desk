@@ -26,6 +26,10 @@ const estateExaminer: TicketAssignee = {
   display_name: "Themba Nkosi",
   designations: ["Estate Examiner"],
   team_labels: ["Estate Administration"],
+  role_summaries: [
+    "Review estate submissions; verify documents; raise defects; assess compliance. " +
+      "Authority: Review and recommend.",
+  ],
 };
 
 const options = [accountant, estateExaminer];
@@ -321,6 +325,21 @@ describe("StaffCombobox", () => {
     const option = screen.getByRole("option", { name: /Amina Dlamini/ });
     expect(within(option).getByText("Amina Dlamini")).toBeVisible();
     expect(within(option).getByText("Accountant · Finance")).toBeVisible();
+  });
+
+  it("renders the internal role responsibility and authority summary", async () => {
+    const user = userEvent.setup();
+    render(<Harness options={[estateExaminer]} />);
+
+    await openStaffCombobox(user);
+
+    const option = screen.getByRole("option", { name: /Themba Nkosi/ });
+    expect(
+      within(option).getByText(
+        "Review estate submissions; verify documents; raise defects; assess " +
+          "compliance. Authority: Review and recommend.",
+      ),
+    ).toBeVisible();
   });
 
   it("keeps Unassigned as a distinct selectable option", async () => {

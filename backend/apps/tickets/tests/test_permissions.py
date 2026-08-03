@@ -36,9 +36,49 @@ DESIGNATION_KEYS = (
     "principal-accountant",
     "financial-controller",
     "estate-examiner",
+    "examiner",
     "records-clerk",
+    "records-officer",
     "data-clerk",
 )
+
+
+@pytest.mark.parametrize(
+    ("role_key", "expected"),
+    [
+        ("records-officer", False),
+        ("examiner", False),
+        ("assistant-master", True),
+        ("deputy-master", True),
+        ("master", True),
+    ],
+)
+def test_internal_staff_assignment_authority_follows_role_hierarchy(
+    basic_world,
+    role_key,
+    expected,
+):
+    user = _user(groups=[])
+    role = Role.objects.create(
+        keycloak_role=role_key,
+        name=role_key.replace("-", " ").title(),
+        scopes=[{"domain": "operational"}],
+    )
+    UserRole.objects.create(user=user, role=role, office=basic_world["office"])
+    ticket = Ticket.objects.create(
+        number=f"H{uuid4().hex[:5].upper()}",
+        domain="operational",
+        title="Court role assignment hierarchy",
+        status=Status.objects.get(domain="operational", code="new"),
+        channel="web",
+        requester=basic_world["contact"],
+        service=basic_world["gen_info"],
+        request_type=basic_world["gen_info"].request_types.get(),
+        office=basic_world["office"],
+    )
+
+    assert can_assign(user, ticket=ticket) is expected
+    assert can_reassign(user, ticket=ticket) is expected
 
 
 def _user(*, groups: list[str], active: bool = True) -> User:
@@ -328,7 +368,7 @@ def test_unqueue_permission_requires_a_matching_non_queue_constrained_grant(basi
 
 
 @pytest.mark.parametrize("role_key", DESIGNATION_KEYS)
-def test_each_exact_scope_designation_can_action_but_cannot_assign(
+def test_each_exact_scope_designation_has_expected_assignment_authority(
     basic_world,
     role_key,
 ):
@@ -360,8 +400,13 @@ def test_each_exact_scope_designation_can_action_but_cannot_assign(
 
     assert can_update_work_state(user, ticket) is True
     assert can_add_ticket_content(user, ticket) is True
-    assert can_assign(user, ticket=ticket) is False
-    assert can_reassign(user, ticket=ticket) is False
+    manages_assignments = role_key in {
+        "assistant-master",
+        "deputy-master",
+        "master",
+    }
+    assert can_assign(user, ticket=ticket) is manages_assignments
+    assert can_reassign(user, ticket=ticket) is manages_assignments
 
 
 @pytest.mark.parametrize(

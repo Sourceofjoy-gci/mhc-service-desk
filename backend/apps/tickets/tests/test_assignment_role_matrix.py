@@ -30,7 +30,9 @@ PRIMARY_DESIGNATIONS = (
     "principal-accountant",
     "financial-controller",
     "estate-examiner",
+    "examiner",
     "records-clerk",
+    "records-officer",
     "data-clerk",
 )
 
@@ -120,7 +122,6 @@ def test_supported_role_has_complete_creation_to_closure_custody_timeline(
     service = (
         basic_world["gen_info"] if domain == Ticket.Domain.OPERATIONAL else basic_world["it_inc"]
     )
-    actor_group = "ops-supervisors" if domain == Ticket.Domain.OPERATIONAL else "it-leads"
     owner = _scoped_owner(
         role_key=role_key,
         domain=domain,
@@ -133,7 +134,16 @@ def test_supported_role_has_complete_creation_to_closure_custody_timeline(
         basic_world=basic_world,
         label=f"{role_key} backup owner",
     )
-    actor = _user(groups=[actor_group], label="Matrix supervisor")
+    actor = (
+        _scoped_owner(
+            role_key="master",
+            domain=domain,
+            basic_world=basic_world,
+            label="Matrix Master",
+        )
+        if domain == Ticket.Domain.OPERATIONAL
+        else _user(groups=["it-leads"], label="Matrix IT lead")
+    )
     destination = ServiceLocation.objects.create(
         office=basic_world["office"],
         name=f"Matrix destination {role_key}",

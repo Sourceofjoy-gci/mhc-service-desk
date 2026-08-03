@@ -48,8 +48,14 @@ function optionSearchText(option: StaffOption) {
     return "unassigned";
   }
 
-  const { display_name, username, designations, team_labels } = option.assignee;
-  return [display_name, username, ...designations, ...team_labels]
+  const {
+    display_name,
+    username,
+    designations,
+    team_labels,
+    role_summaries = [],
+  } = option.assignee;
+  return [display_name, username, ...designations, ...team_labels, ...role_summaries]
     .join(" ")
     .toLocaleLowerCase();
 }
@@ -232,7 +238,7 @@ export function StaffCombobox({
                   >
                     <Combobox.ItemIndicator
                       keepMounted
-                      className="col-start-1 row-span-2 flex size-4 items-center justify-center text-primary opacity-0 data-selected:opacity-100"
+                      className="col-start-1 row-span-3 flex size-4 items-center justify-center text-primary opacity-0 data-selected:opacity-100"
                     >
                       <CheckIcon aria-hidden="true" className="size-3.5" />
                     </Combobox.ItemIndicator>
@@ -248,6 +254,14 @@ export function StaffCombobox({
                         <span className="col-start-2 truncate text-xs text-muted-foreground">
                           {supportingContext(option.assignee)}
                         </span>
+                        {option.assignee.role_summaries?.map((summary) => (
+                          <span
+                            key={summary}
+                            className="col-start-2 mt-0.5 max-w-xl text-xs text-muted-foreground"
+                          >
+                            {summary}
+                          </span>
+                        ))}
                       </>
                     )}
                   </Combobox.Item>

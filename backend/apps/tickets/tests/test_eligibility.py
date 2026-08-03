@@ -35,9 +35,35 @@ DESIGNATION_CASES = (
     ("principal-accountant", "Principal Accountant", "Finance"),
     ("financial-controller", "Financial Controller", "Finance"),
     ("estate-examiner", "Estate Examiner", "Estate Administration"),
+    ("examiner", "Examiner", "Estate Administration"),
     ("records-clerk", "Records Clerk", "Records and Data"),
+    ("records-officer", "Records Officer", "Records and Data"),
     ("data-clerk", "Data Clerk", "Records and Data"),
 )
+
+INTERNAL_ROLE_SUMMARIES = {
+    "master": (
+        "Make final decisions on designated approvals and policy exceptions. "
+        "Authority: Full approval authority."
+    ),
+    "deputy-master": (
+        "Perform higher-level review; handle exceptions; make escalation "
+        "decisions. Authority: Senior approval and oversight."
+    ),
+    "assistant-master": (
+        "Supervise reviews; validate recommendations; authorise workflow "
+        "progress. Authority: Approve within delegated authority."
+    ),
+    "examiner": (
+        "Review estate submissions; verify documents; raise defects; assess "
+        "compliance. Authority: Review and recommend."
+    ),
+    "records-officer": (
+        "Register new estate matters; capture metadata; receive and index "
+        "documents; maintain file completeness. Authority: Create and update "
+        "case intake records."
+    ),
+}
 
 
 def _ticket(
@@ -246,6 +272,11 @@ def test_each_primary_designation_is_an_explainable_exact_scope_candidate(
         display_name=user.display_name,
         designations=(display_name,),
         team_labels=(team_label,),
+        role_summaries=(
+            (INTERNAL_ROLE_SUMMARIES[role_key],)
+            if role_key in INTERNAL_ROLE_SUMMARIES
+            else ()
+        ),
     )
     assert is_eligible_assignee(ticket, user) is True
 
@@ -254,6 +285,40 @@ def test_designation_table_is_complete_and_stable():
     assert tuple(
         (item.role_key, item.display_name, item.team_label) for item in DESIGNATIONS
     ) == DESIGNATION_CASES
+
+
+@pytest.mark.parametrize(
+    ("role_key", "expected_summary"),
+    [
+        (
+            "records-officer",
+            "Register new estate matters; capture metadata; receive and index "
+            "documents; maintain file completeness. Authority: Create and update "
+            "case intake records.",
+        ),
+        (
+            "examiner",
+            "Review estate submissions; verify documents; raise defects; assess "
+            "compliance. Authority: Review and recommend.",
+        ),
+    ],
+)
+def test_internal_staff_candidate_exposes_role_context(
+    basic_world,
+    role_key,
+    expected_summary,
+):
+    ticket = _ticket(basic_world)
+    user = _user(username=f"{role_key}-context")
+    _grant(
+        user,
+        role_key=role_key,
+        role_name=role_key.replace("-", " ").title(),
+        scopes=[{"domain": "operational"}],
+        office=ticket.office,
+    )
+
+    assert _candidate(ticket, user).role_summaries == (expected_summary,)
 
 
 @pytest.mark.parametrize(

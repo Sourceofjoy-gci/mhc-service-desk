@@ -29,7 +29,9 @@ const PRIMARY_DESIGNATION_ROLES = [
   "principal-accountant",
   "financial-controller",
   "estate-examiner",
+  "examiner",
   "records-clerk",
+  "records-officer",
   "data-clerk",
 ] as const;
 

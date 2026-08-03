@@ -340,9 +340,10 @@ def test_candidate_directory_returns_only_exact_active_staff_with_metadata_and_s
                 "id": str(eligible.id),
                 "username": eligible.username,
                 "display_name": "Naledi Exact",
-                "designations": ["Senior Accountant"],
-                "team_labels": ["Finance"],
-            }
+                    "designations": ["Senior Accountant"],
+                    "team_labels": ["Finance"],
+                    "role_summaries": [],
+                }
         ]
     }
 

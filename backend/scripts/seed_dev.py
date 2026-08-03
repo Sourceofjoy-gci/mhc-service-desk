@@ -19,22 +19,14 @@ django.setup()
 from apps.catalogue.models import RequestType, Service  # noqa: E402
 from apps.contacts.models import Contact  # noqa: E402
 from apps.identity_access.models import Role, User  # noqa: E402
+from apps.identity_access.staff_roles import STAFF_DESIGNATIONS  # noqa: E402
 from apps.organisations.models import Office, Region  # noqa: E402
 from apps.sla.seed_sla import seed_sla  # noqa: E402
 from apps.tickets.seed_workflow import seed_workflow  # noqa: E402
 
 PRIMARY_STAFF_ROLES = {
-    "master": "Master",
-    "deputy-master": "Deputy Master",
-    "assistant-master": "Assistant Master",
-    "assistant-accountant": "Assistant Accountant",
-    "accountant": "Accountant",
-    "senior-accountant": "Senior Accountant",
-    "principal-accountant": "Principal Accountant",
-    "financial-controller": "Financial Controller",
-    "estate-examiner": "Estate Examiner",
-    "records-clerk": "Records Clerk",
-    "data-clerk": "Data Clerk",
+    designation.role_key: designation.display_name
+    for designation in STAFF_DESIGNATIONS
 }
 
 
@@ -74,11 +66,18 @@ def ensure_role(keycloak_role: str, name: str) -> Role:
 
 
 def seed_primary_staff_roles() -> None:
-    for keycloak_role, name in PRIMARY_STAFF_ROLES.items():
-        Role.objects.get_or_create(
-            keycloak_role=keycloak_role,
-            defaults={"name": name, "scopes": [{"domain": "operational"}]},
+    for designation in STAFF_DESIGNATIONS:
+        role, _ = Role.objects.get_or_create(
+            keycloak_role=designation.role_key,
+            defaults={
+                "name": designation.display_name,
+                "description": designation.description,
+                "scopes": [{"domain": "operational"}],
+            },
         )
+        if designation.description and not role.description.strip():
+            role.description = designation.description
+            role.save(update_fields=["description", "updated_at"])
 
 
 def ensure_contact(name: str, email: str, phone: str = "") -> Contact:
@@ -100,11 +99,21 @@ def ensure_local_admin() -> User:
     )
 
 
-def main():
-    mbabane = ensure_region("Hhohho", "Hhohho Region")
+def main() -> None:
+    hhohho = ensure_region("Hhohho", "Hhohho Region")
     manzini = ensure_region("Manzini", "Manzini Region")
-    ensure_office(mbabane, "MHC-MBA", "Master's Office — Mbabane (Main)")
+    shiselweni = ensure_region("Shiselweni", "Shiselweni Region")
+    lubombo = ensure_region("Lubombo", "Lubombo Region")
+
+    ensure_office(hhohho, "MHC-MBA", "Master's Office — Mbabane (Main)")
     ensure_office(manzini, "MHC-MAN", "Master's Office — Manzini")
+    ensure_office(hhohho, "MHC-LOB", "Master's Office — Lobamba")
+    ensure_office(shiselweni, "MHC-HLA", "Master's Office — Hlathikhulu")
+    ensure_office(shiselweni, "MHC-NHL", "Master's Office — Nhlangano")
+    ensure_office(lubombo, "MHC-SIT", "Master's Office — Siteki")
+    ensure_office(lubombo, "MHC-SIP", "Master's Office — Siphofaneni")
+    ensure_office(lubombo, "MHC-SIM", "Master's Office — Simunye")
+    ensure_office(hhohho, "MHC-PIG", "Master's Office — Pigg's Peak")
 
     gen_info = ensure_service("GEN-INFO", "General information and office contact", "operational")
     est_reg = ensure_service("EST-REG", "Estate registration or reference enquiry", "operational")
