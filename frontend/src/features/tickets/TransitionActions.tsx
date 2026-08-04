@@ -1,8 +1,9 @@
-import { useMutation } from "@tanstack/react-query";
-import { useRef, useState, type FormEvent } from "react";
+import { useMutation, useQuery } from "@tanstack/react-query";
+import { useEffect, useRef, useState, type FormEvent } from "react";
 import { AlertCircle } from "lucide-react";
 import { Alert, AlertDescription, AlertTitle } from "@/components/ui/alert";
 import { Button } from "@/components/ui/button";
+import { StaffCombobox } from "@/components/ui/combobox";
 import {
   Dialog,
   DialogContent,
@@ -48,6 +49,17 @@ const EMPTY_VALUES: FormValues = {
   resolution_summary: "",
 };
 
+function useDebouncedValue(value: string, delay: number) {
+  const [debounced, setDebounced] = useState(value);
+
+  useEffect(() => {
+    const timeout = window.setTimeout(() => setDebounced(value), delay);
+    return () => window.clearTimeout(timeout);
+  }, [delay, value]);
+
+  return debounced;
+}
+
 function firstMessages(fields: Record<string, string[]> | undefined) {
   return fields ?? {};
 }
@@ -59,12 +71,45 @@ export function TransitionActions({
 }: TransitionActionsProps) {
   const [chosen, setChosen] = useState<AvailableTransition | null>(null);
   const [values, setValues] = useState<FormValues>(EMPTY_VALUES);
+  const [supervisorId, setSupervisorId] = useState<string | null>(null);
+  const [supervisorSearch, setSupervisorSearch] = useState("");
   const [clientErrors, setClientErrors] = useState<Record<string, string[]>>(
     {},
   );
   const [isReloading, setIsReloading] = useState(false);
   const [reloadError, setReloadError] = useState<unknown>(null);
   const submitLock = useRef(false);
+  const debouncedSupervisorSearch = useDebouncedValue(supervisorSearch, 250);
+  const isEscalating = chosen?.to_status === "escalated";
+  const supervisorQuery = useQuery({
+    queryKey: [
+      "ticket",
+      ticket.number,
+      "escalation-supervisors",
+      debouncedSupervisorSearch,
+    ],
+    queryFn: () =>
+      ticketsApi.escalationSupervisors(
+        ticket.number,
+        debouncedSupervisorSearch,
+      ),
+    enabled: isEscalating,
+  });
+
+  const resetSupervisor = () => {
+    setSupervisorId(null);
+    setSupervisorSearch("");
+  };
+
+  const selectSupervisor = (id: string | null) => {
+    setSupervisorId(id);
+    if (id !== null) {
+      setClientErrors((current) => {
+        const { supervisor_id: _supervisorError, ...remaining } = current;
+        return remaining;
+      });
+    }
+  };
 
   const transition = useMutation({
     mutationFn: (submitted: TransitionValues) =>
@@ -75,6 +120,8 @@ export function TransitionActions({
     onSuccess: async (refreshedTicket) => {
       onUpdated(refreshedTicket);
       setChosen(null);
+      setValues(EMPTY_VALUES);
+      resetSupervisor();
       await onActivityChanged?.();
     },
     onSettled: () => {
@@ -88,12 +135,14 @@ export function TransitionActions({
     setClientErrors({});
     setReloadError(null);
     setValues(EMPTY_VALUES);
+    resetSupervisor();
     setChosen(next);
   };
 
   const close = () => {
     if (transition.isPending || isReloading) return;
     setChosen(null);
+    resetSupervisor();
   };
 
   const submit = (event: FormEvent<HTMLFormElement>) => {
@@ -110,6 +159,9 @@ export function TransitionActions({
     if (chosen.requires_resolution && !values.resolution_summary.trim()) {
       errors.resolution_summary = ["Resolution summary is required."];
     }
+    if (chosen.to_status === "escalated" && !supervisorId) {
+      errors.supervisor_id = ["Select an escalation supervisor."];
+    }
     setClientErrors(errors);
     if (Object.keys(errors).length > 0) return;
 
@@ -119,6 +171,9 @@ export function TransitionActions({
       submitted.resolution_code = values.resolution_code.trim();
       submitted.resolution_summary = values.resolution_summary.trim();
     }
+    if (chosen.to_status === "escalated") {
+      submitted.supervisor_id = supervisorId!;
+    }
     submitLock.current = true;
     transition.mutate(submitted);
   };
@@ -126,6 +181,13 @@ export function TransitionActions({
   const problem = apiProblem(transition.error);
   const stale = problem?.code === "stale_ticket" && transition.error !== null;
   const fieldErrors = firstMessages(problem?.fields ?? clientErrors);
+  const supervisorLoadProblem = apiProblem(supervisorQuery.error);
+  const supervisorError =
+    fieldErrors.supervisor_id?.[0] ??
+    (supervisorQuery.isError
+      ? (supervisorLoadProblem?.detail ??
+        "Could not load eligible supervisors.")
+      : undefined);
 
   const reload = async () => {
     if (isReloading) return;
@@ -136,6 +198,8 @@ export function TransitionActions({
       onUpdated(refreshedTicket);
       await onActivityChanged?.();
       setChosen(null);
+      setValues(EMPTY_VALUES);
+      resetSupervisor();
     } catch (error) {
       setReloadError(error);
     } finally {
@@ -261,6 +325,23 @@ export function TransitionActions({
                       />
                     </Field>
                   </>
+                ) : null}
+
+                {chosen.to_status === "escalated" ? (
+                  <StaffCombobox
+                    id="transition-escalation-supervisor"
+                    label="Escalate to supervisor"
+                    value={supervisorId}
+                    options={supervisorQuery.data?.results ?? []}
+                    onValueChange={selectSupervisor}
+                    onSearchChange={setSupervisorSearch}
+                    allowUnassigned={false}
+                    disabled={disabled}
+                    loading={
+                      supervisorQuery.isLoading || supervisorQuery.isFetching
+                    }
+                    error={supervisorError}
+                  />
                 ) : null}
               </FieldGroup>
 

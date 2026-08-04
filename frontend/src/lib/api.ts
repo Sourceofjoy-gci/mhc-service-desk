@@ -289,6 +289,7 @@ export interface TicketTransitionRequest {
   reason?: string;
   resolution_code?: string;
   resolution_summary?: string;
+  supervisor_id?: string;
 }
 
 export interface AttachmentDownload {
@@ -500,6 +501,14 @@ export const ticketsApi = {
     const query = params.toString();
     return api<{ results: TicketAssignee[] }>(
       `/tickets/${number}/assignees/${query ? `?${query}` : ""}`,
+    );
+  },
+  escalationSupervisors: (number: string, search = "") => {
+    const params = new URLSearchParams();
+    if (search) params.set("search", search);
+    const query = params.toString();
+    return api<{ results: TicketAssignee[] }>(
+      `/tickets/${number}/escalation-supervisors/${query ? `?${query}` : ""}`,
     );
   },
   assign: (number: string, body: AssignmentRequest) =>

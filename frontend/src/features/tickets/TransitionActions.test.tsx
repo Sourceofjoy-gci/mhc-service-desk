@@ -1,13 +1,14 @@
 import { act, screen, waitFor } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { beforeEach, describe, expect, it, vi } from "vitest";
-import { ApiError, type TicketDetail } from "@/lib/api";
+import { ApiError, type TicketAssignee, type TicketDetail } from "@/lib/api";
 import { renderWithProviders } from "@/test/render";
 import { TransitionActions } from "./TransitionActions";
 
 const harness = vi.hoisted(() => ({
   transition: vi.fn(),
   get: vi.fn(),
+  escalationSupervisors: vi.fn(),
 }));
 
 vi.mock("@/lib/api", async (importOriginal) => {
@@ -18,6 +19,7 @@ vi.mock("@/lib/api", async (importOriginal) => {
       ...original.ticketsApi,
       transition: harness.transition,
       get: harness.get,
+      escalationSupervisors: harness.escalationSupervisors,
     },
   };
 });
@@ -120,6 +122,32 @@ const TICKET: TicketDetail = {
   notes: [],
 };
 
+const ASSISTANT_MASTER: TicketAssignee = {
+  id: "00000000-0000-0000-0000-000000000099",
+  username: "assistant.dlamini",
+  display_name: "Assistant Master Dlamini",
+  designations: ["Assistant Master"],
+  team_labels: ["Office Leadership"],
+  role_summaries: ["Approves workflow progress."],
+};
+
+const ESCALATABLE_TICKET: TicketDetail = {
+  ...TICKET,
+  available_transition_codes: [
+    ...TICKET.available_transition_codes,
+    "escalated",
+  ],
+  available_transitions: [
+    ...TICKET.available_transitions,
+    {
+      to_status: "escalated",
+      label: "Escalate",
+      requires_resolution: false,
+      requires_reason: true,
+    },
+  ],
+};
+
 function deferred<T>() {
   let resolve!: (value: T) => void;
   let reject!: (reason: unknown) => void;
@@ -130,10 +158,14 @@ function deferred<T>() {
   return { promise, resolve, reject };
 }
 
-function renderActions(onUpdated = vi.fn(), onActivityChanged = vi.fn()) {
+function renderActions(
+  ticket: TicketDetail = TICKET,
+  onUpdated = vi.fn(),
+  onActivityChanged = vi.fn(),
+) {
   renderWithProviders(
     <TransitionActions
-      ticket={TICKET}
+      ticket={ticket}
       onUpdated={onUpdated}
       onActivityChanged={onActivityChanged}
     />,
@@ -149,12 +181,206 @@ async function openResolve(user: ReturnType<typeof userEvent.setup>) {
   };
 }
 
+async function selectSupervisor(user: ReturnType<typeof userEvent.setup>) {
+  await user.click(
+    screen.getByRole("combobox", { name: "Escalate to supervisor" }),
+  );
+  await screen.findByRole("option", { name: /Assistant Master Dlamini/ });
+  await user.keyboard("{ArrowDown}");
+  await user.keyboard("{Enter}");
+}
+
 beforeEach(() => {
   harness.transition.mockReset();
   harness.get.mockReset();
+  harness.escalationSupervisors.mockReset();
+  harness.escalationSupervisors.mockResolvedValue({ results: [] });
 });
 
 describe("server-driven transition actions", () => {
+  it("shows escalation supervision only for the escalation action", async () => {
+    const user = userEvent.setup();
+    renderActions(ESCALATABLE_TICKET);
+
+    expect(harness.escalationSupervisors).not.toHaveBeenCalled();
+    await user.click(screen.getByRole("button", { name: "Start work" }));
+    expect(
+      screen.queryByRole("combobox", { name: "Escalate to supervisor" }),
+    ).not.toBeInTheDocument();
+    expect(harness.escalationSupervisors).not.toHaveBeenCalled();
+
+    await user.click(screen.getByRole("button", { name: "Cancel" }));
+    await user.click(screen.getByRole("button", { name: "Escalate" }));
+
+    expect(
+      screen.getByRole("combobox", { name: "Escalate to supervisor" }),
+    ).toBeVisible();
+    await waitFor(() =>
+      expect(harness.escalationSupervisors).toHaveBeenCalledWith(
+        TICKET.number,
+        "",
+      ),
+    );
+  });
+
+  it("requires and submits a named escalation supervisor", async () => {
+    harness.escalationSupervisors.mockResolvedValue({
+      results: [ASSISTANT_MASTER],
+    });
+    harness.transition.mockResolvedValue({
+      ...ESCALATABLE_TICKET,
+      status_code: "escalated",
+      status_name: "Escalated",
+      assignee: ASSISTANT_MASTER.id,
+      assignee_detail: {
+        id: ASSISTANT_MASTER.id,
+        display_name: ASSISTANT_MASTER.display_name,
+      },
+    });
+    const user = userEvent.setup();
+    const { onUpdated, onActivityChanged } = renderActions(ESCALATABLE_TICKET);
+
+    await user.click(screen.getByRole("button", { name: "Escalate" }));
+    const reason = screen.getByRole("textbox", { name: "Reason" });
+    await user.type(reason, "SLA risk");
+    await user.click(screen.getByRole("button", { name: "Confirm Escalate" }));
+    expect(
+      await screen.findByText("Select an escalation supervisor."),
+    ).toBeVisible();
+    expect(reason).toHaveValue("SLA risk");
+
+    await user.click(
+      screen.getByRole("combobox", { name: "Escalate to supervisor" }),
+    );
+    const option = await screen.findByRole("option", {
+      name: /Assistant Master Dlamini/,
+    });
+    expect(option).toHaveTextContent("Assistant Master");
+    await user.keyboard("{ArrowDown}");
+    await user.keyboard("{Enter}");
+    await waitFor(() =>
+      expect(
+        screen.getByRole("combobox", { name: "Escalate to supervisor" }),
+      ).toHaveTextContent(ASSISTANT_MASTER.display_name),
+    );
+    await user.click(screen.getByRole("button", { name: "Confirm Escalate" }));
+
+    await waitFor(() =>
+      expect(harness.transition).toHaveBeenCalledWith(TICKET.number, {
+        to_status: "escalated",
+        updated_at: TICKET.updated_at,
+        reason: "SLA risk",
+        supervisor_id: ASSISTANT_MASTER.id,
+      }),
+    );
+    await waitFor(() => expect(onUpdated).toHaveBeenCalledTimes(1));
+    expect(onActivityChanged).toHaveBeenCalledTimes(1);
+  });
+
+  it("shows supervisor lookup loading and failure state without querying other actions", async () => {
+    const lookup = deferred<{ results: TicketAssignee[] }>();
+    harness.escalationSupervisors.mockReturnValue(lookup.promise);
+    const user = userEvent.setup();
+    renderActions(ESCALATABLE_TICKET);
+
+    await user.click(screen.getByRole("button", { name: "Escalate" }));
+    expect(
+      screen.getByRole("combobox", { name: "Escalate to supervisor" }),
+    ).toHaveAttribute("aria-busy", "true");
+    lookup.reject(
+      new ApiError(503, {
+        code: "service_unavailable",
+        detail: "Supervisor directory is unavailable.",
+        fields: {},
+        correlation_id: "corr-directory-1",
+      }),
+    );
+
+    expect(
+      await screen.findByText("Supervisor directory is unavailable."),
+    ).toBeVisible();
+  });
+
+  it("clears the selected supervisor when the escalation dialog is cancelled", async () => {
+    harness.escalationSupervisors.mockResolvedValue({
+      results: [ASSISTANT_MASTER],
+    });
+    const user = userEvent.setup();
+    renderActions(ESCALATABLE_TICKET);
+
+    await user.click(screen.getByRole("button", { name: "Escalate" }));
+    await selectSupervisor(user);
+    expect(
+      screen.getByRole("combobox", { name: "Escalate to supervisor" }),
+    ).toHaveTextContent(ASSISTANT_MASTER.display_name);
+
+    await user.click(screen.getByRole("button", { name: "Cancel" }));
+    await user.click(screen.getByRole("button", { name: "Escalate" }));
+    expect(
+      screen.getByRole("combobox", { name: "Escalate to supervisor" }),
+    ).toHaveTextContent("Select eligible team member");
+  });
+
+  it("disables supervisor selection while escalation submission is pending", async () => {
+    harness.escalationSupervisors.mockResolvedValue({
+      results: [ASSISTANT_MASTER],
+    });
+    const pending = deferred<TicketDetail>();
+    harness.transition.mockReturnValue(pending.promise);
+    const user = userEvent.setup();
+    renderActions(ESCALATABLE_TICKET);
+
+    await user.click(screen.getByRole("button", { name: "Escalate" }));
+    await user.type(
+      screen.getByRole("textbox", { name: "Reason" }),
+      "SLA risk",
+    );
+    await selectSupervisor(user);
+    await user.click(screen.getByRole("button", { name: "Confirm Escalate" }));
+
+    await waitFor(() => expect(harness.transition).toHaveBeenCalledTimes(1));
+    expect(
+      screen.getByRole("combobox", { name: "Escalate to supervisor" }),
+    ).toBeDisabled();
+    expect(screen.getByRole("button", { name: "Cancel" })).toBeDisabled();
+    pending.resolve(ESCALATABLE_TICKET);
+  });
+
+  it("preserves an escalation selection for server field and stale errors", async () => {
+    harness.escalationSupervisors.mockResolvedValue({
+      results: [ASSISTANT_MASTER],
+    });
+    harness.transition.mockRejectedValue(
+      new ApiError(400, {
+        code: "invalid_transition",
+        detail: "Supervisor no longer has this authority.",
+        fields: {
+          supervisor_id: ["Select an eligible escalation supervisor."],
+        },
+        correlation_id: "corr-supervisor-1",
+      }),
+    );
+    const user = userEvent.setup();
+    renderActions(ESCALATABLE_TICKET);
+
+    await user.click(screen.getByRole("button", { name: "Escalate" }));
+    await user.type(
+      screen.getByRole("textbox", { name: "Reason" }),
+      "SLA risk",
+    );
+    await selectSupervisor(user);
+    await user.click(screen.getByRole("button", { name: "Confirm Escalate" }));
+
+    expect(
+      await screen.findByText("Select an eligible escalation supervisor."),
+    ).toBeVisible();
+    expect(screen.getByRole("textbox", { name: "Reason" })).toHaveValue(
+      "SLA risk",
+    );
+    expect(
+      screen.getByRole("combobox", { name: "Escalate to supervisor" }),
+    ).toHaveTextContent(ASSISTANT_MASTER.display_name);
+  });
   it("renders only the transition labels supplied by the ticket", () => {
     renderActions();
 

@@ -249,6 +249,28 @@ describe("ticket lifecycle API contracts", () => {
     });
   });
 
+  it("encodes escalation-supervisor search and omits an empty query", async () => {
+    const fetchMock = vi
+      .spyOn(globalThis, "fetch")
+      .mockResolvedValueOnce(jsonResponse(200, { results: [] }))
+      .mockResolvedValueOnce(jsonResponse(200, { results: [] }));
+
+    await ticketsApi.escalationSupervisors(
+      "OP-202607-000001",
+      "assistant & master",
+    );
+    await ticketsApi.escalationSupervisors("OP-202607-000001");
+
+    expect(request(fetchMock.mock.calls[0])).toMatchObject({
+      url: "/api/v1/tickets/OP-202607-000001/escalation-supervisors/?search=assistant+%26+master",
+      init: { method: "GET" },
+    });
+    expect(request(fetchMock.mock.calls[1])).toMatchObject({
+      url: "/api/v1/tickets/OP-202607-000001/escalation-supervisors/",
+      init: { method: "GET" },
+    });
+  });
+
   it("POSTs the exact assignment command and returns its authoritative response", async () => {
     const response = assignmentResponse();
     const fetchMock = vi
