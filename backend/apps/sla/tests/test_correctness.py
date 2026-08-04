@@ -20,6 +20,7 @@ from freezegun import freeze_time
 
 from apps.catalogue.models import Service
 from apps.contacts.models import Contact
+from apps.identity_access.models import Role, UserRole
 from apps.organisations.models import Office
 from apps.sla.models import BusinessCalendar, SlaInstance, SlaPauseHistory, SlaPolicy
 from apps.sla.seed_sla import seed_sla
@@ -711,6 +712,18 @@ class TestSlaTransitionLockOrder(TransactionTestCase):
             keycloak_groups=["ops-agents"],
         )
         self.actor._groups = ["ops-agents"]
+        assistant_master, _ = Role.objects.get_or_create(
+            keycloak_role="assistant-master",
+            defaults={
+                "name": "Assistant Master",
+                "scopes": [{"domain": "operational"}],
+            },
+        )
+        UserRole.objects.create(
+            user=self.actor,
+            role=assistant_master,
+            office=office,
+        )
         ticket = ticket_services.create_ticket(
             domain="operational",
             title="Lock order regression",
