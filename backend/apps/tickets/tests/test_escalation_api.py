@@ -60,6 +60,10 @@ def _url(ticket: Ticket) -> str:
     return reverse("tickets-escalation-supervisors", args=[ticket.number])
 
 
+def _transition_url(ticket: Ticket) -> str:
+    return reverse("tickets-transition", args=[ticket.number])
+
+
 def test_escalation_supervisor_endpoint_returns_only_safe_eligible_candidates(
     basic_world,
 ):
@@ -118,3 +122,25 @@ def test_escalation_supervisor_endpoint_forbids_actor_who_cannot_escalate(
     assert response.data["code"] == "ticket_action_forbidden"
     assert response.data["detail"] == "You cannot perform this ticket action."
     assert response.data["fields"] == {}
+
+
+def test_escalation_transition_api_assigns_submitted_supervisor(basic_world):
+    actor = _scoped_actor(basic_world, role_key="examiner")
+    supervisor = _scoped_actor(basic_world, role_key="assistant-master")
+    ticket = _ticket(basic_world, status_code="in_progress")
+
+    response = _client(actor).post(
+        _transition_url(ticket),
+        {
+            "to_status": "escalated",
+            "updated_at": ticket.updated_at.isoformat(),
+            "reason": "Requires delegated approval",
+            "supervisor_id": str(supervisor.id),
+        },
+        format="json",
+    )
+
+    assert response.status_code == 200
+    ticket.refresh_from_db()
+    assert ticket.status.code == "escalated"
+    assert ticket.assignee_id == supervisor.id

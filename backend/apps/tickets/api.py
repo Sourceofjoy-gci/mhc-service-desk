@@ -325,6 +325,7 @@ class TransitionRequestSerializer(serializers.Serializer[dict[str, object]]):
     reason = serializers.CharField(required=False, allow_blank=True)
     resolution_code = serializers.CharField(required=False, allow_blank=True)
     resolution_summary = serializers.CharField(required=False, allow_blank=True)
+    supervisor_id = serializers.UUIDField(required=False)
 
 
 class MessageCreateSerializer(serializers.Serializer[dict[str, object]]):

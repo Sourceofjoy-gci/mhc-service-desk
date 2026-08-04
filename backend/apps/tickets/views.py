@@ -274,6 +274,7 @@ class TicketViewSet(
                 reason=serializer.validated_data.get("reason", ""),
                 resolution_code=serializer.validated_data.get("resolution_code", ""),
                 resolution_summary=serializer.validated_data.get("resolution_summary", ""),
+                supervisor_id=serializer.validated_data.get("supervisor_id"),
                 request=request,
             )
         except services.TransitionError as exc:

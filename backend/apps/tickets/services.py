@@ -39,8 +39,20 @@ from .custody import (
     user_actor,
 )
 from .eligibility import _has_request_local_auditor_claim, is_auditor_identity
+from .escalation import (
+    EscalationAssignmentPlan,
+    IneligibleEscalationSupervisor,
+    prepare_escalation_assignment,
+)
 from .events import record_ticket_event
-from .models import Ticket, TicketLink, TicketMessage, TicketNote, Watcher
+from .models import (
+    Ticket,
+    TicketCustodyEvent,
+    TicketLink,
+    TicketMessage,
+    TicketNote,
+    Watcher,
+)
 from .permissions import (
     can_add_ticket_content,
     can_change_confidentiality,
@@ -393,6 +405,7 @@ def transition_ticket(
     reason: str = "",
     resolution_code: str = "",
     resolution_summary: str = "",
+    supervisor_id: UUID | None = None,
     request: Request | None = None,
     snapshot: AuthoritySnapshot | None = None,
 ) -> Ticket:
@@ -406,12 +419,21 @@ def transition_ticket(
     if expected_updated_at != locked.updated_at:
         raise TicketConflictError(locked.updated_at)
 
-    locked_authority = _lock_and_revalidate_mutation_actor(
-        ticket=locked,
-        actor=actor,
-        request=request,
-        initial_snapshot=authority,
-        scope_failure_is_permission=True,
+    additional_user_ids: set[UUID] = set()
+    if to_status_code == "escalated":
+        if locked.assignee_id is not None:
+            additional_user_ids.add(locked.assignee_id)
+        if supervisor_id is not None:
+            additional_user_ids.add(supervisor_id)
+    locked_authority, locked_authorities = (
+        _lock_and_revalidate_mutation_authorities(
+            ticket=locked,
+            actor=actor,
+            request=request,
+            initial_snapshot=authority,
+            additional_user_ids=additional_user_ids,
+            scope_failure_is_permission=True,
+        )
     )
     locked_actor = locked_authority.actor
     locked_snapshot = locked_authority.snapshot
@@ -447,16 +469,41 @@ def transition_ticket(
         for field in required
         if not str(supplied_fields.get(field, "")).strip()
     }
+    if workflow_transition.to_status.code == "escalated":
+        if supervisor_id is None:
+            missing["supervisor_id"] = ["Select an escalation supervisor."]
+    elif supervisor_id is not None:
+        missing["supervisor_id"] = [
+            "This field is only valid when escalating."
+        ]
     if missing:
         raise TransitionError(missing)
+
+    escalation_plan: EscalationAssignmentPlan | None = None
+    if workflow_transition.to_status.code == "escalated":
+        assert supervisor_id is not None
+        try:
+            escalation_plan = prepare_escalation_assignment(
+                locked,
+                supervisor_id,
+                locked_authorities=locked_authorities,
+            )
+        except IneligibleEscalationSupervisor as exc:
+            raise TransitionError(
+                {"supervisor_id": ["Select an eligible escalation supervisor."]}
+            ) from exc
 
     now = timezone.now()
     previous = locked.status
     target = workflow_transition.to_status
     before: dict[str, WorkStateValue] = {"status": previous.code}
     after: dict[str, WorkStateValue] = {"status": target.code}
+    previous_assignee_id = locked.assignee_id
     update_fields = ["status"]
     locked.status = target
+    if escalation_plan is not None and escalation_plan.changed:
+        locked.assignee = escalation_plan.supervisor
+        update_fields.append("assignee")
 
     if workflow_transition.sets_resolution:
         before.update(
@@ -529,13 +576,52 @@ def transition_ticket(
         actor_subject=locked_actor.keycloak_subject,
         reason=reason,
     )
+    if escalation_plan is not None and escalation_plan.changed:
+        assignment_event = (
+            TicketCustodyEvent.EventType.ASSIGNED
+            if previous_assignee_id is None
+            else TicketCustodyEvent.EventType.REASSIGNED
+        )
+        record_ticket_event(
+            ticket=locked,
+            actor_subject=locked_actor.keycloak_subject,
+            action="ticket.assignment.changed",
+            before={
+                "assignee": (
+                    str(previous_assignee_id)
+                    if previous_assignee_id is not None
+                    else None
+                )
+            },
+            after={"assignee": str(escalation_plan.supervisor.id)},
+            metadata={
+                "reason": reason,
+                "source_process": "ticket.escalation",
+            },
+            custody_actor=user_actor(locked_actor),
+            custody_events=(
+                CustodyEventInput(
+                    event_type=assignment_event,
+                    source_process="ticket.escalation",
+                    previous_owner=escalation_plan.previous_owner,
+                    new_owner=escalation_plan.new_owner,
+                    reason=reason,
+                    occurred_at=now,
+                ),
+            ),
+        )
+    transition_metadata = {"reason": reason}
+    if escalation_plan is not None:
+        transition_metadata["supervisor_id"] = str(
+            escalation_plan.supervisor.id
+        )
     record_ticket_event(
         ticket=locked,
         actor_subject=locked_actor.keycloak_subject,
         action="ticket.transitioned",
         before=before,
         after=after,
-        metadata={"reason": reason},
+        metadata=transition_metadata,
         custody_actor=user_actor(locked_actor),
         custody_events=(
             CustodyEventInput(
@@ -546,7 +632,7 @@ def transition_ticket(
                 previous_status=status_snapshot(previous),
                 new_status=status_snapshot(target),
                 reason=reason,
-                occurred_at=history.occurred_at,
+                occurred_at=now,
             ),
         ),
     )

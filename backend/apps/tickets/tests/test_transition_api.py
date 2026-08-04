@@ -8,7 +8,7 @@ from django.urls import reverse
 from rest_framework.test import APIClient
 
 from apps.audit.models import AuditEvent
-from apps.identity_access.models import User
+from apps.identity_access.models import Role, User, UserRole
 from apps.tickets.models import OutboxEvent, Ticket
 from apps.workflow.models import Status, Transition, TransitionHistory
 
@@ -40,6 +40,36 @@ def _ticket(basic_world, *, status_code: str = "new") -> Ticket:
         request_type=service.request_types.get(),
         office=basic_world["office"],
     )
+
+
+def _supervisor(
+    basic_world,
+    *,
+    role_key: str = "assistant-master",
+) -> User:
+    supervisor = User.objects.create(
+        username=f"supervisor-{uuid4().hex}",
+        keycloak_subject=f"supervisor-subject-{uuid4().hex}",
+        display_name=role_key.replace("-", " ").title(),
+        is_active=True,
+    )
+    role = Role.objects.create(
+        keycloak_role=role_key,
+        name=role_key.replace("-", " ").title(),
+        scopes=[
+            {
+                "domain": Ticket.Domain.OPERATIONAL,
+                "office": str(basic_world["office"].id),
+                "service": str(basic_world["gen_info"].id),
+            }
+        ],
+    )
+    UserRole.objects.create(
+        user=supervisor,
+        role=role,
+        office=basic_world["office"],
+    )
+    return supervisor
 
 
 def _post(user: User, ticket: Ticket, payload: dict):
@@ -191,6 +221,107 @@ def test_resolution_transition_requires_code_and_summary(basic_world, missing):
     assert ticket.status.code == "in_progress"
 
 
+def test_escalation_transition_rejects_explicit_null_supervisor_at_serializer(
+    basic_world,
+):
+    actor = _user(["ops-agents"])
+    ticket = _ticket(basic_world, status_code="in_progress")
+    previous_updated_at = ticket.updated_at
+
+    response = _post(
+        actor,
+        ticket,
+        {
+            "to_status": "escalated",
+            "updated_at": ticket.updated_at.isoformat(),
+            "reason": "Requires delegated approval",
+            "supervisor_id": None,
+        },
+    )
+
+    assert response.status_code == 400
+    assert response.data["code"] == "invalid_transition"
+    assert response.data["fields"] == {
+        "supervisor_id": ["This field may not be null."]
+    }
+    ticket.refresh_from_db()
+    assert ticket.status.code == "in_progress"
+    assert ticket.assignee_id is None
+    assert ticket.updated_at == previous_updated_at
+    assert TransitionHistory.objects.filter(ticket=ticket).count() == 0
+    assert AuditEvent.objects.filter(object_id=str(ticket.id)).count() == 0
+    assert ticket.custody_events.count() == 0
+    assert OutboxEvent.objects.filter(aggregate_id=str(ticket.id)).count() == 0
+
+
+def test_non_escalation_transition_rejects_explicit_null_supervisor_at_serializer(
+    basic_world,
+):
+    actor = _user(["ops-agents"])
+    ticket = _ticket(basic_world, status_code="in_progress")
+    previous_updated_at = ticket.updated_at
+
+    response = _post(
+        actor,
+        ticket,
+        {
+            "to_status": "resolved",
+            "updated_at": ticket.updated_at.isoformat(),
+            "resolution_code": "INFO_PROVIDED",
+            "resolution_summary": "Requester received the answer.",
+            "supervisor_id": None,
+        },
+    )
+
+    assert response.status_code == 400
+    assert response.data["code"] == "invalid_transition"
+    assert response.data["fields"] == {
+        "supervisor_id": ["This field may not be null."]
+    }
+    ticket.refresh_from_db()
+    assert ticket.status.code == "in_progress"
+    assert ticket.assignee_id is None
+    assert ticket.updated_at == previous_updated_at
+    assert TransitionHistory.objects.filter(ticket=ticket).count() == 0
+    assert AuditEvent.objects.filter(object_id=str(ticket.id)).count() == 0
+    assert ticket.custody_events.count() == 0
+    assert OutboxEvent.objects.filter(aggregate_id=str(ticket.id)).count() == 0
+
+
+def test_non_escalation_transition_rejects_supervisor_uuid_at_service_boundary(
+    basic_world,
+):
+    actor = _supervisor(basic_world, role_key="master")
+    ticket = _ticket(basic_world, status_code="in_progress")
+    previous_updated_at = ticket.updated_at
+
+    response = _post(
+        actor,
+        ticket,
+        {
+            "to_status": "resolved",
+            "updated_at": ticket.updated_at.isoformat(),
+            "resolution_code": "INFO_PROVIDED",
+            "resolution_summary": "Requester received the answer.",
+            "supervisor_id": str(uuid4()),
+        },
+    )
+
+    assert response.status_code == 400
+    assert response.data["code"] == "invalid_transition"
+    assert response.data["fields"] == {
+        "supervisor_id": ["This field is only valid when escalating."]
+    }
+    ticket.refresh_from_db()
+    assert ticket.status.code == "in_progress"
+    assert ticket.assignee_id is None
+    assert ticket.updated_at == previous_updated_at
+    assert TransitionHistory.objects.filter(ticket=ticket).count() == 0
+    assert AuditEvent.objects.filter(object_id=str(ticket.id)).count() == 0
+    assert ticket.custody_events.count() == 0
+    assert OutboxEvent.objects.filter(aggregate_id=str(ticket.id)).count() == 0
+
+
 def test_reason_requirement_and_success_return_refreshed_next_capabilities(basic_world):
     actor = _user(["ops-agents"])
     ticket = _ticket(basic_world)
@@ -238,6 +369,7 @@ def test_reason_requirement_and_success_return_refreshed_next_capabilities(basic
 
 def test_escalation_requires_a_reason_and_records_the_responsible_actor(basic_world):
     actor = _user(["ops-agents"])
+    supervisor = _supervisor(basic_world)
     ticket = _ticket(basic_world, status_code="in_progress")
 
     missing = _post(
@@ -246,7 +378,10 @@ def test_escalation_requires_a_reason_and_records_the_responsible_actor(basic_wo
         {"to_status": "escalated", "updated_at": ticket.updated_at.isoformat()},
     )
     assert missing.status_code == 400
-    assert missing.data["fields"] == {"reason": ["This field is required."]}
+    assert missing.data["fields"] == {
+        "reason": ["This field is required."],
+        "supervisor_id": ["Select an escalation supervisor."],
+    }
 
     response = _post(
         actor,
@@ -255,11 +390,13 @@ def test_escalation_requires_a_reason_and_records_the_responsible_actor(basic_wo
             "to_status": "escalated",
             "updated_at": ticket.updated_at.isoformat(),
             "reason": "SLA risk",
+            "supervisor_id": str(supervisor.id),
         },
     )
 
     assert response.status_code == 200
     ticket.refresh_from_db()
+    assert ticket.assignee_id == supervisor.id
     event = ticket.custody_events.order_by("sequence").last()
     assert event is not None
     assert event.event_type == "escalated"

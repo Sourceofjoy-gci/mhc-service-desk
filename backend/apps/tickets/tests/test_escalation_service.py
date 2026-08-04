@@ -8,17 +8,20 @@ import pytest
 from django.db import transaction
 from django.utils import timezone
 
+from apps.audit.models import AuditEvent
 from apps.identity_access.authority_lock import lock_user_authorities
 from apps.identity_access.models import Role, User, UserRole
 from apps.identity_access.scope import get_authority_snapshot
 from apps.organisations.models import Office
+from apps.sla.models import SlaInstance, SlaPauseHistory, SlaPolicy
 from apps.tickets import services
+from apps.tickets.eligibility import eligible_escalation_supervisors
 from apps.tickets.escalation import (
     IneligibleEscalationSupervisor,
     prepare_escalation_assignment,
 )
-from apps.tickets.models import Ticket
-from apps.workflow.models import Status
+from apps.tickets.models import OutboxEvent, Ticket
+from apps.workflow.models import Status, TransitionHistory
 
 pytestmark = pytest.mark.django_db
 
@@ -132,6 +135,39 @@ def _assert_rejected(ticket: Ticket, target: User) -> None:
                 target.id,
                 locked_authorities=authorities,
             )
+
+
+def _sla_instance(ticket: Ticket) -> SlaInstance:
+    policy = SlaPolicy.objects.get(
+        domain=ticket.domain,
+        priority=ticket.priority,
+    )
+    return SlaInstance.objects.create(
+        ticket=ticket,
+        policy=policy,
+        kind="resolution",
+        state=SlaInstance.State.ACTIVE,
+        due_at=ticket.created_at + timedelta(hours=1),
+    )
+
+
+def _assert_no_transition_evidence(
+    ticket: Ticket,
+    *,
+    status_code: str,
+    assignee_id: UUID | None,
+    sla: SlaInstance,
+) -> None:
+    ticket.refresh_from_db()
+    sla.refresh_from_db()
+    assert ticket.status.code == status_code
+    assert ticket.assignee_id == assignee_id
+    assert TransitionHistory.objects.filter(ticket=ticket).count() == 0
+    assert sla.state == SlaInstance.State.ACTIVE
+    assert SlaPauseHistory.objects.filter(instance=sla).count() == 0
+    assert AuditEvent.objects.filter(object_id=str(ticket.id)).count() == 0
+    assert ticket.custody_events.count() == 0
+    assert OutboxEvent.objects.filter(aggregate_id=str(ticket.id)).count() == 0
 
 
 def test_prepare_escalation_assignment_builds_an_immutable_owner_plan(
@@ -361,3 +397,283 @@ def test_combined_mutation_authority_lock_preserves_stale_auditor_denial(
             initial_snapshot=initial_snapshot,
             additional_user_ids={supervisor.id},
         )
+
+
+def test_escalation_transition_reports_reason_and_supervisor_together(
+    basic_world,
+) -> None:
+    actor = _scoped_actor(basic_world, role_key="examiner")
+    ticket = _ticket(basic_world, assignee=actor)
+    sla = _sla_instance(ticket)
+
+    with pytest.raises(services.TransitionError) as exc_info:
+        services.transition_ticket(
+            ticket_id=ticket.id,
+            actor=actor,
+            expected_updated_at=ticket.updated_at,
+            to_status_code="escalated",
+        )
+
+    assert exc_info.value.fields == {
+        "reason": ["This field is required."],
+        "supervisor_id": ["Select an escalation supervisor."],
+    }
+    _assert_no_transition_evidence(
+        ticket,
+        status_code="in_progress",
+        assignee_id=actor.id,
+        sla=sla,
+    )
+
+
+def test_non_escalation_transition_rejects_supervisor_without_side_effects(
+    basic_world,
+) -> None:
+    actor = _scoped_actor(basic_world, role_key="master")
+    ticket = _ticket(basic_world, assignee=actor)
+    sla = _sla_instance(ticket)
+
+    with pytest.raises(services.TransitionError) as exc_info:
+        services.transition_ticket(
+            ticket_id=ticket.id,
+            actor=actor,
+            expected_updated_at=ticket.updated_at,
+            to_status_code="resolved",
+            resolution_code="INFO_PROVIDED",
+            resolution_summary="Requester received the answer.",
+            supervisor_id=uuid4(),
+        )
+
+    assert exc_info.value.fields == {
+        "supervisor_id": ["This field is only valid when escalating."],
+    }
+    _assert_no_transition_evidence(
+        ticket,
+        status_code="in_progress",
+        assignee_id=actor.id,
+        sla=sla,
+    )
+
+
+def test_escalation_assigns_supervisor_and_records_complete_evidence(
+    basic_world,
+    monkeypatch,
+) -> None:
+    actor = _scoped_actor(basic_world, role_key="examiner")
+    supervisor = _scoped_actor(basic_world, role_key="assistant-master")
+    ticket = _ticket(basic_world, assignee=actor)
+    sla = _sla_instance(ticket)
+    real_lock_user_authorities = lock_user_authorities
+    lock_calls: list[tuple[UUID, ...]] = []
+
+    def record_combined_lock(user_ids) -> dict:
+        ordered_ids = tuple(sorted(set(user_ids), key=str))
+        lock_calls.append(ordered_ids)
+        return real_lock_user_authorities(ordered_ids)
+
+    monkeypatch.setattr(
+        services,
+        "lock_user_authorities",
+        record_combined_lock,
+    )
+
+    updated = services.transition_ticket(
+        ticket_id=ticket.id,
+        actor=actor,
+        expected_updated_at=ticket.updated_at,
+        to_status_code="escalated",
+        reason="Requires delegated approval",
+        supervisor_id=supervisor.id,
+    )
+
+    sla.refresh_from_db()
+    assert lock_calls == [tuple(sorted({actor.id, supervisor.id}, key=str))]
+    assert updated.status.code == "escalated"
+    assert updated.assignee_id == supervisor.id
+    assert TransitionHistory.objects.filter(ticket=ticket).count() == 1
+    assert sla.state == SlaInstance.State.ACTIVE
+    assert SlaPauseHistory.objects.filter(instance=sla).count() == 0
+    assert list(
+        updated.custody_events.values_list("event_type", flat=True)
+    ) == ["reassigned", "escalated"]
+    assert AuditEvent.objects.filter(
+        object_id=str(ticket.id),
+        action__in=["ticket.assignment.changed", "ticket.transitioned"],
+    ).count() == 2
+    assert OutboxEvent.objects.filter(
+        aggregate_id=str(ticket.id),
+        event_type__in=["ticket.assignment.changed", "ticket.transitioned"],
+    ).count() == 2
+    assignment_audit = AuditEvent.objects.get(
+        object_id=str(ticket.id),
+        action="ticket.assignment.changed",
+    )
+    assert assignment_audit.actor_subject == actor.keycloak_subject
+    assert assignment_audit.payload["before"] == {"assignee": str(actor.id)}
+    assert assignment_audit.payload["after"] == {
+        "assignee": str(supervisor.id)
+    }
+    assert assignment_audit.payload["metadata"] == {
+        "reason": "Requires delegated approval",
+        "source_process": "ticket.escalation",
+    }
+    transition_audit = AuditEvent.objects.get(
+        object_id=str(ticket.id),
+        action="ticket.transitioned",
+    )
+    assert transition_audit.payload["metadata"] == {
+        "reason": "Requires delegated approval",
+        "supervisor_id": str(supervisor.id),
+    }
+    custody = list(updated.custody_events.order_by("sequence"))
+    assert custody[0].occurred_at == custody[1].occurred_at
+
+
+def test_escalation_to_existing_supervisor_records_only_transition_evidence(
+    basic_world,
+) -> None:
+    actor = _scoped_actor(basic_world, role_key="examiner")
+    supervisor = _scoped_actor(basic_world, role_key="deputy-master")
+    ticket = _ticket(basic_world, assignee=supervisor)
+    sla = _sla_instance(ticket)
+
+    updated = services.transition_ticket(
+        ticket_id=ticket.id,
+        actor=actor,
+        expected_updated_at=ticket.updated_at,
+        to_status_code="escalated",
+        reason="Supervisor already owns the matter",
+        supervisor_id=supervisor.id,
+    )
+
+    sla.refresh_from_db()
+    assert updated.status.code == "escalated"
+    assert updated.assignee_id == supervisor.id
+    assert TransitionHistory.objects.filter(ticket=ticket).count() == 1
+    assert sla.state == SlaInstance.State.ACTIVE
+    assert SlaPauseHistory.objects.filter(instance=sla).count() == 0
+    assert list(
+        updated.custody_events.values_list("event_type", flat=True)
+    ) == ["escalated"]
+    assert AuditEvent.objects.filter(object_id=str(ticket.id)).count() == 1
+    assert OutboxEvent.objects.filter(aggregate_id=str(ticket.id)).count() == 1
+    transition_audit = AuditEvent.objects.get(
+        object_id=str(ticket.id),
+        action="ticket.transitioned",
+    )
+    assert transition_audit.payload["metadata"] == {
+        "reason": "Supervisor already owns the matter",
+        "supervisor_id": str(supervisor.id),
+    }
+
+
+def test_stale_escalation_transition_records_no_evidence(basic_world) -> None:
+    actor = _scoped_actor(basic_world, role_key="examiner")
+    previous = _scoped_actor(basic_world, role_key="records-officer")
+    supervisor = _scoped_actor(basic_world, role_key="master")
+    ticket = _ticket(basic_world, assignee=previous)
+    sla = _sla_instance(ticket)
+
+    with pytest.raises(services.TicketConflictError):
+        services.transition_ticket(
+            ticket_id=ticket.id,
+            actor=actor,
+            expected_updated_at=ticket.updated_at - timedelta(microseconds=1),
+            to_status_code="escalated",
+            reason="Stale escalation",
+            supervisor_id=supervisor.id,
+        )
+
+    _assert_no_transition_evidence(
+        ticket,
+        status_code="in_progress",
+        assignee_id=previous.id,
+        sla=sla,
+    )
+
+
+def test_escalation_transition_revalidates_revoked_supervisor_eligibility(
+    basic_world,
+) -> None:
+    actor = _scoped_actor(basic_world, role_key="examiner")
+    previous = _scoped_actor(basic_world, role_key="records-officer")
+    supervisor = _scoped_actor(basic_world, role_key="master")
+    ticket = _ticket(basic_world, assignee=previous)
+    sla = _sla_instance(ticket)
+    assert [candidate.id for candidate in eligible_escalation_supervisors(ticket)] == [
+        supervisor.id
+    ]
+    UserRole.objects.filter(user=supervisor).delete()
+
+    with pytest.raises(services.TransitionError) as exc_info:
+        services.transition_ticket(
+            ticket_id=ticket.id,
+            actor=actor,
+            expected_updated_at=ticket.updated_at,
+            to_status_code="escalated",
+            reason="Candidate was visible before revocation",
+            supervisor_id=supervisor.id,
+        )
+
+    assert exc_info.value.fields == {
+        "supervisor_id": ["Select an eligible escalation supervisor."],
+    }
+    _assert_no_transition_evidence(
+        ticket,
+        status_code="in_progress",
+        assignee_id=previous.id,
+        sla=sla,
+    )
+
+
+def test_escalation_transition_rolls_back_ticket_sla_history_and_evidence(
+    basic_world,
+    monkeypatch,
+) -> None:
+    actor = _scoped_actor(basic_world, role_key="examiner")
+    previous = _scoped_actor(basic_world, role_key="records-officer")
+    supervisor = _scoped_actor(basic_world, role_key="master")
+    ticket = _ticket(basic_world, assignee=previous)
+    sla = _sla_instance(ticket)
+    real_record_ticket_event = services.record_ticket_event
+
+    def mutate_sla(**kwargs) -> None:
+        SlaInstance.objects.filter(ticket=kwargs["ticket"]).update(
+            state=SlaInstance.State.CANCELLED
+        )
+
+    def fail_after_assignment_evidence(**kwargs):
+        result = real_record_ticket_event(**kwargs)
+        if kwargs["action"] == "ticket.assignment.changed":
+            raise RuntimeError("downstream transition evidence failed")
+        return result
+
+    monkeypatch.setattr(
+        "apps.sla.services.sync_slas_for_transition",
+        mutate_sla,
+    )
+    monkeypatch.setattr(
+        services,
+        "record_ticket_event",
+        fail_after_assignment_evidence,
+    )
+
+    with pytest.raises(
+        RuntimeError,
+        match="downstream transition evidence failed",
+    ):
+        services.transition_ticket(
+            ticket_id=ticket.id,
+            actor=actor,
+            expected_updated_at=ticket.updated_at,
+            to_status_code="escalated",
+            reason="Must commit as one unit",
+            supervisor_id=supervisor.id,
+        )
+
+    _assert_no_transition_evidence(
+        ticket,
+        status_code="in_progress",
+        assignee_id=previous.id,
+        sla=sla,
+    )
