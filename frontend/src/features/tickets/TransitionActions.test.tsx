@@ -1,4 +1,10 @@
-import { act, screen, waitFor } from "@testing-library/react";
+import {
+  act,
+  fireEvent,
+  screen,
+  waitFor,
+  within,
+} from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import { ApiError, type TicketAssignee, type TicketDetail } from "@/lib/api";
@@ -223,6 +229,50 @@ describe("server-driven transition actions", () => {
     );
   });
 
+  it("debounces typed supervisor search but resets it immediately on cancel", async () => {
+    harness.escalationSupervisors.mockResolvedValue({
+      results: [ASSISTANT_MASTER],
+    });
+    const user = userEvent.setup();
+    renderActions(ESCALATABLE_TICKET);
+
+    await user.click(screen.getByRole("button", { name: "Escalate" }));
+    await waitFor(() =>
+      expect(harness.escalationSupervisors).toHaveBeenLastCalledWith(
+        TICKET.number,
+        "",
+      ),
+    );
+    await user.click(
+      screen.getByRole("combobox", { name: "Escalate to supervisor" }),
+    );
+    await user.type(
+      await screen.findByRole("combobox", {
+        name: "Search Escalate to supervisor",
+      }),
+      "deputy & master",
+    );
+    await waitFor(
+      () =>
+        expect(harness.escalationSupervisors).toHaveBeenLastCalledWith(
+          TICKET.number,
+          "deputy & master",
+        ),
+      { timeout: 1_000 },
+    );
+
+    await user.click(
+      screen.getByRole("combobox", { name: "Escalate to supervisor" }),
+    );
+    await user.click(screen.getByRole("button", { name: "Cancel" }));
+    await user.click(screen.getByRole("button", { name: "Escalate" }));
+
+    expect(harness.escalationSupervisors).toHaveBeenLastCalledWith(
+      TICKET.number,
+      "",
+    );
+  });
+
   it("requires and submits a named escalation supervisor", async () => {
     harness.escalationSupervisors.mockResolvedValue({
       results: [ASSISTANT_MASTER],
@@ -256,6 +306,8 @@ describe("server-driven transition actions", () => {
       name: /Assistant Master Dlamini/,
     });
     expect(option).toHaveTextContent("Assistant Master");
+    expect(within(option).getByText(/Office Leadership/)).toBeVisible();
+    expect(within(option).getByText("Approves workflow progress.")).toBeVisible();
     await user.keyboard("{ArrowDown}");
     await user.keyboard("{Enter}");
     await waitFor(() =>
@@ -321,6 +373,99 @@ describe("server-driven transition actions", () => {
     ).toHaveTextContent("Select eligible team member");
   });
 
+  it("clears the selected supervisor when a different action is selected", async () => {
+    harness.escalationSupervisors.mockResolvedValue({
+      results: [ASSISTANT_MASTER],
+    });
+    const user = userEvent.setup();
+    renderActions(ESCALATABLE_TICKET);
+
+    await user.click(screen.getByRole("button", { name: "Escalate" }));
+    await selectSupervisor(user);
+    fireEvent.click(
+      screen.getByRole("button", { name: "Start work", hidden: true }),
+    );
+    expect(
+      screen.queryByRole("combobox", { name: "Escalate to supervisor" }),
+    ).not.toBeInTheDocument();
+
+    fireEvent.click(
+      screen.getByRole("button", { name: "Escalate", hidden: true }),
+    );
+    expect(
+      screen.getByRole("combobox", { name: "Escalate to supervisor" }),
+    ).toHaveTextContent("Select eligible team member");
+  });
+
+  it("preserves values through a stale escalation then clears them after Reload", async () => {
+    harness.escalationSupervisors.mockResolvedValue({
+      results: [ASSISTANT_MASTER],
+    });
+    harness.transition.mockRejectedValue(
+      new ApiError(409, {
+        code: "stale_ticket",
+        detail: "The ticket changed.",
+        fields: { updated_at: ["2026-07-27T09:17:00Z"] },
+        correlation_id: "corr-escalation-stale",
+      }),
+    );
+    harness.get.mockResolvedValue({
+      ...ESCALATABLE_TICKET,
+      updated_at: "2026-07-27T09:17:00Z",
+    });
+    const user = userEvent.setup();
+    const { onUpdated, onActivityChanged } = renderActions(ESCALATABLE_TICKET);
+
+    await user.click(screen.getByRole("button", { name: "Escalate" }));
+    await user.type(screen.getByRole("textbox", { name: "Reason" }), "SLA risk");
+    await selectSupervisor(user);
+    await user.click(
+      screen.getByRole("combobox", { name: "Escalate to supervisor" }),
+    );
+    await user.type(
+      await screen.findByRole("combobox", {
+        name: "Search Escalate to supervisor",
+      }),
+      "assistant",
+    );
+    await waitFor(() =>
+      expect(harness.escalationSupervisors).toHaveBeenLastCalledWith(
+        TICKET.number,
+        "assistant",
+      ),
+    );
+    await user.click(
+      screen.getByRole("combobox", { name: "Escalate to supervisor" }),
+    );
+    await user.click(screen.getByRole("button", { name: "Confirm Escalate" }));
+
+    expect(
+      await screen.findByText("This ticket changed since you opened it"),
+    ).toBeVisible();
+    expect(screen.getByRole("textbox", { name: "Reason" })).toHaveValue("SLA risk");
+    expect(
+      screen.getByRole("combobox", { name: "Escalate to supervisor" }),
+    ).toHaveTextContent(ASSISTANT_MASTER.display_name);
+
+    await user.click(screen.getByRole("button", { name: "Reload" }));
+    await waitFor(() => expect(harness.get).toHaveBeenCalledWith(TICKET.number));
+    expect(onUpdated).toHaveBeenCalledTimes(1);
+    expect(onActivityChanged).toHaveBeenCalledTimes(1);
+    expect(screen.queryByRole("dialog")).not.toBeInTheDocument();
+
+    await user.click(screen.getByRole("button", { name: "Escalate" }));
+    await waitFor(() =>
+      expect(harness.escalationSupervisors).toHaveBeenLastCalledWith(
+        TICKET.number,
+        "",
+      ),
+    );
+    expect(screen.getByRole("textbox", { name: "Reason" })).toHaveValue("");
+    expect(
+      screen.getByRole("combobox", { name: "Escalate to supervisor" }),
+    ).toHaveTextContent("Select eligible team member");
+  });
+
   it("disables supervisor selection while escalation submission is pending", async () => {
     harness.escalationSupervisors.mockResolvedValue({
       results: [ASSISTANT_MASTER],
@@ -380,6 +525,56 @@ describe("server-driven transition actions", () => {
     expect(
       screen.getByRole("combobox", { name: "Escalate to supervisor" }),
     ).toHaveTextContent(ASSISTANT_MASTER.display_name);
+  });
+
+  it("prioritizes a server supervisor error over a failed candidate refresh", async () => {
+    harness.escalationSupervisors.mockImplementation((_number, search) =>
+      search
+        ? Promise.reject(
+            new ApiError(503, {
+              code: "service_unavailable",
+              detail: "Supervisor directory is unavailable.",
+              fields: {},
+              correlation_id: "corr-directory-2",
+            }),
+          )
+        : Promise.resolve({ results: [ASSISTANT_MASTER] }),
+    );
+    harness.transition.mockRejectedValue(
+      new ApiError(400, {
+        code: "invalid_transition",
+        detail: "Supervisor is no longer eligible.",
+        fields: { supervisor_id: ["Choose another eligible supervisor."] },
+        correlation_id: "corr-supervisor-2",
+      }),
+    );
+    const user = userEvent.setup();
+    renderActions(ESCALATABLE_TICKET);
+
+    await user.click(screen.getByRole("button", { name: "Escalate" }));
+    await user.type(screen.getByRole("textbox", { name: "Reason" }), "SLA risk");
+    await selectSupervisor(user);
+    await user.click(
+      screen.getByRole("combobox", { name: "Escalate to supervisor" }),
+    );
+    await user.type(
+      await screen.findByRole("combobox", {
+        name: "Search Escalate to supervisor",
+      }),
+      "different",
+    );
+    await screen.findByText("Supervisor directory is unavailable.");
+    await user.click(
+      screen.getByRole("combobox", { name: "Escalate to supervisor" }),
+    );
+    await user.click(screen.getByRole("button", { name: "Confirm Escalate" }));
+
+    expect(
+      await screen.findByText("Choose another eligible supervisor."),
+    ).toBeVisible();
+    expect(
+      screen.queryByText("Supervisor directory is unavailable."),
+    ).not.toBeInTheDocument();
   });
   it("renders only the transition labels supplied by the ticket", () => {
     renderActions();

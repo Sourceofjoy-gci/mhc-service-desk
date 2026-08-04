@@ -57,7 +57,7 @@ function useDebouncedValue(value: string, delay: number) {
     return () => window.clearTimeout(timeout);
   }, [delay, value]);
 
-  return debounced;
+  return [debounced, setDebounced] as const;
 }
 
 function firstMessages(fields: Record<string, string[]> | undefined) {
@@ -79,7 +79,8 @@ export function TransitionActions({
   const [isReloading, setIsReloading] = useState(false);
   const [reloadError, setReloadError] = useState<unknown>(null);
   const submitLock = useRef(false);
-  const debouncedSupervisorSearch = useDebouncedValue(supervisorSearch, 250);
+  const [debouncedSupervisorSearch, setDebouncedSupervisorSearch] =
+    useDebouncedValue(supervisorSearch, 250);
   const isEscalating = chosen?.to_status === "escalated";
   const supervisorQuery = useQuery({
     queryKey: [
@@ -99,6 +100,7 @@ export function TransitionActions({
   const resetSupervisor = () => {
     setSupervisorId(null);
     setSupervisorSearch("");
+    setDebouncedSupervisorSearch("");
   };
 
   const selectSupervisor = (id: string | null) => {
