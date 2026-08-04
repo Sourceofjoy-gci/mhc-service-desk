@@ -81,7 +81,8 @@ export function TransitionActions({
   const submitLock = useRef(false);
   const [debouncedSupervisorSearch, setDebouncedSupervisorSearch] =
     useDebouncedValue(supervisorSearch, 250);
-  const isEscalating = chosen?.to_status === "escalated";
+  const isOperationalEscalation =
+    ticket.domain === "operational" && chosen?.to_status === "escalated";
   const supervisorQuery = useQuery({
     queryKey: [
       "ticket",
@@ -94,7 +95,7 @@ export function TransitionActions({
         ticket.number,
         debouncedSupervisorSearch,
       ),
-    enabled: isEscalating,
+    enabled: isOperationalEscalation,
   });
 
   const resetSupervisor = () => {
@@ -161,7 +162,7 @@ export function TransitionActions({
     if (chosen.requires_resolution && !values.resolution_summary.trim()) {
       errors.resolution_summary = ["Resolution summary is required."];
     }
-    if (chosen.to_status === "escalated" && !supervisorId) {
+    if (isOperationalEscalation && !supervisorId) {
       errors.supervisor_id = ["Select an escalation supervisor."];
     }
     setClientErrors(errors);
@@ -173,7 +174,7 @@ export function TransitionActions({
       submitted.resolution_code = values.resolution_code.trim();
       submitted.resolution_summary = values.resolution_summary.trim();
     }
-    if (chosen.to_status === "escalated") {
+    if (isOperationalEscalation) {
       submitted.supervisor_id = supervisorId!;
     }
     submitLock.current = true;
@@ -329,7 +330,7 @@ export function TransitionActions({
                   </>
                 ) : null}
 
-                {chosen.to_status === "escalated" ? (
+                {isOperationalEscalation ? (
                   <StaffCombobox
                     id="transition-escalation-supervisor"
                     label="Escalate to supervisor"

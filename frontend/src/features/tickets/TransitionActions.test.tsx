@@ -163,6 +163,17 @@ const ESCALATABLE_TICKET: TicketDetail = {
   ],
 };
 
+const IT_ESCALATABLE_TICKET: TicketDetail = {
+  ...ESCALATABLE_TICKET,
+  id: "it-ticket-1",
+  number: "IT-2026-000001",
+  domain: "it",
+  title: "Email service interruption",
+  service_code: "INCIDENT",
+  service: "IT incident",
+  request_type: "Service interruption",
+};
+
 function deferred<T>() {
   let resolve!: (value: T) => void;
   let reject!: (reason: unknown) => void;
@@ -238,6 +249,47 @@ describe("server-driven transition actions", () => {
       expect(harness.escalationSupervisors).toHaveBeenCalledWith(
         TICKET.number,
         "",
+      ),
+    );
+  });
+
+  it("keeps IT escalation reason-only without loading supervisors", async () => {
+    const user = userEvent.setup();
+    renderActions(IT_ESCALATABLE_TICKET);
+
+    await user.click(screen.getByRole("button", { name: "Escalate" }));
+
+    expect(screen.getByRole("textbox", { name: "Reason" })).toBeVisible();
+    expect(
+      screen.queryByRole("combobox", { name: "Escalate to supervisor" }),
+    ).not.toBeInTheDocument();
+    expect(harness.escalationSupervisors).not.toHaveBeenCalled();
+  });
+
+  it("submits IT escalation without a supervisor", async () => {
+    harness.transition.mockResolvedValue({
+      ...IT_ESCALATABLE_TICKET,
+      status_code: "escalated",
+      status_name: "Escalated",
+    });
+    const user = userEvent.setup();
+    renderActions(IT_ESCALATABLE_TICKET);
+
+    await user.click(screen.getByRole("button", { name: "Escalate" }));
+    await user.type(
+      screen.getByRole("textbox", { name: "Reason" }),
+      "Vendor incident needs attention",
+    );
+    await user.click(screen.getByRole("button", { name: "Confirm Escalate" }));
+
+    await waitFor(() =>
+      expect(harness.transition).toHaveBeenCalledWith(
+        IT_ESCALATABLE_TICKET.number,
+        {
+          to_status: "escalated",
+          updated_at: IT_ESCALATABLE_TICKET.updated_at,
+          reason: "Vendor incident needs attention",
+        },
       ),
     );
   });

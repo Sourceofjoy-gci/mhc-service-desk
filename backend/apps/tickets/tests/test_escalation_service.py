@@ -31,14 +31,20 @@ def _ticket(
     *,
     status_code: str = "in_progress",
     assignee: User | None = None,
+    domain: str = Ticket.Domain.OPERATIONAL,
 ) -> Ticket:
-    service = basic_world["gen_info"]
+    service = (
+        basic_world["gen_info"]
+        if domain == Ticket.Domain.OPERATIONAL
+        else basic_world["it_inc"]
+    )
+    prefix = "OP" if domain == Ticket.Domain.OPERATIONAL else "IT"
     return Ticket.objects.create(
-        number=f"OP-202607-{Ticket.objects.count() + 965001:06d}",
-        domain=Ticket.Domain.OPERATIONAL,
+        number=f"{prefix}-202607-{Ticket.objects.count() + 965001:06d}",
+        domain=domain,
         title="Escalation assignment planning contract",
         status=Status.objects.get(
-            domain=Ticket.Domain.OPERATIONAL,
+            domain=domain,
             code=status_code,
         ),
         channel=Ticket.Channel.INTERNAL,
@@ -424,6 +430,75 @@ def test_escalation_transition_reports_reason_and_supervisor_together(
         assignee_id=actor.id,
         sla=sla,
     )
+
+
+def test_it_escalation_preserves_owner_and_records_only_transition_evidence(
+    basic_world,
+    monkeypatch,
+) -> None:
+    actor = _user(display_name="IT Agent", groups=["it-agents"])
+    owner = _user(display_name="Current IT Owner", groups=["it-agents"])
+    ticket = _ticket(
+        basic_world,
+        domain=Ticket.Domain.IT,
+        assignee=owner,
+    )
+    real_lock_user_authorities = lock_user_authorities
+    lock_calls: list[tuple[UUID, ...]] = []
+
+    def record_combined_lock(user_ids) -> dict:
+        ordered_ids = tuple(sorted(set(user_ids), key=str))
+        lock_calls.append(ordered_ids)
+        return real_lock_user_authorities(ordered_ids)
+
+    def reject_assignment_planning(*args, **kwargs):
+        raise AssertionError("IT escalation must not plan a supervisor assignment")
+
+    monkeypatch.setattr(
+        services,
+        "lock_user_authorities",
+        record_combined_lock,
+    )
+    monkeypatch.setattr(
+        services,
+        "prepare_escalation_assignment",
+        reject_assignment_planning,
+    )
+
+    updated = services.transition_ticket(
+        ticket_id=ticket.id,
+        actor=actor,
+        expected_updated_at=ticket.updated_at,
+        to_status_code="escalated",
+        reason="Vendor incident needs attention",
+    )
+
+    assert lock_calls == [(actor.id,)]
+    assert updated.status.code == "escalated"
+    assert updated.assignee_id == owner.id
+    assert TransitionHistory.objects.filter(ticket=ticket).count() == 1
+    assert list(
+        updated.custody_events.values_list("event_type", flat=True)
+    ) == ["escalated"]
+    assert list(
+        AuditEvent.objects.filter(object_id=str(ticket.id)).values_list(
+            "action",
+            flat=True,
+        )
+    ) == ["ticket.transitioned"]
+    assert list(
+        OutboxEvent.objects.filter(aggregate_id=str(ticket.id)).values_list(
+            "event_type",
+            flat=True,
+        )
+    ) == ["ticket.transitioned"]
+    transition_audit = AuditEvent.objects.get(
+        object_id=str(ticket.id),
+        action="ticket.transitioned",
+    )
+    assert transition_audit.payload["metadata"] == {
+        "reason": "Vendor incident needs attention",
+    }
 
 
 def test_non_escalation_transition_rejects_supervisor_without_side_effects(

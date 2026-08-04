@@ -419,8 +419,12 @@ def transition_ticket(
     if expected_updated_at != locked.updated_at:
         raise TicketConflictError(locked.updated_at)
 
+    is_operational_escalation = (
+        locked.domain == Ticket.Domain.OPERATIONAL
+        and to_status_code == "escalated"
+    )
     additional_user_ids: set[UUID] = set()
-    if to_status_code == "escalated":
+    if is_operational_escalation:
         if locked.assignee_id is not None:
             additional_user_ids.add(locked.assignee_id)
         if supervisor_id is not None:
@@ -469,7 +473,7 @@ def transition_ticket(
         for field in required
         if not str(supplied_fields.get(field, "")).strip()
     }
-    if workflow_transition.to_status.code == "escalated":
+    if is_operational_escalation:
         if supervisor_id is None:
             missing["supervisor_id"] = ["Select an escalation supervisor."]
     elif supervisor_id is not None:
@@ -480,7 +484,7 @@ def transition_ticket(
         raise TransitionError(missing)
 
     escalation_plan: EscalationAssignmentPlan | None = None
-    if workflow_transition.to_status.code == "escalated":
+    if is_operational_escalation:
         assert supervisor_id is not None
         try:
             escalation_plan = prepare_escalation_assignment(

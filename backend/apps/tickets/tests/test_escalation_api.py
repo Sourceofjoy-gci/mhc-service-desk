@@ -6,9 +6,10 @@ import pytest
 from django.urls import reverse
 from rest_framework.test import APIClient
 
+from apps.audit.models import AuditEvent
 from apps.identity_access.models import Role, User, UserRole
-from apps.tickets.models import Ticket
-from apps.workflow.models import Status
+from apps.tickets.models import OutboxEvent, Ticket
+from apps.workflow.models import Status, TransitionHistory
 
 pytestmark = pytest.mark.django_db
 
@@ -37,18 +38,30 @@ def _scoped_actor(basic_world, *, role_key: str) -> User:
     return user
 
 
-def _ticket(basic_world, *, status_code: str) -> Ticket:
-    service = basic_world["gen_info"]
+def _ticket(
+    basic_world,
+    *,
+    status_code: str,
+    domain: str = Ticket.Domain.OPERATIONAL,
+    assignee: User | None = None,
+) -> Ticket:
+    service = (
+        basic_world["gen_info"]
+        if domain == Ticket.Domain.OPERATIONAL
+        else basic_world["it_inc"]
+    )
+    prefix = "OP" if domain == Ticket.Domain.OPERATIONAL else "IT"
     return Ticket.objects.create(
-        number=f"OP-202607-{Ticket.objects.count() + 960001:06d}",
-        domain=Ticket.Domain.OPERATIONAL,
+        number=f"{prefix}-202607-{Ticket.objects.count() + 960001:06d}",
+        domain=domain,
         title="Escalation supervisor API contract",
-        status=Status.objects.get(domain=Ticket.Domain.OPERATIONAL, code=status_code),
+        status=Status.objects.get(domain=domain, code=status_code),
         channel=Ticket.Channel.INTERNAL,
         requester=basic_world["contact"],
         service=service,
         request_type=service.request_types.get(),
         office=basic_world["office"],
+        assignee=assignee,
     )
 
 
@@ -165,3 +178,98 @@ def test_escalation_transition_api_assigns_submitted_supervisor(basic_world):
     ticket.refresh_from_db()
     assert ticket.status.code == "escalated"
     assert ticket.assignee_id == supervisor.id
+
+
+def test_it_escalation_api_preserves_owner_without_assignment_evidence(
+    basic_world,
+):
+    actor = User.objects.create(
+        username=f"it-agent-{uuid4().hex}",
+        keycloak_subject=f"it-agent-subject-{uuid4().hex}",
+        keycloak_groups=["it-agents"],
+    )
+    owner = User.objects.create(
+        username=f"it-owner-{uuid4().hex}",
+        keycloak_subject=f"it-owner-subject-{uuid4().hex}",
+        keycloak_groups=["it-agents"],
+    )
+    ticket = _ticket(
+        basic_world,
+        status_code="in_progress",
+        domain=Ticket.Domain.IT,
+        assignee=owner,
+    )
+
+    response = _client(actor).post(
+        _transition_url(ticket),
+        {
+            "to_status": "escalated",
+            "updated_at": ticket.updated_at.isoformat(),
+            "reason": "Vendor incident needs attention",
+        },
+        format="json",
+    )
+
+    assert response.status_code == 200
+    ticket.refresh_from_db()
+    assert ticket.status.code == "escalated"
+    assert ticket.assignee_id == owner.id
+    assert TransitionHistory.objects.filter(ticket=ticket).count() == 1
+    assert not AuditEvent.objects.filter(
+        object_id=str(ticket.id),
+        action="ticket.assignment.changed",
+    ).exists()
+    assert not OutboxEvent.objects.filter(
+        aggregate_id=str(ticket.id),
+        event_type="ticket.assignment.changed",
+    ).exists()
+    assert not ticket.custody_events.filter(
+        event_type__in=["assigned", "reassigned"],
+    ).exists()
+
+
+def test_it_escalation_api_rejects_submitted_supervisor_without_side_effects(
+    basic_world,
+):
+    actor = User.objects.create(
+        username=f"it-agent-{uuid4().hex}",
+        keycloak_subject=f"it-agent-subject-{uuid4().hex}",
+        keycloak_groups=["it-agents"],
+    )
+    owner = User.objects.create(
+        username=f"it-owner-{uuid4().hex}",
+        keycloak_subject=f"it-owner-subject-{uuid4().hex}",
+        keycloak_groups=["it-agents"],
+    )
+    ticket = _ticket(
+        basic_world,
+        status_code="in_progress",
+        domain=Ticket.Domain.IT,
+        assignee=owner,
+    )
+    previous_updated_at = ticket.updated_at
+
+    response = _client(actor).post(
+        _transition_url(ticket),
+        {
+            "to_status": "escalated",
+            "updated_at": ticket.updated_at.isoformat(),
+            "reason": "Vendor incident needs attention",
+            "supervisor_id": str(uuid4()),
+        },
+        format="json",
+    )
+
+    assert response.status_code == 400
+    assert response.data["code"] == "invalid_transition"
+    assert response.data["fields"] == {
+        "supervisor_id": ["This field is only valid when escalating."],
+    }
+    ticket.refresh_from_db()
+    assert ticket.status.code == "in_progress"
+    assert ticket.assignee_id == owner.id
+    assert ticket.updated_at == previous_updated_at
+    assert TransitionHistory.objects.filter(ticket=ticket).count() == 0
+    assert AuditEvent.objects.filter(object_id=str(ticket.id)).count() == 0
+    assert OutboxEvent.objects.filter(aggregate_id=str(ticket.id)).count() == 0
+    assert ticket.custody_events.count() == 0
