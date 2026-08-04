@@ -632,7 +632,11 @@ def transition_ticket(
                 previous_status=status_snapshot(previous),
                 new_status=status_snapshot(target),
                 reason=reason,
-                occurred_at=now,
+                occurred_at=(
+                    now
+                    if escalation_plan is not None
+                    else history.occurred_at
+                ),
             ),
         ),
     )

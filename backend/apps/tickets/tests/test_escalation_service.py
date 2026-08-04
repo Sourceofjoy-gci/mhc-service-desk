@@ -677,3 +677,21 @@ def test_escalation_transition_rolls_back_ticket_sla_history_and_evidence(
         assignee_id=previous.id,
         sla=sla,
     )
+
+
+def test_non_escalation_transition_custody_preserves_history_timestamp(
+    basic_world,
+) -> None:
+    actor = _scoped_actor(basic_world, role_key="examiner")
+    ticket = _ticket(basic_world, status_code="new", assignee=actor)
+
+    updated = services.transition_ticket(
+        ticket_id=ticket.id,
+        actor=actor,
+        expected_updated_at=ticket.updated_at,
+        to_status_code="triage",
+    )
+
+    history = TransitionHistory.objects.get(ticket=ticket)
+    custody = updated.custody_events.get()
+    assert custody.occurred_at == history.occurred_at
