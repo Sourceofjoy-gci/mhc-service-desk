@@ -6,6 +6,7 @@ from pathlib import Path
 import pytest
 
 from apps.identity_access.models import Role
+from apps.identity_access.staff_roles import STAFF_DESIGNATION_BY_KEY
 from scripts import seed_dev
 
 PRIMARY_STAFF_ROLES = {
@@ -57,6 +58,13 @@ INTERNAL_STAFF_CONTEXT = {
         "Authority: Full approval authority."
     ),
 }
+
+
+def test_deputy_master_and_master_have_identical_operational_authority_aliases():
+    assert (
+        STAFF_DESIGNATION_BY_KEY["deputy-master"].authority_aliases
+        == STAFF_DESIGNATION_BY_KEY["master"].authority_aliases
+    )
 
 
 @pytest.mark.django_db

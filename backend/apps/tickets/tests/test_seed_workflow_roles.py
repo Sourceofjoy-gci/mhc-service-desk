@@ -102,16 +102,23 @@ def test_seeded_workflow_enforces_resolution_escalation_and_final_authority(
         to_status__code="in_progress"
     ).exists()
 
-    resolved = ticket("resolved", 3)
-    assert set(
-        available_transitions(resolved, deputy).values_list(
-            "to_status__code",
-            flat=True,
+    for sequence, status_code in enumerate(
+        ("resolved", "cancelled", "rejected", "duplicate", "spam"),
+        start=3,
+    ):
+        final_authority_ticket = ticket(status_code, sequence)
+        master_destinations = set(
+            available_transitions(final_authority_ticket, master).values_list(
+                "to_status__code",
+                flat=True,
+            )
         )
-    ) == {"reopened"}
-    assert set(
-        available_transitions(resolved, master).values_list(
-            "to_status__code",
-            flat=True,
+        deputy_destinations = set(
+            available_transitions(final_authority_ticket, deputy).values_list(
+                "to_status__code",
+                flat=True,
+            )
         )
-    ) == {"reopened", "closed"}
+
+        assert "closed" in master_destinations
+        assert deputy_destinations == master_destinations

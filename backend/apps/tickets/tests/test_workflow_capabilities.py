@@ -47,7 +47,7 @@ DESIGNATION_KEYS = (
             ("examiner", "records-officer"),
         ),
         ("deputy-master", ("deputy-master", "master"), ("assistant-master",)),
-        ("master", ("master",), ("deputy-master",)),
+        ("master", ("deputy-master", "master"), ("assistant-master",)),
         ("examiner", ("examiner", "estate-examiner"), ("records-officer",)),
         (
             "records-officer",
@@ -85,6 +85,104 @@ def test_internal_staff_approval_roles_inherit_up_the_court_hierarchy(
         assert available_transitions(ticket, actor_with(role_key)).exists()
     for role_key in denied_roles:
         assert not available_transitions(ticket, actor_with(role_key)).exists()
+
+
+def test_scoped_deputy_master_sees_and_executes_master_transition(basic_world):
+    ticket = _ticket(basic_world)
+    transition = Transition.objects.get(
+        domain=ticket.domain,
+        from_status=ticket.status,
+        to_status__code="triage",
+    )
+    transition.required_role = "master"
+    transition.save(update_fields=["required_role"])
+    deputy = _user([])
+    deputy_role = Role.objects.create(
+        keycloak_role="deputy-master",
+        name="Deputy Master",
+        scopes=[
+            {
+                "domain": ticket.domain,
+                "office": str(ticket.office_id),
+                "service": str(ticket.service_id),
+            }
+        ],
+    )
+    UserRole.objects.create(user=deputy, role=deputy_role, office=ticket.office)
+
+    assert available_transitions(ticket, deputy).get() == transition
+
+    updated = services.transition_ticket(
+        ticket_id=ticket.id,
+        actor=deputy,
+        expected_updated_at=ticket.updated_at,
+        to_status_code="triage",
+    )
+
+    assert updated.status.code == "triage"
+
+
+@pytest.mark.parametrize(
+    "boundary",
+    [
+        "expired",
+        "mismatched-office",
+        "mismatched-service",
+        "restricted-only-on-ordinary",
+        "auditor",
+        "cross-domain",
+    ],
+)
+def test_deputy_master_parity_preserves_scope_and_auditor_boundaries(
+    basic_world,
+    boundary,
+):
+    ticket = _ticket(basic_world)
+    transition = Transition.objects.get(
+        domain=ticket.domain,
+        from_status=ticket.status,
+        to_status__code="triage",
+    )
+    transition.required_role = "master"
+    transition.save(update_fields=["required_role"])
+    scope = {
+        "domain": ticket.domain,
+        "office": str(ticket.office_id),
+        "service": str(ticket.service_id),
+    }
+    if boundary == "mismatched-office":
+        scope["office"] = str(uuid4())
+    elif boundary == "mismatched-service":
+        scope["service"] = str(uuid4())
+    elif boundary == "restricted-only-on-ordinary":
+        scope["restricted_only"] = True
+    elif boundary == "cross-domain":
+        scope["domain"] = "it"
+
+    deputy = _user([])
+    deputy_role = Role.objects.create(
+        keycloak_role="deputy-master",
+        name="Deputy Master",
+        scopes=[scope],
+    )
+    assignment_kwargs = {}
+    if boundary == "expired":
+        assignment_kwargs["expires_at"] = timezone.now() - timedelta(seconds=1)
+    UserRole.objects.create(
+        user=deputy,
+        role=deputy_role,
+        office=ticket.office,
+        **assignment_kwargs,
+    )
+    if boundary == "auditor":
+        auditor_role = Role.objects.create(
+            keycloak_role="auditors",
+            name="Auditor",
+        )
+        UserRole.objects.create(user=deputy, role=auditor_role)
+
+    assert not available_transitions(ticket, deputy).exists()
+    _assert_denied_without_side_effects(ticket, deputy)
 
 
 def _user(groups: list[str]) -> User:

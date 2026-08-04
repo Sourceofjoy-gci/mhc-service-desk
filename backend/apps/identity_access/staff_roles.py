@@ -42,7 +42,7 @@ STAFF_DESIGNATIONS: tuple[StaffDesignation, ...] = (
         "Perform higher-level review; handle exceptions; make escalation "
         "decisions. Authority: Senior approval and oversight.",
         _OPERATIONAL_SUPERVISOR_AUTHORITY
-        | {"assistant-master", "deputy-master"},
+        | {"assistant-master", "deputy-master", "master"},
     ),
     StaffDesignation(
         "assistant-master",

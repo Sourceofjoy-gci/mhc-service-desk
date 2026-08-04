@@ -30,6 +30,15 @@ persisted assignments fail closed. When a restricted-only grant and a broader
 grant cover the same branch, the broader grant supplies ordinary rows for that
 branch; the restricted-only grant does not broaden any other branch.
 
+For Operational workflow approval gates, an active persisted Deputy Master
+assignment has the same authority aliases as Master, including transitions whose
+canonical `required_role` is `master`. That parity applies only inside the exact
+domain, office, service, queue, confidentiality, and expiry boundaries of the
+Deputy's own assignment. It does not grant administrative, IT, auditor, security,
+or cross-domain authority; a Keycloak realm-role claim alone remains insufficient.
+Assistant Master retains delegated approval authority and cannot satisfy a
+`master` gate.
+
 The verified Keycloak `sub` is the authoritative local identity binding. A
 different subject cannot take over an existing authoritative username. An
 inactive local user has no canonical authority, including when marked as a
