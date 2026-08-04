@@ -387,6 +387,11 @@ def test_ticket_cursors_cover_large_tied_queue_exactly_once(basic_world):
 
 def test_safe_cursor_covers_large_tied_timestamp_exactly_once():
     pagination = import_module("apps.identity_access.pagination")
+    unrelated_role = Role.objects.create(
+        id=UUID(int=10_000),
+        keycloak_role="unrelated-cursor-role",
+        name="Unrelated cursor role",
+    )
 
     class RoleSerializer(serializers.ModelSerializer):
         class Meta:
@@ -394,7 +399,7 @@ def test_safe_cursor_covers_large_tied_timestamp_exactly_once():
             fields = ("id",)
 
     class RoleViewSet(viewsets.ReadOnlyModelViewSet):
-        queryset = Role.objects.all()
+        queryset = Role.objects.filter(keycloak_role__startswith="cursor-fixture-role-")
         serializer_class = RoleSerializer
         pagination_class = pagination.SafeCursorPagination
         authentication_classes = []
@@ -403,13 +408,15 @@ def test_safe_cursor_covers_large_tied_timestamp_exactly_once():
     roles = [
         Role(
             id=UUID(int=index + 1),
-            keycloak_role=f"role-{index + 1}",
+            keycloak_role=f"cursor-fixture-role-{index + 1}",
             name=f"Role {index + 1}",
         )
         for index in range(1055)
     ]
     Role.objects.bulk_create(roles, batch_size=500)
-    Role.objects.update(created_at=timezone.now() - timedelta(days=1))
+    Role.objects.filter(keycloak_role__startswith="cursor-fixture-role-").update(
+        created_at=timezone.now() - timedelta(days=1)
+    )
     view = RoleViewSet.as_view({"get": "list"})
 
     responses, rows = _traverse_pages(
@@ -417,8 +424,10 @@ def test_safe_cursor_covers_large_tied_timestamp_exactly_once():
         "/roles/",
     )
 
+    assert Role.objects.filter(pk=unrelated_role.pk).exists()
     assert len(responses) == 22
     assert [row["id"] for row in rows] == [str(role.id) for role in reversed(roles)]
+    assert str(unrelated_role.id) not in {row["id"] for row in rows}
     assert len(rows) == len({row["id"] for row in rows}) == 1055
 
 
