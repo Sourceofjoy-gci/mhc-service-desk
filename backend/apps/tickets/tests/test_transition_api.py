@@ -202,7 +202,7 @@ def test_realm_role_supervisor_can_execute_a_legacy_role_transition(basic_world)
 
 @pytest.mark.parametrize("missing", ["resolution_code", "resolution_summary"])
 def test_resolution_transition_requires_code_and_summary(basic_world, missing):
-    actor = _user(["ops-agents"])
+    actor = _supervisor(basic_world, role_key="assistant-master")
     ticket = _ticket(basic_world, status_code="in_progress")
     payload = {
         "to_status": "resolved",

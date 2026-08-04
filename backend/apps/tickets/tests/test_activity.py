@@ -13,7 +13,7 @@ from rest_framework.test import APIClient, APIRequestFactory
 
 from apps.audit.models import AuditEvent
 from apps.files.models import Attachment
-from apps.identity_access.models import User
+from apps.identity_access.models import Role, User, UserRole
 from apps.identity_access.scope import get_authority_snapshot
 from apps.sla.models import SlaInstance, SlaPolicy
 from apps.tickets import services as ticket_services
@@ -56,6 +56,28 @@ def _user(groups, *, subject="agent-1", display_name="Agent One"):
         keycloak_groups=groups,
     )
     user._groups = groups
+    return user
+
+
+def _scoped_user(basic_world, *, role_key: str, subject: str) -> User:
+    user = User.objects.create(
+        username=f"user-{uuid4().hex}",
+        keycloak_subject=subject,
+        display_name=role_key.replace("-", " ").title(),
+        is_active=True,
+    )
+    role = Role.objects.create(
+        keycloak_role=role_key,
+        name=role_key.replace("-", " ").title(),
+        scopes=[
+            {
+                "domain": Ticket.Domain.OPERATIONAL,
+                "office": str(basic_world["office"].id),
+                "service": str(basic_world["gen_info"].id),
+            }
+        ],
+    )
+    UserRole.objects.create(user=user, role=role, office=basic_world["office"])
     return user
 
 
@@ -942,11 +964,20 @@ def test_activity_endpoint_hides_other_domain_ticket(basic_world):
 
 def test_reopen_activity_preserves_the_prior_resolution(basic_world):
     ticket = _ticket(basic_world)
-    actor = _user(["ops-agents"], subject="lifecycle-agent")
+    resolver = _scoped_user(
+        basic_world,
+        role_key="assistant-master",
+        subject="lifecycle-resolver",
+    )
+    reopener = _scoped_user(
+        basic_world,
+        role_key="deputy-master",
+        subject="lifecycle-reopener",
+    )
 
     ticket = ticket_services.transition_ticket(
         ticket_id=ticket.id,
-        actor=actor,
+        actor=resolver,
         expected_updated_at=ticket.updated_at,
         to_status_code="resolved",
         resolution_code="INFO_PROVIDED",
@@ -954,7 +985,7 @@ def test_reopen_activity_preserves_the_prior_resolution(basic_world):
     )
     ticket = ticket_services.transition_ticket(
         ticket_id=ticket.id,
-        actor=actor,
+        actor=reopener,
         expected_updated_at=ticket.updated_at,
         to_status_code="reopened",
         reason="Requester supplied new information",

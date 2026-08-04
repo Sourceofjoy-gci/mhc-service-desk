@@ -12,6 +12,8 @@ from apps.workflow.models import Status
 
 pytestmark = pytest.mark.django_db
 
+CORRELATION_ID = "escalation-supervisor-search-test"
+
 
 def _scoped_actor(basic_world, *, role_key: str) -> User:
     user = User.objects.create(
@@ -108,6 +110,25 @@ def test_escalation_supervisor_endpoint_searches_deterministically(basic_world):
         str(assistant.id),
         str(deputy.id),
     ]
+
+
+def test_escalation_supervisor_endpoint_rejects_search_over_one_hundred_characters(
+    basic_world,
+):
+    actor = _scoped_actor(basic_world, role_key="examiner")
+    ticket = _ticket(basic_world, status_code="in_progress")
+
+    response = _client(actor).get(
+        _url(ticket),
+        {"search": "x" * 101},
+        HTTP_X_CORRELATION_ID=CORRELATION_ID,
+    )
+
+    assert response.status_code == 400
+    assert response.data["code"] == "invalid_assignee_search"
+    assert response.data["detail"] == "Supervisor search is invalid."
+    assert set(response.data["fields"]) == {"search"}
+    assert response.data["correlation_id"] == CORRELATION_ID
 
 
 def test_escalation_supervisor_endpoint_forbids_actor_who_cannot_escalate(
