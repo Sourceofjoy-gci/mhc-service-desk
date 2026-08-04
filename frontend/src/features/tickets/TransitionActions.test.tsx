@@ -6,7 +6,7 @@ import {
   within,
 } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
-import { beforeEach, describe, expect, it, vi } from "vitest";
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { ApiError, type TicketAssignee, type TicketDetail } from "@/lib/api";
 import { renderWithProviders } from "@/test/render";
 import { TransitionActions } from "./TransitionActions";
@@ -131,10 +131,19 @@ const TICKET: TicketDetail = {
 const ASSISTANT_MASTER: TicketAssignee = {
   id: "00000000-0000-0000-0000-000000000099",
   username: "assistant.dlamini",
-  display_name: "Assistant Master Dlamini",
+  display_name: "Lindiwe Dlamini",
   designations: ["Assistant Master"],
   team_labels: ["Office Leadership"],
   role_summaries: ["Approves workflow progress."],
+};
+
+const DEPUTY_MASTER: TicketAssignee = {
+  id: "00000000-0000-0000-0000-000000000100",
+  username: "deputy.mabuza",
+  display_name: "Musa Mabuza",
+  designations: ["Deputy Master"],
+  team_labels: ["Executive Review"],
+  role_summaries: ["Provides senior approval and oversight."],
 };
 
 const ESCALATABLE_TICKET: TicketDetail = {
@@ -169,14 +178,14 @@ function renderActions(
   onUpdated = vi.fn(),
   onActivityChanged = vi.fn(),
 ) {
-  renderWithProviders(
+  const rendered = renderWithProviders(
     <TransitionActions
       ticket={ticket}
       onUpdated={onUpdated}
       onActivityChanged={onActivityChanged}
     />,
   );
-  return { onUpdated, onActivityChanged };
+  return { onUpdated, onActivityChanged, ...rendered };
 }
 
 async function openResolve(user: ReturnType<typeof userEvent.setup>) {
@@ -191,7 +200,7 @@ async function selectSupervisor(user: ReturnType<typeof userEvent.setup>) {
   await user.click(
     screen.getByRole("combobox", { name: "Escalate to supervisor" }),
   );
-  await screen.findByRole("option", { name: /Assistant Master Dlamini/ });
+  await screen.findByRole("option", { name: /Lindiwe Dlamini/ });
   await user.keyboard("{ArrowDown}");
   await user.keyboard("{Enter}");
 }
@@ -201,6 +210,10 @@ beforeEach(() => {
   harness.get.mockReset();
   harness.escalationSupervisors.mockReset();
   harness.escalationSupervisors.mockResolvedValue({ results: [] });
+});
+
+afterEach(() => {
+  vi.useRealTimers();
 });
 
 describe("server-driven transition actions", () => {
@@ -273,6 +286,46 @@ describe("server-driven transition actions", () => {
     );
   });
 
+  it("waits 250 ms and collapses typed supervisor search into one lookup", async () => {
+    harness.escalationSupervisors.mockResolvedValue({
+      results: [ASSISTANT_MASTER],
+    });
+    const user = userEvent.setup();
+    renderActions(ESCALATABLE_TICKET);
+
+    await user.click(screen.getByRole("button", { name: "Escalate" }));
+    await user.click(
+      screen.getByRole("combobox", { name: "Escalate to supervisor" }),
+    );
+    const search = await screen.findByRole("combobox", {
+      name: "Search Escalate to supervisor",
+    });
+    harness.escalationSupervisors.mockClear();
+
+    vi.useFakeTimers();
+    try {
+      for (const value of ["d", "de", "dep", "depu", "deput", "deputy"]) {
+        fireEvent.change(search, { target: { value } });
+      }
+
+      await act(async () => {
+        await vi.advanceTimersByTimeAsync(249);
+      });
+      expect(harness.escalationSupervisors).not.toHaveBeenCalled();
+
+      await act(async () => {
+        await vi.advanceTimersByTimeAsync(1);
+      });
+      expect(harness.escalationSupervisors).toHaveBeenCalledTimes(1);
+      expect(harness.escalationSupervisors).toHaveBeenLastCalledWith(
+        TICKET.number,
+        "deputy",
+      );
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
   it("requires and submits a named escalation supervisor", async () => {
     harness.escalationSupervisors.mockResolvedValue({
       results: [ASSISTANT_MASTER],
@@ -303,7 +356,7 @@ describe("server-driven transition actions", () => {
       screen.getByRole("combobox", { name: "Escalate to supervisor" }),
     );
     const option = await screen.findByRole("option", {
-      name: /Assistant Master Dlamini/,
+      name: /Lindiwe Dlamini/,
     });
     expect(option).toHaveTextContent("Assistant Master");
     expect(within(option).getByText(/Office Leadership/)).toBeVisible();
@@ -327,6 +380,64 @@ describe("server-driven transition actions", () => {
     );
     await waitFor(() => expect(onUpdated).toHaveBeenCalledTimes(1));
     expect(onActivityChanged).toHaveBeenCalledTimes(1);
+  });
+
+  it("clears reason, supervisor, and search after a successful escalation refresh", async () => {
+    harness.escalationSupervisors.mockResolvedValue({
+      results: [ASSISTANT_MASTER],
+    });
+    const refreshed = {
+      ...ESCALATABLE_TICKET,
+      updated_at: "2026-07-27T09:16:00Z",
+      status_code: "escalated",
+      status_name: "Escalated",
+    };
+    harness.transition.mockResolvedValue(refreshed);
+    const user = userEvent.setup();
+    const { onUpdated, rerender } = renderActions(ESCALATABLE_TICKET);
+
+    await user.click(screen.getByRole("button", { name: "Escalate" }));
+    await user.type(screen.getByRole("textbox", { name: "Reason" }), "SLA risk");
+    await selectSupervisor(user);
+    await user.click(
+      screen.getByRole("combobox", { name: "Escalate to supervisor" }),
+    );
+    await user.type(
+      await screen.findByRole("combobox", {
+        name: "Search Escalate to supervisor",
+      }),
+      "lindiwe",
+    );
+    await waitFor(() =>
+      expect(harness.escalationSupervisors).toHaveBeenLastCalledWith(
+        TICKET.number,
+        "lindiwe",
+      ),
+    );
+    await user.click(
+      screen.getByRole("combobox", { name: "Escalate to supervisor" }),
+    );
+    await user.click(screen.getByRole("button", { name: "Confirm Escalate" }));
+    await waitFor(() => expect(onUpdated).toHaveBeenCalledWith(refreshed));
+
+    rerender(
+      <TransitionActions
+        ticket={refreshed}
+        onUpdated={onUpdated}
+        onActivityChanged={vi.fn()}
+      />,
+    );
+    await user.click(screen.getByRole("button", { name: "Escalate" }));
+    await waitFor(() =>
+      expect(harness.escalationSupervisors).toHaveBeenLastCalledWith(
+        refreshed.number,
+        "",
+      ),
+    );
+    expect(screen.getByRole("textbox", { name: "Reason" })).toHaveValue("");
+    expect(
+      screen.getByRole("combobox", { name: "Escalate to supervisor" }),
+    ).toHaveTextContent("Select eligible team member");
   });
 
   it("shows supervisor lookup loading and failure state without querying other actions", async () => {
@@ -374,14 +485,37 @@ describe("server-driven transition actions", () => {
   });
 
   it("clears the selected supervisor when a different action is selected", async () => {
-    harness.escalationSupervisors.mockResolvedValue({
-      results: [ASSISTANT_MASTER],
-    });
+    harness.escalationSupervisors.mockImplementation((_number, search) =>
+      Promise.resolve({
+        results: search ? [DEPUTY_MASTER] : [ASSISTANT_MASTER],
+      }),
+    );
     const user = userEvent.setup();
     renderActions(ESCALATABLE_TICKET);
 
     await user.click(screen.getByRole("button", { name: "Escalate" }));
     await selectSupervisor(user);
+    await user.click(
+      screen.getByRole("combobox", { name: "Escalate to supervisor" }),
+    );
+    await user.type(
+      await screen.findByRole("combobox", {
+        name: "Search Escalate to supervisor",
+      }),
+      "executive",
+    );
+    await waitFor(() =>
+      expect(harness.escalationSupervisors).toHaveBeenLastCalledWith(
+        TICKET.number,
+        "executive",
+      ),
+    );
+    expect(
+      await screen.findByRole("option", { name: /Musa Mabuza/ }),
+    ).toBeVisible();
+    await user.click(
+      screen.getByRole("combobox", { name: "Escalate to supervisor" }),
+    );
     fireEvent.click(
       screen.getByRole("button", { name: "Start work", hidden: true }),
     );
@@ -392,9 +526,22 @@ describe("server-driven transition actions", () => {
     fireEvent.click(
       screen.getByRole("button", { name: "Escalate", hidden: true }),
     );
+    await waitFor(() =>
+      expect(harness.escalationSupervisors).toHaveBeenLastCalledWith(
+        TICKET.number,
+        "",
+      ),
+    );
     expect(
       screen.getByRole("combobox", { name: "Escalate to supervisor" }),
     ).toHaveTextContent("Select eligible team member");
+    await user.click(
+      screen.getByRole("combobox", { name: "Escalate to supervisor" }),
+    );
+    expect(await screen.findByRole("option", { name: /Lindiwe Dlamini/ })).toBeVisible();
+    expect(
+      screen.queryByRole("option", { name: /Musa Mabuza/ }),
+    ).not.toBeInTheDocument();
   });
 
   it("preserves values through a stale escalation then clears them after Reload", async () => {
