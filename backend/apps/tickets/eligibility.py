@@ -79,6 +79,8 @@ _LEGACY_ROLE_DETAILS: dict[str, tuple[str, str]] = {
     "it-agents": ("IT Agent", "IT"),
     "lead-it": ("IT Lead", "IT"),
     "it-leads": ("IT Lead", "IT"),
+    "agent-servicedesk": ("Service Desk Agent", "Operational"),
+    "service-desk-agents": ("Service Desk Agent", "Operational"),
 }
 _ROLE_FAMILY_DOMAIN: dict[str, str] = {
     "agent-operational": Ticket.Domain.OPERATIONAL,
@@ -89,6 +91,8 @@ _ROLE_FAMILY_DOMAIN: dict[str, str] = {
     "it-agents": Ticket.Domain.IT,
     "lead-it": Ticket.Domain.IT,
     "it-leads": Ticket.Domain.IT,
+    "agent-servicedesk": Ticket.Domain.OPERATIONAL,
+    "service-desk-agents": Ticket.Domain.OPERATIONAL,
 }
 _ROLE_ALIASES: dict[str, frozenset[str]] = {
     "agent-operational": frozenset({"agent-operational", "ops-agents"}),
@@ -101,6 +105,8 @@ _ROLE_ALIASES: dict[str, frozenset[str]] = {
     "it-leads": frozenset({"lead-it", "it-leads"}),
     "admin": frozenset({"admin", "system-admins"}),
     "system-admins": frozenset({"admin", "system-admins"}),
+    "agent-servicedesk": frozenset({"agent-servicedesk", "service-desk-agents"}),
+    "service-desk-agents": frozenset({"agent-servicedesk", "service-desk-agents"}),
 }
 _ACTOR_GROUP_ROLE_KEYS = frozenset(_ROLE_ALIASES)
 _ROLE_ALIASES.update(
@@ -116,6 +122,7 @@ _GROUP_FALLBACK_ROLE_KEYS = {
     "it-agents",
     "it-leads",
     "system-admins",
+    "service-desk-agents",
 }
 # Actor group fallback accepts only established functional roles. Designation
 # realm roles are identity context; a scoped UserRole is still required before

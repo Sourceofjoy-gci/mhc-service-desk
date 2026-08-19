@@ -43,6 +43,7 @@ _KEYCLOAK_GROUPS = frozenset(
         "security-responders",
         "system-admins",
         "auditors",
+        "service-desk-agents",
     }
 )
 _KEYCLOAK_GROUP_PATHS = {f"/{group}": group for group in _KEYCLOAK_GROUPS}
@@ -55,6 +56,7 @@ _KEYCLOAK_REALM_ROLES = (
         "lead-it",
         "admin",
         "auditor",
+        "agent-servicedesk",
     }
     | STAFF_DESIGNATION_ROLE_KEYS
 )

@@ -41,8 +41,13 @@ _DEFAULT_ROLE_SCOPES: dict[str, tuple[RawScope, ...]] = {
         {"domain": "operational", "restricted_only": True},
         {"domain": "it", "restricted_only": True},
     ),
+    "service-desk-agents": ({"domain": "operational"},),
+    "agent-servicedesk": ({"domain": "operational"},),
 }
 _AUDITOR_ROLES = {"auditor", "auditors"}
+# The national service desk answers queries before the responsible office is
+# known, so it is never bound to one office.
+_SERVICE_DESK_ROLES = frozenset({"service-desk-agents", "agent-servicedesk"})
 _RESTRICTED_VIEW_ROLES = {
     "supervisor-operational",
     "ops-supervisors",
@@ -437,6 +442,8 @@ def _snapshot_from_groups(user: object) -> AuthoritySnapshot:
             Scope(domain="it", restricted_only=True),
             can_view_restricted_rows=True,
         )
+    if groups & _SERVICE_DESK_ROLES:
+        add_scope(Scope(domain="operational"))
     if groups & {"system-admins", "admin"}:
         add_scope(Scope(domain="admin"), can_view_restricted_rows=True)
     if groups & {"auditors", "auditor"}:

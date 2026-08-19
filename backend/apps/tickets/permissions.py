@@ -29,6 +29,8 @@ DOMAIN_GROUPS = {
         "ops-agents",
         "supervisor-operational",
         "ops-supervisors",
+        "agent-servicedesk",
+        "service-desk-agents",
     },
     "it": {"agent-it", "it-agents", "lead-it", "it-leads"},
 }
