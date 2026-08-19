@@ -20,6 +20,8 @@ def me(request: Request) -> Response:
     user = request.user
     if not isinstance(user, User):
         raise TypeError("Authenticated identity must use the configured User model")
+    office = user.office
+    station = user.station
     payload = {
         "id": str(user.id),
         "username": user.username,
@@ -28,5 +30,11 @@ def me(request: Request) -> Response:
         "mfa_enabled": user.mfa_enabled,
         "is_staff": user.is_staff,
         "is_superuser": user.is_superuser,
+        "office": (
+            {"id": str(office.id), "code": office.code, "name": office.name}
+            if office is not None
+            else None
+        ),
+        "station": ({"id": str(station.id), "name": station.name} if station is not None else None),
     }
     return Response(payload)
