@@ -101,11 +101,11 @@
       "bearerOnly": false,
       "standardFlowEnabled": true,
       "implicitFlowEnabled": false,
-      "directAccessGrantsEnabled": false,
-      "rootUrl": "${PUBLIC_BASE_URL}",
-      "baseUrl": "${PUBLIC_BASE_URL}",
-      "redirectUris": ["${PUBLIC_BASE_URL}/*"],
-      "webOrigins": ["${PUBLIC_BASE_URL}"],
+      "directAccessGrantsEnabled": true,
+      "rootUrl": "http://localhost:5173",
+      "baseUrl": "http://localhost:5173",
+      "redirectUris": ["http://localhost:5173/*"],
+      "webOrigins": ["+"],
       "attributes": {
         "pkce.code.challenge.method": "S256"
       },
