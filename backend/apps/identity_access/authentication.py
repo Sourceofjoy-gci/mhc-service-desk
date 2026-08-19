@@ -20,6 +20,8 @@ from rest_framework import authentication, exceptions
 from rest_framework.request import Request
 from rest_framework_simplejwt.tokens import AccessToken
 
+from apps.organisations.models import Office, ServiceLocation
+
 from .authority_lock import lock_user_authorities
 from .models import User
 from .staff_roles import STAFF_DESIGNATION_ROLE_KEYS
@@ -139,10 +141,14 @@ class KeycloakJWTAuthentication(authentication.BaseAuthentication):
                 groups = _normalize_groups(groups)
                 _synchronize_groups(dev_user, groups)
                 group_claims: list[JSONValue] = list(groups)
-                return dev_user, {
+                dev_claims: JSONObject = {
                     "sub": f"dev:{username}",
                     "groups": group_claims,
                 }
+                if len(parts) > 3 and parts[3]:
+                    dev_claims["office"] = parts[3]
+                _synchronize_office(dev_user, dev_claims)
+                return dev_user, dev_claims
         # --------------------------------------------------------------------
 
         try:
@@ -208,6 +214,7 @@ class KeycloakJWTAuthentication(authentication.BaseAuthentication):
         # ``groups``. Treat both sources as one set of effective memberships.
         groups = _effective_groups(payload)
         _synchronize_groups(user, groups)
+        _synchronize_office(user, payload)
         return user, payload
 
     def authenticate_header(self, request: Request) -> str:
@@ -294,6 +301,60 @@ def _synchronize_groups(user: User, groups: list[str]) -> None:
             locked.save(update_fields=["keycloak_groups"])
         user.keycloak_groups = list(locked.keycloak_groups)
     vars(user)["_groups"] = list(groups)
+
+
+def _claim_text(payload: JSONObject, name: str) -> str:
+    value = payload.get(name)
+    return value.strip() if isinstance(value, str) else ""
+
+
+def _resolve_office_and_station(
+    payload: JSONObject,
+) -> tuple[Office | None, ServiceLocation | None]:
+    """Resolve the office claim, then the station claim inside that office.
+
+    A claim naming an unknown code, or an inactive row, resolves to ``None``.
+    ``ServiceLocation.name`` is unique only within an office, so a station can
+    only be resolved once the office is known.
+    """
+    office_code = _claim_text(payload, "office")
+    if not office_code:
+        return None, None
+    office = Office.objects.filter(code=office_code, is_active=True).first()
+    if office is None:
+        return None, None
+
+    station_name = _claim_text(payload, "station")
+    if not station_name:
+        return office, None
+    station = ServiceLocation.objects.filter(
+        office=office,
+        name=station_name,
+        is_active=True,
+    ).first()
+    return office, station
+
+
+def _synchronize_office(user: User, payload: JSONObject) -> None:
+    """Mirror the office and station claims onto the local user."""
+    office, station = _resolve_office_and_station(payload)
+    office_id = office.id if office is not None else None
+    station_id = station.id if station is not None else None
+
+    with transaction.atomic():
+        locked = lock_user_authorities((user.id,))[user.id].user
+        changed: list[str] = []
+        if locked.office_id != office_id:
+            locked.office = office
+            changed.append("office")
+        if locked.station_id != station_id:
+            locked.station = station
+            changed.append("station")
+        if changed:
+            locked.save(update_fields=changed)
+
+    user.office = office
+    user.station = station
 
 
 def _decode_unverified_header(token: str) -> JSONObject:
