@@ -22,6 +22,20 @@ class User(AbstractUser):
     mfa_enabled = models.BooleanField(default=False)
     last_keycloak_sync = models.DateTimeField(null=True, blank=True)
     keycloak_groups = models.JSONField(default=list, blank=True)
+    office = models.ForeignKey(
+        "organisations.Office",
+        on_delete=models.PROTECT,
+        null=True,
+        blank=True,
+        related_name="based_officers",
+    )
+    station = models.ForeignKey(
+        "organisations.ServiceLocation",
+        on_delete=models.SET_NULL,
+        null=True,
+        blank=True,
+        related_name="stationed_officers",
+    )
 
     class Meta:
         db_table = "identity_user"
