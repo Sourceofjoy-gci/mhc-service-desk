@@ -4,6 +4,7 @@ Pytest-django creates a fresh test database for each test run. We seed the
 catalogue, workflow, SLA, contacts, and organisations so individual tests
 have something to operate on.
 """
+
 from __future__ import annotations
 
 import pytest

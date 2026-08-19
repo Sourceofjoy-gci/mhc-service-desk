@@ -1,4 +1,5 @@
 """Ticket action permissions and assignment eligibility."""
+
 from __future__ import annotations
 
 from django.db.models import QuerySet
@@ -79,13 +80,7 @@ def can_assign(
     if user.is_superuser:
         return True
     if has_active_persisted_assignments(user):
-        return bool(
-            {
-                grant.role_key
-                for grant in get_effective_role_grants(user)
-            }
-            & REASSIGN_GROUPS
-        )
+        return bool({grant.role_key for grant in get_effective_role_grants(user)} & REASSIGN_GROUPS)
     return bool(user_groups(user) & REASSIGN_GROUPS)
 
 
@@ -148,9 +143,7 @@ def _role_grant_covers_routing_result(
         return False
     if scope.office_id is not None and scope.office_id != str(ticket.office_id):
         return False
-    effective_office_id = (
-        str(grant.office_id) if grant.office_id is not None else scope.office_id
-    )
+    effective_office_id = str(grant.office_id) if grant.office_id is not None else scope.office_id
     return _scope_covers_routing_result(
         scope,
         ticket,
@@ -204,10 +197,7 @@ def _can_assign_with_snapshot(
         return False
     if snapshot.auditor_identity or "auditor" in snapshot.capabilities:
         return False
-    return bool(
-        matching_actor_role_aliases(ticket, user, snapshot=snapshot)
-        & REASSIGN_GROUPS
-    )
+    return bool(matching_actor_role_aliases(ticket, user, snapshot=snapshot) & REASSIGN_GROUPS)
 
 
 def can_unqueue_ticket(

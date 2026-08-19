@@ -3,6 +3,7 @@
 The frontend only needs enough information to render role-aware navigation.
 All enforcement happens on the actual data endpoints.
 """
+
 from __future__ import annotations
 
 from rest_framework.decorators import api_view, permission_classes

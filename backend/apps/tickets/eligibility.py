@@ -51,9 +51,7 @@ class AssigneeCandidate:
 
 
 DESIGNATIONS = STAFF_DESIGNATIONS
-ESCALATION_SUPERVISOR_ROLE_KEYS = frozenset(
-    {"assistant-master", "deputy-master", "master"}
-)
+ESCALATION_SUPERVISOR_ROLE_KEYS = frozenset({"assistant-master", "deputy-master", "master"})
 
 _DESIGNATION_BY_KEY = {item.role_key: item for item in DESIGNATIONS}
 _AUDITOR_ROLE_KEYS = {"auditor", "auditors"}
@@ -189,10 +187,7 @@ def _scope_matches_ticket(scope: Scope, ticket: Ticket) -> bool:
 
 
 def _functional_scope_matches_confidentiality(scope: Scope, ticket: Ticket) -> bool:
-    return (
-        not scope.restricted_only
-        or ticket.confidentiality == Ticket.Confidentiality.RESTRICTED
-    )
+    return not scope.restricted_only or ticket.confidentiality == Ticket.Confidentiality.RESTRICTED
 
 
 def _assignment_scope_matches_ticket(
@@ -274,10 +269,7 @@ def _functional_matches(
                     display_name=persisted_name or designation.display_name,
                     team_label=designation.team_label,
                     primary_designation=True,
-                    role_summary=(
-                        assignment.role.description.strip()
-                        or designation.description
-                    ),
+                    role_summary=(assignment.role.description.strip() or designation.description),
                 )
             )
         elif legacy is not None:
@@ -334,10 +326,7 @@ def _has_request_local_auditor_claim(
         raw_groups = getattr(identity, "_groups", ())
         if not isinstance(raw_groups, list | tuple | set | frozenset):
             return False
-        return bool(
-            _AUDITOR_ROLE_KEYS
-            & {group for group in raw_groups if isinstance(group, str)}
-        )
+        return bool(_AUDITOR_ROLE_KEYS & {group for group in raw_groups if isinstance(group, str)})
 
     if has_auditor_group(user):
         return True
@@ -573,8 +562,7 @@ def _candidate_for_user(
         matches = tuple(
             match
             for match in matches
-            if match.primary_designation
-            and match.role_key in allowed_designation_role_keys
+            if match.primary_designation and match.role_key in allowed_designation_role_keys
         )
     if not matches:
         return None

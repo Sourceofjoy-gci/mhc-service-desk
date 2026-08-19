@@ -4,6 +4,7 @@ Local users mirror Keycloak subjects so the application can enforce
 server-side authorization even when Keycloak is briefly unreachable.
 Sensitive domain never lives in this model.
 """
+
 from __future__ import annotations
 
 import uuid

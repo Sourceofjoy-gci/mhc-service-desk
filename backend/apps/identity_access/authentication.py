@@ -44,14 +44,18 @@ _KEYCLOAK_GROUPS = frozenset(
     }
 )
 _KEYCLOAK_GROUP_PATHS = {f"/{group}": group for group in _KEYCLOAK_GROUPS}
-_KEYCLOAK_REALM_ROLES = _KEYCLOAK_GROUPS | {
-    "agent-operational",
-    "supervisor-operational",
-    "agent-it",
-    "lead-it",
-    "admin",
-    "auditor",
-} | STAFF_DESIGNATION_ROLE_KEYS
+_KEYCLOAK_REALM_ROLES = (
+    _KEYCLOAK_GROUPS
+    | {
+        "agent-operational",
+        "supervisor-operational",
+        "agent-it",
+        "lead-it",
+        "admin",
+        "auditor",
+    }
+    | STAFF_DESIGNATION_ROLE_KEYS
+)
 
 type JSONScalar = str | int | float | bool | None
 type JSONValue = JSONScalar | list[JSONValue] | dict[str, JSONValue]
@@ -170,7 +174,10 @@ class KeycloakJWTAuthentication(authentication.BaseAuthentication):
             audience: object = settings.KEYCLOAK["AUDIENCE"]
             if not isinstance(audience, str):
                 raise TypeError("KEYCLOAK audience must be a string")
-            payload = _verify_jwt(token, public_key, audience=audience)
+            issuer: object = settings.KEYCLOAK["ISSUER"]
+            if not isinstance(issuer, str):
+                raise TypeError("KEYCLOAK issuer must be a string")
+            payload = _verify_jwt(token, public_key, audience=audience, issuer=issuer)
         except Exception as exc:
             raise exceptions.AuthenticationFailed(f"Token verification failed: {exc}") from exc
 
@@ -243,9 +250,7 @@ def _resolve_local_user(
 def _effective_groups(payload: JSONObject) -> list[str]:
     """Return the canonical staff memberships carried by a Keycloak token."""
     realm_access = payload.get("realm_access")
-    realm_roles = (
-        realm_access.get("roles") if isinstance(realm_access, dict) else None
-    )
+    realm_roles = realm_access.get("roles") if isinstance(realm_access, dict) else None
     return _deduplicate_memberships(
         _normalize_groups(payload.get("groups")),
         _normalize_realm_roles(realm_roles),
@@ -273,8 +278,7 @@ def _normalize_realm_roles(raw_roles: object) -> list[str]:
     return [
         role
         for raw_role in raw_roles
-        if isinstance(raw_role, str)
-        and (role := raw_role.strip()) in _KEYCLOAK_REALM_ROLES
+        if isinstance(raw_role, str) and (role := raw_role.strip()) in _KEYCLOAK_REALM_ROLES
     ]
 
 
@@ -314,6 +318,7 @@ def _verify_jwt(
     token: str,
     public_key: RSAPublicKey,
     audience: str,
+    issuer: str,
 ) -> JSONObject:
     import jwt
 
@@ -323,7 +328,13 @@ def _verify_jwt(
             key=public_key,
             algorithms=["RS256"],
             audience=audience,
-            options={"verify_aud": True, "verify_iat": True, "verify_exp": True},
+            issuer=issuer,
+            options={
+                "verify_aud": True,
+                "verify_iss": True,
+                "verify_iat": True,
+                "verify_exp": True,
+            },
         ),
         source="JWT payload",
     )
