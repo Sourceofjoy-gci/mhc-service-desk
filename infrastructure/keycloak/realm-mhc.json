@@ -44,7 +44,8 @@
       { "name": "examiner", "description": "Review estate submissions; verify documents; raise defects; assess compliance. Authority: Review and recommend." },
       { "name": "records-clerk", "description": "Records Clerk" },
       { "name": "records-officer", "description": "Register new estate matters; capture metadata; receive and index documents; maintain file completeness. Authority: Create and update case intake records." },
-      { "name": "data-clerk", "description": "Data Clerk" }
+      { "name": "data-clerk", "description": "Data Clerk" },
+      { "name": "agent-servicedesk", "description": "Service desk agent" }
     ]
   },
   "groups": [
@@ -82,6 +83,14 @@
       "name": "auditors",
       "path": "/auditors",
       "realmRoles": ["staff", "auditor"]
+    },
+    {
+      "name": "service-desk-agents",
+      "path": "/service-desk-agents",
+      "realmRoles": [
+        "staff",
+        "agent-servicedesk"
+      ]
     }
   ],
   "clients": [
@@ -92,11 +101,11 @@
       "bearerOnly": false,
       "standardFlowEnabled": true,
       "implicitFlowEnabled": false,
-      "directAccessGrantsEnabled": true,
-      "rootUrl": "http://localhost:5173",
-      "baseUrl": "http://localhost:5173",
-      "redirectUris": ["http://localhost:5173/*"],
-      "webOrigins": ["+"],
+      "directAccessGrantsEnabled": false,
+      "rootUrl": "${PUBLIC_BASE_URL}",
+      "baseUrl": "${PUBLIC_BASE_URL}",
+      "redirectUris": ["${PUBLIC_BASE_URL}/*"],
+      "webOrigins": ["${PUBLIC_BASE_URL}"],
       "attributes": {
         "pkce.code.challenge.method": "S256"
       },
@@ -243,6 +252,32 @@
       "protocol": "openid-connect",
       "protocolMapper": "oidc-usermodel-realm-role-mapper",
       "config": {
+        "id.token.claim": "true",
+        "access.token.claim": "true",
+        "userinfo.token.claim": "true"
+      }
+    },
+    {
+      "name": "office",
+      "protocol": "openid-connect",
+      "protocolMapper": "oidc-usermodel-attribute-mapper",
+      "config": {
+        "user.attribute": "office",
+        "claim.name": "office",
+        "jsonType.label": "String",
+        "id.token.claim": "true",
+        "access.token.claim": "true",
+        "userinfo.token.claim": "true"
+      }
+    },
+    {
+      "name": "station",
+      "protocol": "openid-connect",
+      "protocolMapper": "oidc-usermodel-attribute-mapper",
+      "config": {
+        "user.attribute": "station",
+        "claim.name": "station",
+        "jsonType.label": "String",
         "id.token.claim": "true",
         "access.token.claim": "true",
         "userinfo.token.claim": "true"
