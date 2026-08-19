@@ -33,6 +33,7 @@ TECHNICAL_REALM_ROLES = {
     "lead-it",
     "admin",
     "auditor",
+    "agent-servicedesk",
 }
 
 INTERNAL_STAFF_CONTEXT = {
@@ -124,14 +125,10 @@ def test_keycloak_realm_declares_primary_roles_without_default_assignments():
     } == INTERNAL_STAFF_CONTEXT
 
     default_group_roles = {
-        role
-        for group in realm.get("groups", [])
-        for role in group.get("realmRoles", [])
+        role for group in realm.get("groups", []) for role in group.get("realmRoles", [])
     }
     default_user_roles = {
-        role
-        for user in realm.get("users", [])
-        for role in user.get("realmRoles", [])
+        role for user in realm.get("users", []) for role in user.get("realmRoles", [])
     }
     assert set(PRIMARY_STAFF_ROLES).isdisjoint(default_group_roles)
     assert set(PRIMARY_STAFF_ROLES).isdisjoint(default_user_roles)
