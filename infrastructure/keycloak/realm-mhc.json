@@ -224,6 +224,32 @@
             "access.token.claim": "true",
             "id.token.claim": "true"
           }
+        },
+        {
+          "name": "office",
+          "protocol": "openid-connect",
+          "protocolMapper": "oidc-usermodel-attribute-mapper",
+          "config": {
+            "user.attribute": "office",
+            "claim.name": "office",
+            "jsonType.label": "String",
+            "id.token.claim": "true",
+            "access.token.claim": "true",
+            "userinfo.token.claim": "true"
+          }
+        },
+        {
+          "name": "station",
+          "protocol": "openid-connect",
+          "protocolMapper": "oidc-usermodel-attribute-mapper",
+          "config": {
+            "user.attribute": "station",
+            "claim.name": "station",
+            "jsonType.label": "String",
+            "id.token.claim": "true",
+            "access.token.claim": "true",
+            "userinfo.token.claim": "true"
+          }
         }
       ]
     },
@@ -252,32 +278,6 @@
       "protocol": "openid-connect",
       "protocolMapper": "oidc-usermodel-realm-role-mapper",
       "config": {
-        "id.token.claim": "true",
-        "access.token.claim": "true",
-        "userinfo.token.claim": "true"
-      }
-    },
-    {
-      "name": "office",
-      "protocol": "openid-connect",
-      "protocolMapper": "oidc-usermodel-attribute-mapper",
-      "config": {
-        "user.attribute": "office",
-        "claim.name": "office",
-        "jsonType.label": "String",
-        "id.token.claim": "true",
-        "access.token.claim": "true",
-        "userinfo.token.claim": "true"
-      }
-    },
-    {
-      "name": "station",
-      "protocol": "openid-connect",
-      "protocolMapper": "oidc-usermodel-attribute-mapper",
-      "config": {
-        "user.attribute": "station",
-        "claim.name": "station",
-        "jsonType.label": "String",
         "id.token.claim": "true",
         "access.token.claim": "true",
         "userinfo.token.claim": "true"

@@ -17,14 +17,36 @@ def test_realm_export_is_readable():
 
 
 def test_office_and_station_attribute_mappers_exist():
-    mappers = {m["name"]: m for m in _realm()["protocolMappers"]}
+    """Keycloak ignores the realm export's top-level ``protocolMappers`` array on
+
+    import — a mapper only takes effect on tokens when it lives inside a client
+    scope that a client actually carries. ``mhc-frontend`` defaults to the
+    ``profile`` scope, so that's where these mappers must live.
+    """
+    realm = _realm()
+    top_level_names = {m["name"] for m in realm["protocolMappers"]}
+    for name in ("office", "station"):
+        assert name not in top_level_names, (
+            f"'{name}' is declared in the realm's top-level protocolMappers array, "
+            "which Keycloak ignores on import — it must live in a client scope "
+            "instead (see the 'profile' client scope)"
+        )
+
+    profile_scope = next(s for s in realm["clientScopes"] if s["name"] == "profile")
+    mappers = {m["name"]: m for m in profile_scope["protocolMappers"]}
     for name, attribute in (("office", "office"), ("station", "station")):
-        assert name in mappers, f"missing protocol mapper: {name}"
+        assert name in mappers, f"missing protocol mapper in 'profile' client scope: {name}"
         mapper = mappers[name]
         assert mapper["protocolMapper"] == "oidc-usermodel-attribute-mapper"
         assert mapper["config"]["user.attribute"] == attribute
         assert mapper["config"]["claim.name"] == attribute
         assert mapper["config"]["access.token.claim"] == "true"
+
+    frontend_client = next(c for c in realm["clients"] if c["clientId"] == "mhc-frontend")
+    assert "profile" in frontend_client["defaultClientScopes"], (
+        "'profile' must stay a default client scope of mhc-frontend for the "
+        "office/station mappers to reach a real token"
+    )
 
 
 def test_service_desk_group_and_realm_role_exist():
