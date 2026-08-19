@@ -4,6 +4,7 @@ Django settings for the MHC e-Ticketing backend.
 Modules are read from environment variables via django-environ. The split
 between base / dev / prod mirrors the deployment profile described in the PRD.
 """
+
 from __future__ import annotations
 
 from pathlib import Path
@@ -133,13 +134,18 @@ KEYCLOAK = {
     "BASE_URL": env("KEYCLOAK_BASE_URL", default="http://keycloak:8080"),
     "PUBLIC_URL": env("KEYCLOAK_PUBLIC_URL", default="http://localhost:8080"),
     "REALM": env("KEYCLOAK_REALM", default="mhc"),
+    "ISSUER": env(
+        "KEYCLOAK_ISSUER",
+        default=f"{env('KEYCLOAK_PUBLIC_URL', default='http://localhost:8080').rstrip('/')}"
+        f"/realms/{env('KEYCLOAK_REALM', default='mhc')}",
+    ),
     "CLIENT_ID": env("KEYCLOAK_CLIENT_ID", default="mhc-frontend"),
     "CLIENT_SECRET": env("KEYCLOAK_CLIENT_SECRET", default=""),
     "AUDIENCE": env("KEYCLOAK_CLIENT_ID_BACKEND", default="mhc-backend"),
     "VERIFICATION_KEYS_URL": env(
         "KEYCLOAK_VERIFICATION_KEYS_URL",
         default=f"{env('KEYCLOAK_BASE_URL', default='http://keycloak:8080')}"
-                f"/realms/{env('KEYCLOAK_REALM', default='mhc')}/protocol/openid-connect/certs",
+        f"/realms/{env('KEYCLOAK_REALM', default='mhc')}/protocol/openid-connect/certs",
     ),
 }
 
@@ -248,8 +254,10 @@ CSRF_COOKIE_SAMESITE = "Lax"
 # for the local admin and any test users)
 AUTH_PASSWORD_VALIDATORS = [
     {"NAME": "django.contrib.auth.password_validation.UserAttributeSimilarityValidator"},
-    {"NAME": "django.contrib.auth.password_validation.MinimumLengthValidator",
-     "OPTIONS": {"min_length": 12}},
+    {
+        "NAME": "django.contrib.auth.password_validation.MinimumLengthValidator",
+        "OPTIONS": {"min_length": 12},
+    },
     {"NAME": "django.contrib.auth.password_validation.CommonPasswordValidator"},
     {"NAME": "django.contrib.auth.password_validation.NumericPasswordValidator"},
 ]
@@ -323,9 +331,7 @@ OTEL_EXPORTER_OTLP_ENDPOINT = env("OTEL_EXPORTER_OTLP_ENDPOINT", default="")
 # -----------------------------------------------------------------------------
 APP_CONFIG = {
     "BUSINESS_TIMEZONE": "Africa/Mbabane",
-    "TICKET_REFERENCE_PREFIX_OPERATIONAL": env(
-        "TICKET_REFERENCE_PREFIX_OPERATIONAL", default="O"
-    ),
+    "TICKET_REFERENCE_PREFIX_OPERATIONAL": env("TICKET_REFERENCE_PREFIX_OPERATIONAL", default="O"),
     "TICKET_REFERENCE_PREFIX_IT": env("TICKET_REFERENCE_PREFIX_IT", default="I"),
     "SLA_EVALUATION_INTERVAL_SECONDS": 60,
     "ATTACHMENT_QUARANTINE_PATH": "quarantine/",
