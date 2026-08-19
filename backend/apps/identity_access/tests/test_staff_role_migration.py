@@ -59,9 +59,7 @@ def test_internal_staff_role_migration_adds_missing_roles_and_preserves_configur
 
         assert set(roles) == set(expected_descriptions)
         assert roles["master"].name == "Configured Master"
-        assert roles["master"].scopes == [
-            {"domain": "operational", "office": "configured-office"}
-        ]
+        assert roles["master"].scopes == [{"domain": "operational", "office": "configured-office"}]
         assert {
             role_key: role.description for role_key, role in roles.items()
         } == expected_descriptions
@@ -71,4 +69,5 @@ def test_internal_staff_role_migration_adds_missing_roles_and_preserves_configur
             if role_key != "master"
         )
     finally:
-        MigrationExecutor(connection).migrate(after)
+        executor = MigrationExecutor(connection)
+        executor.migrate(executor.loader.graph.leaf_nodes("identity_access"))
