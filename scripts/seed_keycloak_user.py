@@ -7,7 +7,7 @@ account (admin / KEYCLOAK_ADMIN_PASSWORD) to mint an admin token, then talks
 to the Keycloak Admin REST API.
 
 Usage:
-    python scripts/seed_keycloak_user.py [--username alice] [--password p@ssw0rd] [--group ops-agents]
+    python scripts/seed_keycloak_user.py [--username alice] [--password p@ssw0rd] [--group ops-agents] [--office MBB] [--station Counter-1]
 """
 from __future__ import annotations
 
@@ -68,7 +68,14 @@ def find_user(token: str, username: str) -> dict | None:
     return None
 
 
-def create_user(token: str, username: str, first: str, last: str, email: str) -> dict:
+def create_user(
+    token: str,
+    username: str,
+    first: str,
+    last: str,
+    email: str,
+    attributes: dict | None = None,
+) -> dict:
     payload = {
         "username": username,
         "enabled": True,
@@ -77,6 +84,8 @@ def create_user(token: str, username: str, first: str, last: str, email: str) ->
         "email": email,
         "emailVerified": True,
     }
+    if attributes:
+        payload["attributes"] = attributes
     code, body = _http("POST", f"{KEYCLOAK_BASE}/admin/realms/{REALM}/users", token, payload)
     if code not in (201, 204):
         raise RuntimeError(f"create user failed: HTTP {code} {body}")
@@ -91,6 +100,24 @@ def set_password(token: str, user_id: str, password: str) -> None:
     code, body = _http("PUT", f"{KEYCLOAK_BASE}/admin/realms/{REALM}/users/{user_id}/reset-password", token, payload)
     if code not in (204,):
         raise RuntimeError(f"set password failed: HTTP {code} {body}")
+
+
+def update_user_attributes(token: str, user: dict, attributes: dict) -> None:
+    """Merge attributes into an existing user and PUT the representation back."""
+    if not attributes:
+        return
+    payload = dict(user)
+    merged = dict(payload.get("attributes") or {})
+    merged.update(attributes)
+    payload["attributes"] = merged
+    code, body = _http(
+        "PUT",
+        f"{KEYCLOAK_BASE}/admin/realms/{REALM}/users/{user['id']}",
+        token,
+        payload,
+    )
+    if code not in (204,):
+        raise RuntimeError(f"update user attributes failed: HTTP {code} {body}")
 
 
 def find_group(token: str, group_path: str) -> dict | None:
@@ -122,6 +149,8 @@ def main() -> int:
     ap.add_argument("--email", default="alice@mhc.local")
     ap.add_argument("--group", default="ops-agents",
                     help="Realm group path, e.g. ops-agents, it-agents, system-admins")
+    ap.add_argument("--office", default="", help="Office code, e.g. MBB")
+    ap.add_argument("--station", default="", help="Station name within the office")
     ap.add_argument("--admin-user", default=os.environ.get("KEYCLOAK_ADMIN", "admin"))
     ap.add_argument("--admin-password", default=os.environ.get("KEYCLOAK_ADMIN_PASSWORD", "p@ssw0rd"))
     args = ap.parse_args()
@@ -132,12 +161,21 @@ def main() -> int:
     token = get_admin_token(args.admin_user, args.admin_password)
     print(f"   master admin token: ok")
 
+    attributes: dict[str, list[str]] = {}
+    if args.office:
+        attributes["office"] = [args.office]
+    if args.station:
+        attributes["station"] = [args.station]
+
     existing = find_user(token, args.username)
     if existing:
         user = existing
-        print(f"   user exists: id={user['id']} — updating password & group")
+        print(f"   user exists: id={user['id']} — updating password, group & attributes")
+        update_user_attributes(token, user, attributes)
     else:
-        user = create_user(token, args.username, args.first, args.last, args.email)
+        user = create_user(
+            token, args.username, args.first, args.last, args.email, attributes
+        )
         print(f"   user created: id={user['id']}")
 
     set_password(token, user["id"], args.password)
