@@ -151,3 +151,27 @@ def test_three_segment_dev_token_still_authenticates(basic_world, client, settin
     )
     assert response.status_code == 200
     assert User.objects.get(username="legacyofficer").office is None
+
+
+def test_admin_shows_office_and_station_read_only():
+    from django.contrib import admin as django_admin
+
+    from apps.identity_access.admin import AuthorityUserAdmin
+
+    model_admin = AuthorityUserAdmin(User, django_admin.site)
+    assert "office" in model_admin.readonly_fields
+    assert "station" in model_admin.readonly_fields
+
+
+def test_authority_lock_preloads_the_office(basic_world):
+    from django.db import connection, transaction
+    from django.test.utils import CaptureQueriesContext
+
+    from apps.identity_access.authority_lock import lock_user_authorities
+
+    user = _user(office=basic_world["office"])
+    with transaction.atomic():
+        locked = lock_user_authorities((user.id,))[user.id].user
+        with CaptureQueriesContext(connection) as captured:
+            assert locked.office.is_active is True
+        assert captured.captured_queries == []

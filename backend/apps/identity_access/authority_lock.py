@@ -41,7 +41,10 @@ def lock_user_authorities(
         return {}
 
     users = list(
-        User.objects.select_for_update(of=("self",)).filter(pk__in=ordered_ids).order_by("id")
+        User.objects.select_for_update(of=("self",))
+        .select_related("office")
+        .filter(pk__in=ordered_ids)
+        .order_by("id")
     )
     assignments = list(
         UserRole.objects.select_for_update(of=("self",))

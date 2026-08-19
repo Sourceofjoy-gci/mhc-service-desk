@@ -23,6 +23,10 @@ def _lock_users(user_ids: Iterable[UUID]) -> None:
 class AuthorityUserAdmin(admin.ModelAdmin):  # type: ignore[type-arg]
     """Identity accounts are deactivated; hard deletion is intentionally disabled."""
 
+    # Keycloak is the single writer for these. A local edit would be silently
+    # overwritten by ``_synchronize_office`` on the officer's next request.
+    readonly_fields = ("office", "station")
+
     def save_model(
         self,
         request: HttpRequest,
