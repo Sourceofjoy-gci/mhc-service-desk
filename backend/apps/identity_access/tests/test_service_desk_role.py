@@ -71,3 +71,44 @@ def test_service_desk_group_is_accepted_by_the_authenticator():
 
     assert "service-desk-agents" in _KEYCLOAK_GROUPS
     assert "agent-servicedesk" in _KEYCLOAK_REALM_ROLES
+
+
+def test_service_desk_is_a_cross_office_identity():
+    from apps.identity_access.scope import get_authority_snapshot
+
+    snapshot = get_authority_snapshot(_desk_user("service-desk-agents"))
+    assert snapshot.cross_office_identity is True
+
+
+def test_auditor_is_a_cross_office_identity():
+    from apps.identity_access.scope import get_authority_snapshot
+
+    snapshot = get_authority_snapshot(_desk_user("auditors"))
+    assert snapshot.cross_office_identity is True
+
+
+def test_operational_agent_is_not_a_cross_office_identity():
+    from apps.identity_access.scope import get_authority_snapshot
+
+    snapshot = get_authority_snapshot(_desk_user("ops-agents"))
+    assert snapshot.cross_office_identity is False
+
+
+def test_system_admin_is_not_a_cross_office_identity():
+    """Admin authority is protected per-scope, not by exempting the identity."""
+    from apps.identity_access.scope import get_authority_snapshot
+
+    snapshot = get_authority_snapshot(_desk_user("system-admins"))
+    assert snapshot.cross_office_identity is False
+
+
+def test_cross_office_flag_holds_on_the_persisted_path(basic_world):
+    from apps.identity_access.models import Role, UserRole
+    from apps.identity_access.scope import get_authority_snapshot
+
+    user = _desk_user("ops-agents")
+    role = Role.objects.create(keycloak_role="service-desk-agents", name="Service Desk")
+    UserRole.objects.create(user=user, role=role)
+    snapshot = get_authority_snapshot(user)
+    assert snapshot.uses_persisted_roles is True
+    assert snapshot.cross_office_identity is True

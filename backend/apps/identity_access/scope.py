@@ -48,6 +48,7 @@ _AUDITOR_ROLES = {"auditor", "auditors"}
 # The national service desk answers queries before the responsible office is
 # known, so it is never bound to one office.
 _SERVICE_DESK_ROLES = frozenset({"service-desk-agents", "agent-servicedesk"})
+_CROSS_OFFICE_ROLES = _AUDITOR_ROLES | _SERVICE_DESK_ROLES
 _RESTRICTED_VIEW_ROLES = {
     "supervisor-operational",
     "ops-supervisors",
@@ -158,6 +159,7 @@ class AuthoritySnapshot:
     group_role_keys: frozenset[str] = frozenset()
     uses_persisted_roles: bool = False
     auditor_identity: bool = False
+    cross_office_identity: bool = False
 
 
 def has_scope(user: object, required: Scope) -> bool:
@@ -348,6 +350,9 @@ def _snapshot_from_persisted(
     auditor_identity = any(
         assignment.role.keycloak_role in _AUDITOR_ROLES for assignment in assignments
     )
+    cross_office_identity = any(
+        assignment.role.keycloak_role in _CROSS_OFFICE_ROLES for assignment in assignments
+    )
 
     for assignment in assignments:
         assignment_scopes = _validated_role_scopes(assignment)
@@ -370,6 +375,7 @@ def _snapshot_from_persisted(
         role_grants=grants,
         uses_persisted_roles=True,
         auditor_identity=auditor_identity,
+        cross_office_identity=cross_office_identity,
     )
 
 
@@ -457,6 +463,7 @@ def _snapshot_from_groups(user: object) -> AuthoritySnapshot:
         restricted_scope_keys=frozenset(restricted_scope_keys),
         group_role_keys=frozenset(groups),
         auditor_identity=bool(_AUDITOR_ROLES & groups),
+        cross_office_identity=bool(_CROSS_OFFICE_ROLES & groups),
     )
 
 
@@ -482,6 +489,7 @@ def _build_authority_snapshot(user: object) -> AuthoritySnapshot:
         group_role_keys=resolved.group_role_keys,
         uses_persisted_roles=resolved.uses_persisted_roles,
         auditor_identity=resolved.auditor_identity,
+        cross_office_identity=resolved.cross_office_identity,
     )
 
 
