@@ -52,10 +52,7 @@ def _mbabane_calendar(*, holidays: list[str] | None = None) -> BusinessCalendar:
     return BusinessCalendar.objects.create(
         name=f"Mbabane correctness {BusinessCalendar.objects.count()}",
         timezone="Africa/Mbabane",
-        weekday_hours={
-            str(day): [{"start": "08:00", "end": "17:00"}]
-            for day in range(1, 6)
-        },
+        weekday_hours={str(day): [{"start": "08:00", "end": "17:00"}] for day in range(1, 6)},
         holidays=holidays or [],
     )
 
@@ -64,18 +61,14 @@ def test_add_business_seconds_uses_calendar_local_timezone() -> None:
     calendar = _mbabane_calendar()
     start = datetime(2026, 7, 27, 6, 0, tzinfo=UTC)  # 08:00 in Mbabane
 
-    assert add_business_seconds(start, 3600, calendar) == datetime(
-        2026, 7, 27, 7, 0, tzinfo=UTC
-    )
+    assert add_business_seconds(start, 3600, calendar) == datetime(2026, 7, 27, 7, 0, tzinfo=UTC)
 
 
 def test_add_business_seconds_applies_holiday_to_calendar_local_date() -> None:
     calendar = _mbabane_calendar(holidays=["2026-07-28"])
     start = datetime(2026, 7, 27, 14, 30, tzinfo=UTC)  # 16:30 local
 
-    assert add_business_seconds(start, 3600, calendar) == datetime(
-        2026, 7, 29, 6, 30, tzinfo=UTC
-    )
+    assert add_business_seconds(start, 3600, calendar) == datetime(2026, 7, 29, 6, 30, tzinfo=UTC)
 
 
 def test_business_seconds_between_uses_calendar_local_slots() -> None:
@@ -426,9 +419,7 @@ def test_data_migration_backfills_history_and_fails_closed_without_it(
         state=SlaInstance.State.PAUSED_INTERNAL,
     )
 
-    migration = import_module(
-        "apps.sla.migrations.0004_backfill_paused_remaining_business_seconds"
-    )
+    migration = import_module("apps.sla.migrations.0004_backfill_paused_remaining_business_seconds")
     migration.backfill_paused_remaining_business_seconds(django_apps, None)
 
     with_history.refresh_from_db()
@@ -710,6 +701,7 @@ class TestSlaTransitionLockOrder(TransactionTestCase):
             username="lock-agent",
             keycloak_subject="lock-agent-subject",
             keycloak_groups=["ops-agents"],
+            office=office,
         )
         self.actor._groups = ["ops-agents"]
         assistant_master, _ = Role.objects.get_or_create(

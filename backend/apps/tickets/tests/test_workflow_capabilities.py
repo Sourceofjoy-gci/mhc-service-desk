@@ -186,10 +186,13 @@ def test_deputy_master_parity_preserves_scope_and_auditor_boundaries(
 
 
 def _user(groups: list[str]) -> User:
+    # Operational and IT authority is confined to the officer's office, so
+    # every staff actor is based at the seeded ``basic_world`` office.
     user = User.objects.create(
         username=f"agent-{uuid4().hex}",
         keycloak_subject=f"subject-{uuid4().hex}",
         keycloak_groups=groups,
+        office=Office.objects.get(code="TST-1"),
     )
     user._groups = groups
     return user
@@ -629,10 +632,7 @@ def test_cached_snapshot_freezes_supervisor_workflow_alias(
     transition.save(update_fields=["required_role"])
 
     expected_cached = mutation == "delete"
-    assert (
-        available_transitions(ticket, actor, request=request).exists()
-        is expected_cached
-    )
+    assert available_transitions(ticket, actor, request=request).exists() is expected_cached
     assert available_transitions(ticket, actor).exists() is (not expected_cached)
 
 
@@ -912,9 +912,7 @@ def test_old_operator_snapshot_cannot_bypass_fresh_auditor_deny(
     elif auditor_source == "django-group":
         actor.groups.add(Group.objects.create(name="auditors"))
     elif auditor_source == "keycloak-group":
-        User.objects.filter(pk=actor.pk).update(
-            keycloak_groups=["ops-agents", "auditors"]
-        )
+        User.objects.filter(pk=actor.pk).update(keycloak_groups=["ops-agents", "auditors"])
     else:
         actor._groups = ["ops-agents", "auditors"]
 

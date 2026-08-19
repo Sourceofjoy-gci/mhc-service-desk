@@ -1,4 +1,5 @@
 """Regression tests for ticket mutation and API integrity boundaries."""
+
 from __future__ import annotations
 
 import ast
@@ -26,11 +27,14 @@ pytestmark = pytest.mark.django_db
 
 
 def _user(groups: list[str], *, active: bool = True) -> User:
+    # Operational and IT authority is confined to the officer's office, so
+    # every staff actor is based at the seeded ``basic_world`` office.
     user = User.objects.create(
         username=f"integrity-{uuid4().hex}",
         keycloak_subject=f"integrity-subject-{uuid4().hex}",
         keycloak_groups=groups,
         is_active=active,
+        office=Office.objects.get(code="TST-1"),
     )
     user._groups = groups
     return user
@@ -62,9 +66,7 @@ def _client(user: User) -> APIClient:
     return client
 
 
-_PROTECTED_ALLOCATION_NAMES = frozenset(
-    {"assignee", "assignee_id", "queue", "queue_id"}
-)
+_PROTECTED_ALLOCATION_NAMES = frozenset({"assignee", "assignee_id", "queue", "queue_id"})
 
 
 def _enclosing_function_name(
@@ -115,11 +117,7 @@ def _allocation_write_violations(
         source if source is not None else module_path.read_text(encoding="utf-8"),
         filename=str(module_path),
     )
-    parents = {
-        child: parent
-        for parent in ast.walk(tree)
-        for child in ast.iter_child_nodes(parent)
-    }
+    parents = {child: parent for parent in ast.walk(tree) for child in ast.iter_child_nodes(parent)}
     violations: list[str] = []
     reviewed_writes = 0
 
@@ -138,8 +136,7 @@ def _allocation_write_violations(
         for target in targets:
             for nested in ast.walk(target):
                 if not (
-                    isinstance(nested, ast.Attribute)
-                    and nested.attr in _PROTECTED_ALLOCATION_NAMES
+                    isinstance(nested, ast.Attribute) and nested.attr in _PROTECTED_ALLOCATION_NAMES
                 ):
                     continue
                 function_name = _enclosing_function_name(node, parents)
@@ -176,8 +173,7 @@ def _allocation_write_violations(
                 names = {
                     element.value
                     for element in update_fields.elts
-                    if isinstance(element, ast.Constant)
-                    and isinstance(element.value, str)
+                    if isinstance(element, ast.Constant) and isinstance(element.value, str)
                 }
                 for protected in sorted(names & _PROTECTED_ALLOCATION_NAMES):
                     record(node, f"save({protected})")
@@ -343,9 +339,7 @@ def test_empty_work_state_patch_returns_unchanged_representation(basic_world) ->
 
 def test_supported_ticket_boundaries_have_no_direct_post_creation_allocation_writes() -> None:
     """A direct owner/queue mutation would bypass eligibility and custody."""
-    assert services.WORK_STATE_FIELDS.isdisjoint(
-        {"assignee", "assignee_id", "queue", "queue_id"}
-    )
+    assert services.WORK_STATE_FIELDS.isdisjoint({"assignee", "assignee_id", "queue", "queue_id"})
     apps_root = Path(__file__).resolve().parents[2]
     module_paths = (
         apps_root / "tickets" / "services.py",
@@ -453,6 +447,7 @@ def test_content_mutation_revalidates_scope_after_pre_read(
         )
 
     if content_kind == "message":
+
         def mutate() -> object:
             return services.add_message(
                 ticket=ticket,
@@ -462,6 +457,7 @@ def test_content_mutation_revalidates_scope_after_pre_read(
                 body_text="Must not cross canonical scope",
             )
     else:
+
         def mutate() -> object:
             return services.add_internal_note(
                 ticket=ticket,
@@ -589,11 +585,14 @@ def test_scoped_actor_can_add_ticket_content_through_api(
     assert response.status_code == 201
     assert model.objects.filter(ticket=ticket).count() == 1
     audit = AuditEvent.objects.get(object_id=str(ticket.id), action=event_type)
-    assert OutboxEvent.objects.filter(
-        aggregate_id=str(ticket.id),
-        event_type=event_type,
-        payload=audit.payload,
-    ).count() == 1
+    assert (
+        OutboxEvent.objects.filter(
+            aggregate_id=str(ticket.id),
+            event_type=event_type,
+            payload=audit.payload,
+        ).count()
+        == 1
+    )
 
 
 @pytest.mark.parametrize(

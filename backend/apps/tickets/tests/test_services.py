@@ -3,6 +3,7 @@
 Exercises ticket numbering, creation, and the workflow transition rules
 (FR-038, FR-040, FR-041, FR-022).
 """
+
 from __future__ import annotations
 
 import pytest
@@ -20,10 +21,13 @@ pytestmark = pytest.mark.django_db
 
 
 def _actor(*groups: str) -> User:
+    # Operational and IT authority is confined to the officer's office, so
+    # every staff actor is based at the seeded ``basic_world`` office.
     user = User.objects.create(
         username=f"actor-{User.objects.count()}",
         keycloak_subject=f"actor-subject-{User.objects.count()}",
         keycloak_groups=list(groups),
+        office=Office.objects.get(code="TST-1"),
     )
     user._groups = list(groups)
     return user
@@ -50,10 +54,13 @@ def test_workflow_test_seed_is_idempotent(db):
     seed_workflow_for_tests()
 
     assert Status.objects.filter(domain="operational", code="escalated").count() == 1
-    assert Transition.objects.filter(
-        domain="operational",
-        to_status__code="escalated",
-    ).count() == 3
+    assert (
+        Transition.objects.filter(
+            domain="operational",
+            to_status__code="escalated",
+        ).count()
+        == 3
+    )
 
 
 def test_ticket_numbering_is_per_domain_and_sequential(basic_world):
@@ -233,7 +240,8 @@ def test_resolution_required_for_resolved_transition(basic_world):
         actor=actor,
         expected_updated_at=ticket.updated_at,
         to_status_code="resolved",
-        resolution_code="INFO_PROVIDED", resolution_summary="Called the requester with the answer.",
+        resolution_code="INFO_PROVIDED",
+        resolution_summary="Called the requester with the answer.",
     )
     assert ticket.status.code == "resolved"
     assert ticket.resolution_code == "INFO_PROVIDED"
@@ -274,9 +282,10 @@ def test_stale_transition_changes_nothing_and_records_nothing(basic_world):
     ticket.refresh_from_db()
     assert ticket.status.code == "new"
     assert ticket.transition_history.count() == history_count
-    assert AuditEvent.objects.filter(
-        object_id=str(ticket.id), action="ticket.transitioned"
-    ).count() == event_count
+    assert (
+        AuditEvent.objects.filter(object_id=str(ticket.id), action="ticket.transitioned").count()
+        == event_count
+    )
     assert not OutboxEvent.objects.filter(
         aggregate_id=str(ticket.id), event_type="ticket.transitioned"
     ).exists()
@@ -374,12 +383,16 @@ def test_resolve_reopen_and_close_record_lifecycle_and_canonical_events(basic_wo
     assert ticket.resolved_at is not None
     assert ticket.closed_at is None
     assert ticket.transition_history.count() == before_history + 1
-    assert AuditEvent.objects.filter(
-        object_id=str(ticket.id), action="ticket.transitioned"
-    ).count() == before_audits + 1
-    assert OutboxEvent.objects.filter(
-        aggregate_id=str(ticket.id), event_type="ticket.transitioned"
-    ).count() == before_outbox + 1
+    assert (
+        AuditEvent.objects.filter(object_id=str(ticket.id), action="ticket.transitioned").count()
+        == before_audits + 1
+    )
+    assert (
+        OutboxEvent.objects.filter(
+            aggregate_id=str(ticket.id), event_type="ticket.transitioned"
+        ).count()
+        == before_outbox + 1
+    )
 
     reopened = Status.objects.create(
         domain="operational", code="reopened", name="Reopened", order=95
@@ -413,9 +426,7 @@ def test_resolve_reopen_and_close_record_lifecycle_and_canonical_events(basic_wo
     assert reopen_event.payload["after"]["resolution_code"] == ""
     assert reopen_event.payload["after"]["resolution_summary"] == ""
     assert reopen_event.payload["after"]["resolved_at"] is None
-    assert reopen_event.payload["metadata"] == {
-        "reason": "Requester supplied new information"
-    }
+    assert reopen_event.payload["metadata"] == {"reason": "Requester supplied new information"}
     assert_latest_transition_custody(ticket, actor, "reopened")
 
     Transition.objects.create(

@@ -17,7 +17,9 @@ from apps.identity_access.models import Role, User
 from apps.identity_access.staff_roles import STAFF_DESIGNATION_ROLE_KEYS
 from apps.organisations.models import Office, Region
 from apps.sla.seed_sla import seed_sla
+from apps.tickets.models import Ticket
 from apps.tickets.seed_workflow import seed_workflow
+from apps.workflow.models import Status
 
 
 @pytest.fixture
@@ -48,6 +50,32 @@ def basic_world(db):
         "it_inc": it_inc,
         "contact": contact,
     }
+
+
+@pytest.fixture
+def ticket_factory(basic_world):
+    """Create a minimal valid operational ticket."""
+    counter = {"n": 0}
+
+    def _make(*, office=None, confidentiality="normal", **kwargs):
+        counter["n"] += 1
+        service = basic_world["gen_info"]
+        return Ticket.objects.create(
+            number=f"OFC-{counter['n']:05d}",
+            domain="operational",
+            title=f"Ticket {counter['n']}",
+            status=Status.objects.get(domain="operational", code="new"),
+            priority="P3",
+            channel="web",
+            requester=basic_world["contact"],
+            service=service,
+            request_type=service.request_types.get(),
+            office=office if office is not None else basic_world["office"],
+            confidentiality=confidentiality,
+            **kwargs,
+        )
+
+    return _make
 
 
 @pytest.fixture

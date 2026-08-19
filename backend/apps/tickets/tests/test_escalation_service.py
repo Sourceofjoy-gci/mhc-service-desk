@@ -34,9 +34,7 @@ def _ticket(
     domain: str = Ticket.Domain.OPERATIONAL,
 ) -> Ticket:
     service = (
-        basic_world["gen_info"]
-        if domain == Ticket.Domain.OPERATIONAL
-        else basic_world["it_inc"]
+        basic_world["gen_info"] if domain == Ticket.Domain.OPERATIONAL else basic_world["it_inc"]
     )
     prefix = "OP" if domain == Ticket.Domain.OPERATIONAL else "IT"
     return Ticket.objects.create(
@@ -63,12 +61,15 @@ def _user(
     active: bool = True,
 ) -> User:
     suffix = uuid4().hex
+    # Operational and IT authority is confined to the officer's office, so
+    # every staff actor is based at the seeded ``basic_world`` office.
     return User.objects.create(
         username=f"escalation-{suffix}",
         keycloak_subject=f"escalation-subject-{suffix}",
         display_name=display_name,
         keycloak_groups=groups or [],
         is_active=active,
+        office=Office.objects.get(code="TST-1"),
     )
 
 
@@ -96,11 +97,7 @@ def _grant(
         user=user,
         role=role,
         office=resolved_office,
-        expires_at=(
-            timezone.now() - timedelta(seconds=1)
-            if expired
-            else None
-        ),
+        expires_at=(timezone.now() - timedelta(seconds=1) if expired else None),
     )
 
 
@@ -367,19 +364,15 @@ def test_combined_mutation_authority_lock_is_single_and_deterministic(
     )
 
     with transaction.atomic():
-        locked_actor, locked_authorities = (
-            services._lock_and_revalidate_mutation_authorities(
-                ticket=ticket,
-                actor=actor,
-                request=None,
-                initial_snapshot=initial_snapshot,
-                additional_user_ids={previous.id, supervisor.id},
-            )
+        locked_actor, locked_authorities = services._lock_and_revalidate_mutation_authorities(
+            ticket=ticket,
+            actor=actor,
+            request=None,
+            initial_snapshot=initial_snapshot,
+            additional_user_ids={previous.id, supervisor.id},
         )
 
-    expected_ids = tuple(
-        sorted({actor.id, previous.id, supervisor.id}, key=str)
-    )
+    expected_ids = tuple(sorted({actor.id, previous.id, supervisor.id}, key=str))
     assert lock_calls == [expected_ids]
     assert locked_actor.actor.id == actor.id
     assert set(locked_authorities) == set(expected_ids)
@@ -477,9 +470,7 @@ def test_it_escalation_preserves_owner_and_records_only_transition_evidence(
     assert updated.status.code == "escalated"
     assert updated.assignee_id == owner.id
     assert TransitionHistory.objects.filter(ticket=ticket).count() == 1
-    assert list(
-        updated.custody_events.values_list("event_type", flat=True)
-    ) == ["escalated"]
+    assert list(updated.custody_events.values_list("event_type", flat=True)) == ["escalated"]
     assert list(
         AuditEvent.objects.filter(object_id=str(ticket.id)).values_list(
             "action",
@@ -568,26 +559,31 @@ def test_escalation_assigns_supervisor_and_records_complete_evidence(
     assert TransitionHistory.objects.filter(ticket=ticket).count() == 1
     assert sla.state == SlaInstance.State.ACTIVE
     assert SlaPauseHistory.objects.filter(instance=sla).count() == 0
-    assert list(
-        updated.custody_events.values_list("event_type", flat=True)
-    ) == ["reassigned", "escalated"]
-    assert AuditEvent.objects.filter(
-        object_id=str(ticket.id),
-        action__in=["ticket.assignment.changed", "ticket.transitioned"],
-    ).count() == 2
-    assert OutboxEvent.objects.filter(
-        aggregate_id=str(ticket.id),
-        event_type__in=["ticket.assignment.changed", "ticket.transitioned"],
-    ).count() == 2
+    assert list(updated.custody_events.values_list("event_type", flat=True)) == [
+        "reassigned",
+        "escalated",
+    ]
+    assert (
+        AuditEvent.objects.filter(
+            object_id=str(ticket.id),
+            action__in=["ticket.assignment.changed", "ticket.transitioned"],
+        ).count()
+        == 2
+    )
+    assert (
+        OutboxEvent.objects.filter(
+            aggregate_id=str(ticket.id),
+            event_type__in=["ticket.assignment.changed", "ticket.transitioned"],
+        ).count()
+        == 2
+    )
     assignment_audit = AuditEvent.objects.get(
         object_id=str(ticket.id),
         action="ticket.assignment.changed",
     )
     assert assignment_audit.actor_subject == actor.keycloak_subject
     assert assignment_audit.payload["before"] == {"assignee": str(actor.id)}
-    assert assignment_audit.payload["after"] == {
-        "assignee": str(supervisor.id)
-    }
+    assert assignment_audit.payload["after"] == {"assignee": str(supervisor.id)}
     assert assignment_audit.payload["metadata"] == {
         "reason": "Requires delegated approval",
         "source_process": "ticket.escalation",
@@ -627,9 +623,7 @@ def test_escalation_to_existing_supervisor_records_only_transition_evidence(
     assert TransitionHistory.objects.filter(ticket=ticket).count() == 1
     assert sla.state == SlaInstance.State.ACTIVE
     assert SlaPauseHistory.objects.filter(instance=sla).count() == 0
-    assert list(
-        updated.custody_events.values_list("event_type", flat=True)
-    ) == ["escalated"]
+    assert list(updated.custody_events.values_list("event_type", flat=True)) == ["escalated"]
     assert AuditEvent.objects.filter(object_id=str(ticket.id)).count() == 1
     assert OutboxEvent.objects.filter(aggregate_id=str(ticket.id)).count() == 1
     transition_audit = AuditEvent.objects.get(

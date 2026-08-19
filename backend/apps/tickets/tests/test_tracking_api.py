@@ -17,6 +17,7 @@ def tracking_world(basic_world):
         username="tracking-agent",
         keycloak_subject="tracking-agent-subject",
         keycloak_groups=["ops-agents"],
+        office=basic_world["office"],
     )
     actor._groups = ["ops-agents"]
     ops_client = APIClient()
@@ -129,9 +130,7 @@ def test_tracking_rejects_non_ascii_digits(tracking_world):
 
 
 def test_ticket_detail_routes_accept_new_and_immutable_legacy_references():
-    assert reverse("tickets-detail", kwargs={"number": "O00001"}).endswith(
-        "/tickets/O00001/"
-    )
+    assert reverse("tickets-detail", kwargs={"number": "O00001"}).endswith("/tickets/O00001/")
     assert reverse(
         "tickets-detail",
         kwargs={"number": "OP-202608-000123"},

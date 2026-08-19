@@ -7,6 +7,7 @@ from django.utils.dateparse import parse_datetime
 
 from apps.audit.models import AuditEvent
 from apps.identity_access.models import Role, User, UserRole
+from apps.organisations.models import Office
 from apps.tickets.assignment import assign_ticket
 from apps.tickets.models import OutboxEvent, Ticket
 from apps.tickets.services import (
@@ -21,11 +22,14 @@ pytestmark = pytest.mark.django_db
 
 
 def _user(groups: list[str], *, active: bool = True) -> User:
+    # Operational and IT authority is confined to the officer's office, so
+    # every staff actor is based at the seeded ``basic_world`` office.
     user = User.objects.create(
         username=f"agent-{uuid4().hex}",
         keycloak_subject=f"subject-{uuid4().hex}",
         keycloak_groups=groups,
         is_active=active,
+        office=Office.objects.get(code="TST-1"),
     )
     user._groups = groups
     return user

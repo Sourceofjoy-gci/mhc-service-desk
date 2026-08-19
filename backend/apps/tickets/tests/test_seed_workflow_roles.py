@@ -37,9 +37,7 @@ def test_seed_workflow_applies_internal_staff_authority_gates_idempotently():
         )
     }
 
-    assert {
-        key: role for key, role in seeded.items() if role
-    } == PRIVILEGED_OPERATIONAL_TRANSITIONS
+    assert {key: role for key, role in seeded.items() if role} == PRIVILEGED_OPERATIONAL_TRANSITIONS
 
     escalation_moves = Transition.objects.filter(
         domain="operational",
@@ -59,6 +57,7 @@ def test_seeded_workflow_enforces_resolution_escalation_and_final_authority(
         user = User.objects.create(
             username=f"seeded-{role_key}",
             keycloak_subject=f"seeded-{role_key}-subject",
+            office=basic_world["office"],
         )
         role = Role.objects.create(
             keycloak_role=role_key,
@@ -98,9 +97,7 @@ def test_seeded_workflow_enforces_resolution_escalation_and_final_authority(
 
     escalated = ticket("escalated", 2)
     assert not available_transitions(escalated, assistant).exists()
-    assert available_transitions(escalated, deputy).filter(
-        to_status__code="in_progress"
-    ).exists()
+    assert available_transitions(escalated, deputy).filter(to_status__code="in_progress").exists()
 
     for sequence, status_code in enumerate(
         ("resolved", "cancelled", "rejected", "duplicate", "spam"),

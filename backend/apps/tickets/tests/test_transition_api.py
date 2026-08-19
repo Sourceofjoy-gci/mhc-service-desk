@@ -9,6 +9,7 @@ from rest_framework.test import APIClient
 
 from apps.audit.models import AuditEvent
 from apps.identity_access.models import Role, User, UserRole
+from apps.organisations.models import Office
 from apps.tickets.models import OutboxEvent, Ticket
 from apps.workflow.models import Status, Transition, TransitionHistory
 
@@ -18,10 +19,13 @@ CORRELATION_ID = "transition-test-correlation"
 
 
 def _user(groups: list[str]) -> User:
+    # Operational and IT authority is confined to the officer's office, so
+    # every staff actor is based at the seeded ``basic_world`` office.
     user = User.objects.create(
         username=f"agent-{uuid4().hex}",
         keycloak_subject=f"subject-{uuid4().hex}",
         keycloak_groups=groups,
+        office=Office.objects.get(code="TST-1"),
     )
     user._groups = groups
     return user
@@ -52,6 +56,7 @@ def _supervisor(
         keycloak_subject=f"supervisor-subject-{uuid4().hex}",
         display_name=role_key.replace("-", " ").title(),
         is_active=True,
+        office=basic_world["office"],
     )
     role = Role.objects.create(
         keycloak_role=role_key,
@@ -241,9 +246,7 @@ def test_escalation_transition_rejects_explicit_null_supervisor_at_serializer(
 
     assert response.status_code == 400
     assert response.data["code"] == "invalid_transition"
-    assert response.data["fields"] == {
-        "supervisor_id": ["This field may not be null."]
-    }
+    assert response.data["fields"] == {"supervisor_id": ["This field may not be null."]}
     ticket.refresh_from_db()
     assert ticket.status.code == "in_progress"
     assert ticket.assignee_id is None
@@ -275,9 +278,7 @@ def test_non_escalation_transition_rejects_explicit_null_supervisor_at_serialize
 
     assert response.status_code == 400
     assert response.data["code"] == "invalid_transition"
-    assert response.data["fields"] == {
-        "supervisor_id": ["This field may not be null."]
-    }
+    assert response.data["fields"] == {"supervisor_id": ["This field may not be null."]}
     ticket.refresh_from_db()
     assert ticket.status.code == "in_progress"
     assert ticket.assignee_id is None
@@ -359,12 +360,16 @@ def test_reason_requirement_and_success_return_refreshed_next_capabilities(basic
     ]
     assert "in_progress" in success.data["available_transition_codes"]
     assert TransitionHistory.objects.filter(ticket=ticket).count() == 1
-    assert AuditEvent.objects.filter(
-        object_id=str(ticket.id), action="ticket.transitioned"
-    ).count() == 1
-    assert OutboxEvent.objects.filter(
-        aggregate_id=str(ticket.id), event_type="ticket.transitioned"
-    ).count() == 1
+    assert (
+        AuditEvent.objects.filter(object_id=str(ticket.id), action="ticket.transitioned").count()
+        == 1
+    )
+    assert (
+        OutboxEvent.objects.filter(
+            aggregate_id=str(ticket.id), event_type="ticket.transitioned"
+        ).count()
+        == 1
+    )
 
 
 def test_escalation_requires_a_reason_and_records_the_responsible_actor(basic_world):
@@ -403,8 +408,6 @@ def test_escalation_requires_a_reason_and_records_the_responsible_actor(basic_wo
     assert event.actor_subject == actor.keycloak_subject
     assert event.occurred_at is not None
     assert event.reason == "SLA risk"
-    audit = AuditEvent.objects.get(
-        object_id=str(ticket.id), action="ticket.transitioned"
-    )
+    audit = AuditEvent.objects.get(object_id=str(ticket.id), action="ticket.transitioned")
     assert audit.actor_subject == actor.keycloak_subject
     assert audit.occurred_at is not None

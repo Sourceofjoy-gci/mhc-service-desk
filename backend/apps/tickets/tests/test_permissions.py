@@ -82,11 +82,14 @@ def test_internal_staff_assignment_authority_follows_role_hierarchy(
 
 
 def _user(*, groups: list[str], active: bool = True) -> User:
+    # Operational and IT authority is confined to the officer's office, so
+    # every staff actor is based at the seeded ``basic_world`` office.
     return User.objects.create(
         username=f"agent-{uuid4().hex}",
         keycloak_subject=f"subject-{uuid4().hex}",
         keycloak_groups=groups,
         is_active=active,
+        office=Office.objects.get(code="TST-1"),
     )
 
 
@@ -107,6 +110,7 @@ def _user(*, groups: list[str], active: bool = True) -> User:
     ],
 )
 def test_elevated_ticket_permissions(
+    basic_world,
     groups,
     can_reassign_expected,
     can_confidentiality_expected,
@@ -118,7 +122,7 @@ def test_elevated_ticket_permissions(
     assert can_change_confidentiality(user) is can_confidentiality_expected
 
 
-def test_user_groups_combines_durable_request_and_django_groups():
+def test_user_groups_combines_durable_request_and_django_groups(basic_world):
     user = _user(groups=["ops-agents"])
     user._groups = ["ops-supervisors"]
     django_group = Group.objects.create(name="system-admins")
@@ -868,11 +872,7 @@ def test_authority_role_requires_configured_and_assignment_offices_to_match(
         role=role,
         office=assignment_office,
     )
-    ticket_office = (
-        role_office
-        if ticket_office_source == "role"
-        else assignment_office
-    )
+    ticket_office = role_office if ticket_office_source == "role" else assignment_office
     ticket = Ticket.objects.create(
         number=f"{'OP' if domain == 'operational' else 'IT'}-202607-{uuid4().int % 1000000:06d}",
         domain=domain,

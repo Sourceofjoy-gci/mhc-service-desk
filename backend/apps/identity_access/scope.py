@@ -8,7 +8,7 @@ The frontend never grants access — it only renders what the backend approves.
 from __future__ import annotations
 
 from collections.abc import Callable, Iterable, Sequence
-from dataclasses import dataclass
+from dataclasses import dataclass, replace
 from datetime import datetime
 from typing import TYPE_CHECKING, Protocol, TypeGuard, TypeVar, runtime_checkable
 from uuid import UUID
@@ -49,6 +49,9 @@ _AUDITOR_ROLES = {"auditor", "auditors"}
 # known, so it is never bound to one office.
 _SERVICE_DESK_ROLES = frozenset({"service-desk-agents", "agent-servicedesk"})
 _CROSS_OFFICE_ROLES = _AUDITOR_ROLES | _SERVICE_DESK_ROLES
+# System administration is never office-bound: a Keycloak misconfiguration must
+# not be able to lock the platform's administrators out of their own instance.
+_OFFICE_BOUND_DOMAINS = frozenset({"operational", "it"})
 _RESTRICTED_VIEW_ROLES = {
     "supervisor-operational",
     "ops-supervisors",
@@ -467,6 +470,61 @@ def _snapshot_from_groups(user: object) -> AuthoritySnapshot:
     )
 
 
+def _office_boundary_id(user: object) -> str | None:
+    """Return the officer's active office id, or ``None`` if they have none."""
+    office = getattr(user, "office", None)
+    if office is None or not getattr(office, "is_active", False):
+        return None
+    return str(office.id)
+
+
+def _apply_office_boundary(
+    snapshot: AuthoritySnapshot,
+    user: object,
+) -> AuthoritySnapshot:
+    """Confine operational and IT authority to the officer's office.
+
+    ``admin`` scopes pass through untouched so a Keycloak misconfiguration can
+    never lock out system administration. Cross-office identities — the service
+    desk and auditors — are exempt entirely.
+
+    ``_scope_key`` includes ``office_id``, so every rewritten scope must have its
+    restricted-view key remapped in the same pass. Skipping that would silently
+    strip restricted-ticket visibility from every supervisor.
+    """
+    if snapshot.cross_office_identity:
+        return snapshot
+
+    boundary = _office_boundary_id(user)
+    scopes: list[Scope] = []
+    restricted_scope_keys: set[ScopeKey] = set()
+
+    for scope in snapshot.scopes:
+        was_restricted = _scope_key(scope) in snapshot.restricted_scope_keys
+
+        if scope.domain not in _OFFICE_BOUND_DOMAINS:
+            scopes.append(scope)
+            if was_restricted:
+                restricted_scope_keys.add(_scope_key(scope))
+            continue
+
+        if boundary is None:
+            continue
+        if scope.office_id is not None and scope.office_id != boundary:
+            continue
+
+        bound = replace(scope, office_id=boundary)
+        scopes.append(bound)
+        if was_restricted:
+            restricted_scope_keys.add(_scope_key(bound))
+
+    return replace(
+        snapshot,
+        scopes=tuple(_normalise_scopes(scopes)),
+        restricted_scope_keys=frozenset(restricted_scope_keys),
+    )
+
+
 def _build_authority_snapshot(user: object) -> AuthoritySnapshot:
     if not user or not _has_active_identity(user):
         return AuthoritySnapshot()
@@ -478,7 +536,7 @@ def _build_authority_snapshot(user: object) -> AuthoritySnapshot:
         resolved = _snapshot_from_groups(user)
 
     if not _is_superuser(user):
-        return resolved
+        return _apply_office_boundary(resolved, user)
 
     admin_scope = Scope(domain="admin")
     return AuthoritySnapshot(

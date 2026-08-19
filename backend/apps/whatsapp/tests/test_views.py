@@ -1,4 +1,5 @@
 """Authorization, authenticity and persistence tests for WhatsApp endpoints."""
+
 from __future__ import annotations
 
 import hashlib
@@ -17,6 +18,7 @@ from rest_framework.test import APIClient
 from apps.audit.models import AuditEvent
 from apps.contacts.models import Contact
 from apps.identity_access.models import User
+from apps.organisations.models import Office
 from apps.tickets.models import OutboxEvent, Ticket, TicketMessage
 from apps.whatsapp.models import WhatsappAccount, WhatsappMessage
 from apps.whatsapp.services import ProviderTemplateDiscoveryError
@@ -49,9 +51,7 @@ class StubProvider:
         business_id: str = "",
     ) -> list[dict[str, object]]:
         self.fetch_count += 1
-        self.fetched.append(
-            {"account_token": account_token, "business_id": business_id}
-        )
+        self.fetched.append({"account_token": account_token, "business_id": business_id})
         return self.templates
 
     def send_text(self, *, to: str, body: str) -> dict[str, str]:
@@ -69,10 +69,13 @@ class StubProvider:
 
 def _authenticated_client(username: str, groups: str) -> APIClient:
     group_list = groups.split(",") if groups else []
+    # Operational and IT authority is confined to the officer's office, so
+    # every staff actor is based at the seeded ``basic_world`` office.
     user = User.objects.create(
         username=username,
         keycloak_subject=f"test:{username}",
         keycloak_groups=group_list,
+        office=Office.objects.get(code="TST-1"),
     )
     user._groups = group_list
     client = APIClient()
@@ -87,9 +90,7 @@ def _ticket(
     consent: bool = True,
     opted_out: bool = False,
 ) -> Ticket:
-    service = (
-        basic_world["gen_info"] if domain == "operational" else basic_world["it_inc"]
-    )
+    service = basic_world["gen_info"] if domain == "operational" else basic_world["it_inc"]
     requester = Contact.objects.create(
         full_name=f"WhatsApp Requester {uuid4().hex}",
         phone_e164=f"+2687{uuid4().int % 10_000_000:07d}",
@@ -151,9 +152,7 @@ def _meta_raw(
                                     "from": "+26876000001",
                                     "id": message_id,
                                     "timestamp": str(
-                                        issued_at
-                                        if issued_at is not None
-                                        else int(time.time())
+                                        issued_at if issued_at is not None else int(time.time())
                                     ),
                                     "type": "text",
                                     "text": {"body": body},
@@ -198,9 +197,7 @@ def _meta_status_raw(
                                     "id": message_id,
                                     "status": delivery_status,
                                     "timestamp": str(
-                                        issued_at
-                                        if issued_at is not None
-                                        else int(time.time())
+                                        issued_at if issued_at is not None else int(time.time())
                                     ),
                                     "recipient_id": "+26876000001",
                                 }
@@ -443,9 +440,10 @@ def test_meta_webhook_processes_every_message_in_a_signed_batch(
     )
 
     assert response.status_code == 201
-    assert set(
-        WhatsappMessage.objects.values_list("external_message_id", flat=True)
-    ) == {"wamid.batch-one", "wamid.batch-two"}
+    assert set(WhatsappMessage.objects.values_list("external_message_id", flat=True)) == {
+        "wamid.batch-one",
+        "wamid.batch-two",
+    }
     assert TicketMessage.objects.filter(direction="inbound").count() == 2
 
 
@@ -517,14 +515,20 @@ def test_meta_delivery_status_is_account_bound_idempotent_and_audited(
     ticket_message.refresh_from_db()
     assert channel_message.delivery_status == "delivered"
     assert ticket_message.delivery_status == "delivered"
-    assert AuditEvent.objects.filter(
-        object_id=str(ticket.id),
-        action="ticket.message.delivery_updated",
-    ).count() == 1
-    assert OutboxEvent.objects.filter(
-        aggregate_id=str(ticket.id),
-        event_type="ticket.message.delivery_updated",
-    ).count() == 1
+    assert (
+        AuditEvent.objects.filter(
+            object_id=str(ticket.id),
+            action="ticket.message.delivery_updated",
+        ).count()
+        == 1
+    )
+    assert (
+        OutboxEvent.objects.filter(
+            aggregate_id=str(ticket.id),
+            event_type="ticket.message.delivery_updated",
+        ).count()
+        == 1
+    )
 
 
 @pytest.mark.django_db
@@ -572,10 +576,13 @@ def test_meta_statuses_use_rank_to_order_events_with_same_timestamp(
     ticket_message.refresh_from_db()
     assert channel_message.delivery_status == "read"
     assert ticket_message.delivery_status == "read"
-    assert AuditEvent.objects.filter(
-        object_id=str(ticket.id),
-        action="ticket.message.delivery_updated",
-    ).count() == 2
+    assert (
+        AuditEvent.objects.filter(
+            object_id=str(ticket.id),
+            action="ticket.message.delivery_updated",
+        ).count()
+        == 2
+    )
 
 
 @pytest.mark.django_db
@@ -614,14 +621,20 @@ def test_meta_newer_same_status_advances_watermark_without_duplicate_event(
     assert response.json()["results"][0]["status"] == "timestamp_advanced"
     channel_message.refresh_from_db()
     assert channel_message.raw_payload["status_timestamp"] == newer_timestamp
-    assert AuditEvent.objects.filter(
-        object_id=str(ticket.id),
-        action="ticket.message.delivery_updated",
-    ).count() == 0
-    assert OutboxEvent.objects.filter(
-        aggregate_id=str(ticket.id),
-        event_type="ticket.message.delivery_updated",
-    ).count() == 0
+    assert (
+        AuditEvent.objects.filter(
+            object_id=str(ticket.id),
+            action="ticket.message.delivery_updated",
+        ).count()
+        == 0
+    )
+    assert (
+        OutboxEvent.objects.filter(
+            aggregate_id=str(ticket.id),
+            event_type="ticket.message.delivery_updated",
+        ).count()
+        == 0
+    )
 
 
 @pytest.mark.django_db
@@ -667,10 +680,13 @@ def test_meta_status_never_regresses_or_accepts_an_older_higher_rank(
     channel_message.refresh_from_db()
     assert channel_message.delivery_status == "delivered"
     assert channel_message.raw_payload["status_timestamp"] == prior_timestamp
-    assert AuditEvent.objects.filter(
-        object_id=str(ticket.id),
-        action="ticket.message.delivery_updated",
-    ).count() == 0
+    assert (
+        AuditEvent.objects.filter(
+            object_id=str(ticket.id),
+            action="ticket.message.delivery_updated",
+        ).count()
+        == 0
+    )
 
 
 @pytest.mark.django_db
@@ -866,14 +882,20 @@ def test_authorized_template_send_persists_channel_and_canonical_events(
         "channel": "whatsapp",
         "provider_message_id": "wamid.template-test",
     }
-    assert OutboxEvent.objects.filter(
-        aggregate_id=str(ticket.id),
-        event_type="ticket.message.created",
-    ).count() == 1
-    assert OutboxEvent.objects.filter(
-        aggregate_id=str(ticket.id),
-        event_type="ticket.message.delivery_updated",
-    ).count() == 1
+    assert (
+        OutboxEvent.objects.filter(
+            aggregate_id=str(ticket.id),
+            event_type="ticket.message.created",
+        ).count()
+        == 1
+    )
+    assert (
+        OutboxEvent.objects.filter(
+            aggregate_id=str(ticket.id),
+            event_type="ticket.message.delivery_updated",
+        ).count()
+        == 1
+    )
 
 
 @pytest.mark.django_db
@@ -1023,9 +1045,7 @@ def test_template_discovery_outage_leaves_retryable_durable_attempt_without_send
     assert attempt.delivery_status == "pending"
     assert attempt.raw_payload["phase"] == "template_discovery_failed"
     assert attempt.raw_payload["retryable"] is True
-    assert attempt.raw_payload["error_code"] == (
-        "whatsapp_template_discovery_unavailable"
-    )
+    assert attempt.raw_payload["error_code"] == ("whatsapp_template_discovery_unavailable")
     assert provider.sent == []
     assert TicketMessage.objects.filter(ticket=ticket).count() == 0
     assert "provider timeout with sensitive detail" not in str(attempt.raw_payload)

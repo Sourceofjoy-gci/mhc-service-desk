@@ -1,4 +1,5 @@
 """Scoped attachment collection and download API tests."""
+
 from __future__ import annotations
 
 from uuid import uuid4
@@ -13,6 +14,7 @@ from apps.files import policy as file_policy
 from apps.files import services as file_services
 from apps.files.models import Attachment, AttachmentAccessLog
 from apps.identity_access.models import User
+from apps.organisations.models import Office
 from apps.tickets.models import OutboxEvent, Ticket
 from apps.workflow.models import Status
 
@@ -20,21 +22,22 @@ pytestmark = pytest.mark.django_db
 
 
 def _user(groups, *, active=True):
+    # Operational and IT authority is confined to the officer's office, so
+    # every staff actor is based at the seeded ``basic_world`` office.
     user = User.objects.create(
         username=f"user-{uuid4().hex}",
         keycloak_subject=f"subject-{uuid4().hex}",
         display_name="Attachment User",
         keycloak_groups=groups,
         is_active=active,
+        office=Office.objects.get(code="TST-1"),
     )
     user._groups = groups
     return user
 
 
 def _ticket(basic_world, *, domain="operational", confidentiality="normal"):
-    service = (
-        basic_world["gen_info"] if domain == "operational" else basic_world["it_inc"]
-    )
+    service = basic_world["gen_info"] if domain == "operational" else basic_world["it_inc"]
     return Ticket.objects.create(
         number=f"{domain[:2].upper()}-202607-{Ticket.objects.count() + 994001:06d}",
         domain=domain,
@@ -188,19 +191,13 @@ def test_attachment_post_rejects_disallowed_type_extension_pairs_before_storage(
 
     response = _client(_user(["ops-agents"])).post(
         reverse("ticket-attachments", args=[ticket.number]),
-        {
-            "files": [
-                SimpleUploadedFile(filename, b"payload", content_type=content_type)
-            ]
-        },
+        {"files": [SimpleUploadedFile(filename, b"payload", content_type=content_type)]},
         format="multipart",
     )
 
     assert response.status_code == 400
     assert response.data["code"] == "invalid_attachment"
-    assert response.data["fields"] == {
-        "files": ["File type and extension are not allowed."]
-    }
+    assert response.data["fields"] == {"files": ["File type and extension are not allowed."]}
     assert not Attachment.objects.filter(ticket=ticket).exists()
 
 
@@ -231,9 +228,7 @@ def test_attachment_post_rejects_a_file_over_twenty_mebibytes_before_storage(
 
     assert response.status_code == 400
     assert response.data["code"] == "invalid_attachment"
-    assert response.data["fields"] == {
-        "files": ["Each file must be 20 MiB or smaller."]
-    }
+    assert response.data["fields"] == {"files": ["Each file must be 20 MiB or smaller."]}
     assert not Attachment.objects.filter(ticket=ticket).exists()
 
 
@@ -285,9 +280,7 @@ def test_attachment_post_rejects_unbounded_file_count_before_scan(
     )
 
     assert response.status_code == 400
-    assert response.data["fields"] == {
-        "files": ["Upload at most 10 files at a time."]
-    }
+    assert response.data["fields"] == {"files": ["Upload at most 10 files at a time."]}
 
 
 def test_attachment_post_rejects_an_aggregate_batch_over_twenty_mebibytes(
@@ -312,9 +305,7 @@ def test_attachment_post_rejects_an_aggregate_batch_over_twenty_mebibytes(
     )
 
     assert response.status_code == 400
-    assert response.data["fields"] == {
-        "files": ["Combined files must be 20 MiB or smaller."]
-    }
+    assert response.data["fields"] == {"files": ["Combined files must be 20 MiB or smaller."]}
 
 
 def test_attachment_storage_key_excludes_the_user_supplied_filename(
@@ -327,6 +318,7 @@ def test_attachment_storage_key_excludes_the_user_supplied_filename(
         "apps.files.views.scan_with_clamav",
         lambda _data: ("clean", None),
     )
+
     def store_and_capture(*, key, **_kwargs):
         stored_keys.append(key)
         return file_services.StoredObject(

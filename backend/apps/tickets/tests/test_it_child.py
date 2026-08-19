@@ -1,4 +1,5 @@
 """Tests for the IT child-ticket sanitised pattern (PRD §11.4)."""
+
 from __future__ import annotations
 
 import pytest
@@ -7,6 +8,7 @@ from django.utils import timezone
 from apps.audit.models import AuditEvent
 from apps.catalogue.models import RequestType
 from apps.identity_access.models import User
+from apps.organisations.models import Office
 from apps.sla.models import SlaPauseHistory, SlaPolicy
 from apps.sla.services import instantiate_slas
 from apps.tickets import it_child, services
@@ -17,10 +19,13 @@ pytestmark = pytest.mark.django_db
 
 
 def _actor(subject: str = "tester") -> User:
+    # Operational and IT authority is confined to the officer's office, so
+    # every staff actor is based at the seeded ``basic_world`` office.
     actor = User.objects.create(
         username=f"it-child-{subject}",
         keycloak_subject=subject,
         keycloak_groups=["ops-agents"],
+        office=Office.objects.get(code="TST-1"),
     )
     actor._groups = ["ops-agents"]
     return actor
@@ -51,9 +56,14 @@ def world(basic_world, db):
 
 def test_create_it_child_records_link_and_parent_status(world):
     parent = services.create_ticket(
-        domain="operational", title="Email issue", description="",
-        requester=world["contact"], service=world["gen_info"], request_type=world["op_rt"],
-        office=world["office"], channel="email",
+        domain="operational",
+        title="Email issue",
+        description="",
+        requester=world["contact"],
+        service=world["gen_info"],
+        request_type=world["op_rt"],
+        office=world["office"],
+        channel="email",
     )
     child = it_child.create_it_child_ticket(
         parent=parent,
@@ -82,9 +92,15 @@ def test_create_it_child_records_link_and_parent_status(world):
 
 def test_child_copies_only_approved_fields(world):
     parent = services.create_ticket(
-        domain="operational", title="X", description="PRIVATE: not for IT",
-        requester=world["contact"], service=world["gen_info"], request_type=world["op_rt"],
-        office=world["office"], channel="email", matter_reference="EST-9999",
+        domain="operational",
+        title="X",
+        description="PRIVATE: not for IT",
+        requester=world["contact"],
+        service=world["gen_info"],
+        request_type=world["op_rt"],
+        office=world["office"],
+        channel="email",
+        matter_reference="EST-9999",
     )
     child = it_child.create_it_child_ticket(
         parent=parent,
@@ -100,9 +116,14 @@ def test_child_copies_only_approved_fields(world):
 
 def test_child_resolution_syncs_parent_to_in_progress(world):
     parent = services.create_ticket(
-        domain="operational", title="X", description="",
-        requester=world["contact"], service=world["gen_info"], request_type=world["op_rt"],
-        office=world["office"], channel="email",
+        domain="operational",
+        title="X",
+        description="",
+        requester=world["contact"],
+        service=world["gen_info"],
+        request_type=world["op_rt"],
+        office=world["office"],
+        channel="email",
     )
     child = it_child.create_it_child_ticket(
         parent=parent,
@@ -111,6 +132,7 @@ def test_child_resolution_syncs_parent_to_in_progress(world):
         actor=world["actor"],
     )
     from apps.workflow.models import Status
+
     target = Status.objects.get(domain="it", code="resolved")
     child.status = target
     child.resolution_code = "DONE"
@@ -135,9 +157,15 @@ def test_it_child_material_mutations_have_canonical_event_pairs(world):
     from apps.tickets.models import OutboxEvent
 
     parent = services.create_ticket(
-        domain="operational", title="X", description="private parent body",
-        requester=world["contact"], service=world["gen_info"], request_type=world["op_rt"],
-        office=world["office"], channel="email", actor_subject="creator",
+        domain="operational",
+        title="X",
+        description="private parent body",
+        requester=world["contact"],
+        service=world["gen_info"],
+        request_type=world["op_rt"],
+        office=world["office"],
+        channel="email",
+        actor_subject="creator",
     )
     child = it_child.create_it_child_ticket(
         parent=parent,
@@ -152,11 +180,14 @@ def test_it_child_material_mutations_have_canonical_event_pairs(world):
     assert child_events.filter(action="ticket.relationship.created").count() == 1
     assert parent_events.filter(action="ticket.transitioned").count() == 1
     for audit in (*child_events, *parent_events):
-        assert OutboxEvent.objects.filter(
-            aggregate_id=audit.object_id,
-            event_type=audit.action,
-            payload=audit.payload,
-        ).count() == 1
+        assert (
+            OutboxEvent.objects.filter(
+                aggregate_id=audit.object_id,
+                event_type=audit.action,
+                payload=audit.payload,
+            ).count()
+            == 1
+        )
         assert "private parent body" not in str(audit.payload)
 
 
@@ -166,9 +197,15 @@ def test_child_to_parent_sync_records_one_canonical_transition_pair(world):
     from apps.workflow.models import Status
 
     parent = services.create_ticket(
-        domain="operational", title="X", description="",
-        requester=world["contact"], service=world["gen_info"], request_type=world["op_rt"],
-        office=world["office"], channel="email", actor_subject="creator",
+        domain="operational",
+        title="X",
+        description="",
+        requester=world["contact"],
+        service=world["gen_info"],
+        request_type=world["op_rt"],
+        office=world["office"],
+        channel="email",
+        actor_subject="creator",
     )
     child = it_child.create_it_child_ticket(
         parent=parent,
@@ -179,28 +216,37 @@ def test_child_to_parent_sync_records_one_canonical_transition_pair(world):
     child.status = Status.objects.get(domain="it", code="resolved")
     child.save(update_fields=["status", "updated_at"])
     before = AuditEvent.objects.filter(
-        object_id=str(parent.id), action="ticket.transitioned",
+        object_id=str(parent.id),
+        action="ticket.transitioned",
     ).count()
 
     it_child.sync_child_status_to_parent(child=child, actor_subject="sync-agent")
 
     event = AuditEvent.objects.filter(
-        object_id=str(parent.id), action="ticket.transitioned",
+        object_id=str(parent.id),
+        action="ticket.transitioned",
     ).latest("occurred_at")
-    assert AuditEvent.objects.filter(
-        object_id=str(parent.id), action="ticket.transitioned",
-    ).count() == before + 1
+    assert (
+        AuditEvent.objects.filter(
+            object_id=str(parent.id),
+            action="ticket.transitioned",
+        ).count()
+        == before + 1
+    )
     assert event.payload["actor"] == "sync-agent"
     assert event.payload["before"] == {
         "status": "waiting_it",
         "waiting_reason": "Waiting for IT",
     }
     assert event.payload["after"] == {"status": "in_progress", "waiting_reason": ""}
-    assert OutboxEvent.objects.filter(
-        aggregate_id=str(parent.id),
-        event_type="ticket.transitioned",
-        payload=event.payload,
-    ).count() == 1
+    assert (
+        OutboxEvent.objects.filter(
+            aggregate_id=str(parent.id),
+            event_type="ticket.transitioned",
+            payload=event.payload,
+        ).count()
+        == 1
+    )
 
 
 def test_it_child_creation_records_the_actual_existing_parent_waiting_reason(world):
@@ -208,9 +254,15 @@ def test_it_child_creation_records_the_actual_existing_parent_waiting_reason(wor
     from apps.workflow.models import Status
 
     parent = services.create_ticket(
-        domain="operational", title="X", description="",
-        requester=world["contact"], service=world["gen_info"], request_type=world["op_rt"],
-        office=world["office"], channel="email", actor_subject="creator",
+        domain="operational",
+        title="X",
+        description="",
+        requester=world["contact"],
+        service=world["gen_info"],
+        request_type=world["op_rt"],
+        office=world["office"],
+        channel="email",
+        actor_subject="creator",
     )
     parent.status = Status.objects.get(domain="operational", code="waiting_it")
     parent.waiting_reason = "Waiting on vendor escalation"
@@ -224,7 +276,8 @@ def test_it_child_creation_records_the_actual_existing_parent_waiting_reason(wor
     )
 
     event = AuditEvent.objects.filter(
-        object_id=str(parent.id), action="ticket.transitioned",
+        object_id=str(parent.id),
+        action="ticket.transitioned",
     ).latest("occurred_at")
     assert event.payload["before"] == {
         "waiting_reason": "Waiting on vendor escalation",
@@ -237,9 +290,15 @@ def test_child_sync_records_the_actual_non_default_parent_waiting_reason(world):
     from apps.workflow.models import Status
 
     parent = services.create_ticket(
-        domain="operational", title="X", description="",
-        requester=world["contact"], service=world["gen_info"], request_type=world["op_rt"],
-        office=world["office"], channel="email", actor_subject="creator",
+        domain="operational",
+        title="X",
+        description="",
+        requester=world["contact"],
+        service=world["gen_info"],
+        request_type=world["op_rt"],
+        office=world["office"],
+        channel="email",
+        actor_subject="creator",
     )
     child = it_child.create_it_child_ticket(
         parent=parent,
@@ -255,7 +314,8 @@ def test_child_sync_records_the_actual_non_default_parent_waiting_reason(world):
     it_child.sync_child_status_to_parent(child=child, actor_subject="sync-agent")
 
     event = AuditEvent.objects.filter(
-        object_id=str(parent.id), action="ticket.transitioned",
+        object_id=str(parent.id),
+        action="ticket.transitioned",
     ).latest("occurred_at")
     assert event.payload["before"] == {
         "status": "waiting_it",
@@ -306,12 +366,16 @@ def test_it_child_parent_transition_pauses_and_resumes_sla_without_extra_events(
     assert pause.state == "paused_it"
     assert pause.actor_subject == "ops-agent"
     assert TransitionHistory.objects.filter(ticket=parent).count() == before_history + 1
-    assert AuditEvent.objects.filter(
-        object_id=str(parent.id), action="ticket.transitioned"
-    ).count() == before_audits + 1
-    assert OutboxEvent.objects.filter(
-        aggregate_id=str(parent.id), event_type="ticket.transitioned"
-    ).count() == before_outbox + 1
+    assert (
+        AuditEvent.objects.filter(object_id=str(parent.id), action="ticket.transitioned").count()
+        == before_audits + 1
+    )
+    assert (
+        OutboxEvent.objects.filter(
+            aggregate_id=str(parent.id), event_type="ticket.transitioned"
+        ).count()
+        == before_outbox + 1
+    )
 
     child.status = Status.objects.get(domain="it", code="resolved")
     child.save(update_fields=["status", "updated_at"])
@@ -322,9 +386,7 @@ def test_it_child_parent_transition_pauses_and_resumes_sla_without_extra_events(
 
     parent.refresh_from_db()
     resolution_sla.refresh_from_db()
-    sla_history = list(
-        SlaPauseHistory.objects.filter(instance=resolution_sla).order_by("at", "id")
-    )
+    sla_history = list(SlaPauseHistory.objects.filter(instance=resolution_sla).order_by("at", "id"))
     assert parent.status.code == "in_progress"
     assert resolution_sla.state == "active"
     assert [(item.state, item.actor_subject) for item in sla_history] == [
@@ -332,9 +394,13 @@ def test_it_child_parent_transition_pauses_and_resumes_sla_without_extra_events(
         ("active", "it-sync-agent"),
     ]
     assert TransitionHistory.objects.filter(ticket=parent).count() == before_history + 2
-    assert AuditEvent.objects.filter(
-        object_id=str(parent.id), action="ticket.transitioned"
-    ).count() == before_audits + 2
-    assert OutboxEvent.objects.filter(
-        aggregate_id=str(parent.id), event_type="ticket.transitioned"
-    ).count() == before_outbox + 2
+    assert (
+        AuditEvent.objects.filter(object_id=str(parent.id), action="ticket.transitioned").count()
+        == before_audits + 2
+    )
+    assert (
+        OutboxEvent.objects.filter(
+            aggregate_id=str(parent.id), event_type="ticket.transitioned"
+        ).count()
+        == before_outbox + 2
+    )

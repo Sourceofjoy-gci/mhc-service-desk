@@ -12,6 +12,7 @@ from rest_framework.permissions import AllowAny
 from rest_framework.test import APIClient, APIRequestFactory
 
 from apps.identity_access.models import Role, User
+from apps.organisations.models import Office
 from apps.tickets import services
 from apps.tickets.models import Ticket
 from apps.workflow.models import Status
@@ -20,9 +21,12 @@ pytestmark = pytest.mark.django_db
 
 
 def _agent():
+    # Operational and IT authority is confined to the officer's office, so
+    # every staff actor is based at the seeded ``basic_world`` office.
     user = User.objects.create(
         username=f"agent-{uuid4().hex}",
         keycloak_subject=f"subject-{uuid4().hex}",
+        office=Office.objects.get(code="TST-1"),
     )
     user._groups = ["ops-agents"]
     return user
@@ -66,9 +70,12 @@ def _client():
 
 
 def _client_for_groups(groups):
+    # Operational and IT authority is confined to the officer's office, so
+    # every staff actor is based at the seeded ``basic_world`` office.
     user = User.objects.create(
         username=f"agent-{uuid4().hex}",
         keycloak_subject=f"subject-{uuid4().hex}",
+        office=Office.objects.get(code="TST-1"),
     )
     user._groups = groups
     client = APIClient()
@@ -246,9 +253,7 @@ def test_reference_search_returns_only_the_in_scope_ticket(basic_world):
     visible = client.get(reverse("tickets-list"), {"search": operational.number})
     hidden = client.get(reverse("tickets-list"), {"search": it_ticket.number})
 
-    assert [item["number"] for item in visible.data["results"]] == [
-        operational.number
-    ]
+    assert [item["number"] for item in visible.data["results"]] == [operational.number]
     assert hidden.data["results"] == []
 
 
@@ -287,18 +292,14 @@ def test_queue_sorts_apply_complete_ordering_across_the_cursor(collection_ticket
         first, rows = _all_pages(_client(), sort=sort)
         assert len(first.data["results"]) == 50
         assert len(rows) == len({row["number"] for row in rows}) == 55
-        assert [key_function(row) for row in rows] == sorted(
-            key_function(row) for row in rows
-        )
+        assert [key_function(row) for row in rows] == sorted(key_function(row) for row in rows)
 
 
 def test_unknown_ticket_sort_falls_back_to_default_ordering(collection_tickets):
     _, default_rows = _all_pages(_client(), sort="priority")
     _, unknown_rows = _all_pages(_client(), sort="not-a-sort")
 
-    assert [row["number"] for row in unknown_rows] == [
-        row["number"] for row in default_rows
-    ]
+    assert [row["number"] for row in unknown_rows] == [row["number"] for row in default_rows]
 
 
 def test_safe_cursor_falls_back_to_model_primary_key():
@@ -330,11 +331,14 @@ def test_safe_cursor_falls_back_to_model_primary_key():
         "00000000-0000-0000-0000-000000000002",
         "00000000-0000-0000-0000-000000000001",
     ]
-    assert pagination.SafeCursorPagination().get_ordering(
-        request,
-        User.objects.all(),
-        UserViewSet(),
-    )[-1] == "-id"
+    assert (
+        pagination.SafeCursorPagination().get_ordering(
+            request,
+            User.objects.all(),
+            UserViewSet(),
+        )[-1]
+        == "-id"
+    )
 
 
 def test_ticket_cursors_cover_large_tied_queue_exactly_once(basic_world):
@@ -431,7 +435,7 @@ def test_safe_cursor_covers_large_tied_timestamp_exactly_once():
     assert len(rows) == len({row["id"] for row in rows}) == 1055
 
 
-def test_tampered_compound_cursor_returns_canonical_not_found():
+def test_tampered_compound_cursor_returns_canonical_not_found(basic_world):
     cursor = b64encode(b"p=not-a-compound-position").decode("ascii")
 
     response = _client().get(reverse("tickets-list"), {"cursor": cursor})

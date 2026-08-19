@@ -13,11 +13,13 @@ pytestmark = pytest.mark.django_db
 
 
 @pytest.fixture
-def user_factory():
+def user_factory(basic_world):
     def make_user(*, groups):
+        # Operational and IT authority is confined to the officer office.
         user = User.objects.create(
             username=f"user-{uuid4().hex}",
             keycloak_subject=f"subject-{uuid4().hex}",
+            office=basic_world["office"],
         )
         user._groups = groups
         return user

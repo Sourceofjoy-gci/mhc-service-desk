@@ -14,7 +14,7 @@ from apps.audit.models import AuditEvent
 from apps.identity_access.authority_lock import lock_user_authorities
 from apps.identity_access.models import Role, User, UserRole
 from apps.identity_access.scope import get_authority_snapshot
-from apps.organisations.models import ServiceLocation
+from apps.organisations.models import Office, ServiceLocation
 from apps.tickets import assignment as assignment_service
 from apps.tickets.assignment import (
     AssignmentActor,
@@ -42,12 +42,15 @@ def _user(
     active: bool = True,
 ) -> User:
     username = f"staff-{uuid4().hex}"
+    # Operational and IT authority is confined to the officer's office, so
+    # every staff actor is based at the seeded ``basic_world`` office.
     user = User.objects.create(
         username=username,
         keycloak_subject=f"subject-{uuid4().hex}",
         display_name=display_name,
         keycloak_groups=groups or [],
         is_active=active,
+        office=Office.objects.get(code="TST-1"),
     )
     user._groups = list(groups or [])
     return user
@@ -468,9 +471,7 @@ def test_cached_auditor_snapshot_stays_denied_after_operator_grant_remains(
     assert "auditor" in cached_snapshot.capabilities
     assert not fresh_snapshot.auditor_identity
     assert "auditor" not in fresh_snapshot.capabilities
-    assert {grant.role_key for grant in fresh_snapshot.role_grants} == {
-        "supervisor-operational"
-    }
+    assert {grant.role_key for grant in fresh_snapshot.role_grants} == {"supervisor-operational"}
     with pytest.raises(TicketPermissionError):
         assign_ticket(
             ticket_id=ticket.id,

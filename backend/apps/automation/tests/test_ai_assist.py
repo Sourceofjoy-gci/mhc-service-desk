@@ -1,4 +1,5 @@
 """Tests for the AI assist guard."""
+
 from __future__ import annotations
 
 import pytest
@@ -22,8 +23,14 @@ def test_record_suggestion_creates_audit_event(basic_world):
     if not (service and request_type and office and contact):
         pytest.skip("seed not available")
     ticket = services.create_ticket(
-        domain="operational", title="AI test", description="",
-        requester=contact, service=service, request_type=request_type, office=office, channel="web",
+        domain="operational",
+        title="AI test",
+        description="",
+        requester=contact,
+        service=service,
+        request_type=request_type,
+        office=office,
+        channel="web",
     )
     suggestion = AiSuggestion(
         suggestion_id="s-1",
@@ -51,8 +58,14 @@ def test_apply_suggestion_requires_kind_payload(basic_world):
     office = Office.objects.filter(is_active=True).first()
     contact = Contact.objects.first()
     ticket = services.create_ticket(
-        domain="operational", title="AI apply", description="",
-        requester=contact, service=service, request_type=request_type, office=office, channel="web",
+        domain="operational",
+        title="AI apply",
+        description="",
+        requester=contact,
+        service=service,
+        request_type=request_type,
+        office=office,
+        channel="web",
     )
     # Apply a classify with invalid priority — should return False (no change)
     suggestion = AiSuggestion(
@@ -81,9 +94,14 @@ def test_record_suggestion_uses_canonical_pair_without_draft_body(basic_world):
     service = Service.objects.filter(domain="operational").first()
     request_type = RequestType.objects.filter(service=service).first()
     ticket = services.create_ticket(
-        domain="operational", title="AI event", description="",
-        requester=Contact.objects.first(), service=service, request_type=request_type,
-        office=Office.objects.filter(is_active=True).first(), channel="web",
+        domain="operational",
+        title="AI event",
+        description="",
+        requester=Contact.objects.first(),
+        service=service,
+        request_type=request_type,
+        office=Office.objects.filter(is_active=True).first(),
+        channel="web",
         actor_subject="creator",
     )
     suggestion = AiSuggestion(
@@ -101,10 +119,12 @@ def test_record_suggestion_uses_canonical_pair_without_draft_body(basic_world):
     record_suggestion(ticket=ticket, suggestion=suggestion)
 
     audit = AuditEvent.objects.get(
-        object_id=str(ticket.id), action="ai.suggestion.draft_reply",
+        object_id=str(ticket.id),
+        action="ai.suggestion.draft_reply",
     )
     outbox = OutboxEvent.objects.get(
-        aggregate_id=str(ticket.id), event_type="ai.suggestion.draft_reply",
+        aggregate_id=str(ticket.id),
+        event_type="ai.suggestion.draft_reply",
     )
     assert audit.payload == outbox.payload
     assert "private generated draft" not in str(audit.payload)
@@ -121,35 +141,53 @@ def test_approved_ai_reply_uses_message_service_and_records_one_pair(basic_world
     service = Service.objects.filter(domain="operational").first()
     request_type = RequestType.objects.filter(service=service).first()
     ticket = services.create_ticket(
-        domain="operational", title="AI reply", description="",
-        requester=Contact.objects.first(), service=service, request_type=request_type,
-        office=Office.objects.filter(is_active=True).first(), channel="web",
+        domain="operational",
+        title="AI reply",
+        description="",
+        requester=Contact.objects.first(),
+        service=service,
+        request_type=request_type,
+        office=Office.objects.filter(is_active=True).first(),
+        channel="web",
         actor_subject="creator",
     )
     suggestion = AiSuggestion(
-        suggestion_id="s-reply", ticket_number=ticket.number, kind="draft_reply",
-        payload={"body_text": "approved draft"}, confidence=0.8,
-        model_id="model-1", model_version="1.0", prompt_hash="hash",
+        suggestion_id="s-reply",
+        ticket_number=ticket.number,
+        kind="draft_reply",
+        payload={"body_text": "approved draft"},
+        confidence=0.8,
+        model_id="model-1",
+        model_version="1.0",
+        prompt_hash="hash",
         created_at="2026-07-19T10:00:00Z",
     )
 
-    assert apply_suggestion(
-        ticket=ticket,
-        suggestion=suggestion,
-        approver_subject="approver-1",
-    ) is True
+    assert (
+        apply_suggestion(
+            ticket=ticket,
+            suggestion=suggestion,
+            approver_subject="approver-1",
+        )
+        is True
+    )
 
     message = TicketMessage.objects.get(ticket=ticket, template_key="ai-draft")
     event = AuditEvent.objects.get(
-        object_id=str(ticket.id), action="ticket.message.created",
+        object_id=str(ticket.id),
+        action="ticket.message.created",
     )
     assert message.author_subject == "ai:model-1"
     assert event.payload["actor"] == "approver-1"
     assert event.payload["metadata"]["suggestion_id"] == "s-reply"
     assert "approved draft" not in str(event.payload)
-    assert OutboxEvent.objects.filter(
-        aggregate_id=str(ticket.id), event_type="ticket.message.created",
-    ).count() == 1
+    assert (
+        OutboxEvent.objects.filter(
+            aggregate_id=str(ticket.id),
+            event_type="ticket.message.created",
+        ).count()
+        == 1
+    )
 
 
 @pytest.mark.parametrize(
@@ -176,15 +214,22 @@ def test_automation_ticket_changes_record_before_after_pairs(
 
     service = Service.objects.filter(domain="operational").first()
     ticket = services.create_ticket(
-        domain="operational", title="Automation", description="",
-        requester=Contact.objects.first(), service=service,
+        domain="operational",
+        title="Automation",
+        description="",
+        requester=Contact.objects.first(),
+        service=service,
         request_type=RequestType.objects.filter(service=service).first(),
-        office=Office.objects.filter(is_active=True).first(), channel="web",
+        office=Office.objects.filter(is_active=True).first(),
+        channel="web",
         actor_subject="creator",
     )
     AutomationRule.objects.create(
-        name=f"Rule {action}", trigger="ticket.created", action=action,
-        action_params=params, is_active=True,
+        name=f"Rule {action}",
+        trigger="ticket.created",
+        action=action,
+        action_params=params,
+        is_active=True,
     )
 
     assert evaluate_rules(trigger="ticket.created", ticket=ticket) == 1
@@ -193,9 +238,13 @@ def test_automation_ticket_changes_record_before_after_pairs(
     field = "assignee" if action == "assign_user" else "priority"
     assert event.payload["before"] == {field: before}
     assert event.payload["after"] == {field: after}
-    assert OutboxEvent.objects.filter(
-        aggregate_id=str(ticket.id), event_type=event_type,
-    ).count() == 1
+    assert (
+        OutboxEvent.objects.filter(
+            aggregate_id=str(ticket.id),
+            event_type=event_type,
+        ).count()
+        == 1
+    )
 
 
 def test_automation_cannot_assign_an_ineligible_username(basic_world):
@@ -208,10 +257,12 @@ def test_automation_cannot_assign_an_ineligible_username(basic_world):
     from apps.tickets import services
     from apps.tickets.models import OutboxEvent, TicketCustodyEvent
 
+    office = Office.objects.filter(is_active=True).first()
     target = User.objects.create(
         username="ineligible-automation-user",
         keycloak_subject="ineligible-automation-user",
         keycloak_groups=["it-agents"],
+        office=office,
     )
     service = Service.objects.filter(domain="operational").first()
     ticket = services.create_ticket(
@@ -272,11 +323,13 @@ def test_automation_assignment_uses_guarded_system_custody_and_reason_fallback(
     from apps.tickets.models import TicketCustodyEvent
 
     username = f"eligible-automation-{User.objects.count()}"
+    office = Office.objects.filter(is_active=True).first()
     target = User.objects.create(
         username=username,
         keycloak_subject=f"subject-{username}",
         display_name="Automated Eligible Owner",
         keycloak_groups=["ops-agents"],
+        office=office,
     )
     service = Service.objects.filter(domain="operational").first()
     ticket = services.create_ticket(

@@ -52,11 +52,14 @@ GROUP_FALLBACK_ROLES = {"ops-agents", "ops-supervisors", "it-agents", "it-leads"
 
 
 def _user(*, groups: list[str] | None = None, label: str) -> User:
+    # Operational and IT authority is confined to the officer's office, so
+    # every staff actor is based at the seeded ``basic_world`` office.
     user = User.objects.create(
         username=f"matrix-{uuid4().hex}",
         keycloak_subject=f"matrix-subject-{uuid4().hex}",
         display_name=label,
         keycloak_groups=groups or [],
+        office=Office.objects.get(code="TST-1"),
     )
     user._groups = list(groups or [])
     return user
@@ -284,14 +287,10 @@ def test_supported_role_has_complete_creation_to_closure_custody_timeline(
     assert verify_custody_chain(ticket) is True
 
     workflow_events = [
-        event
-        for event in events
-        if event.event_type in {"status_changed", "reopened", "closed"}
+        event for event in events if event.event_type in {"status_changed", "reopened", "closed"}
     ]
     visible_workflow = [
-        item
-        for item in build_ticket_activity(ticket)
-        if item["category"] == "workflow"
+        item for item in build_ticket_activity(ticket) if item["category"] == "workflow"
     ]
     assert len(visible_workflow) == len(workflow_events)
     assert len({item["id"] for item in visible_workflow}) == len(visible_workflow)

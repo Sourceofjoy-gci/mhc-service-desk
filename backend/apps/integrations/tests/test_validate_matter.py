@@ -7,6 +7,7 @@ from rest_framework.test import APIClient
 
 from apps.identity_access.models import User
 from apps.integrations import views
+from apps.organisations.models import Office
 from apps.tickets.models import OutboxEvent, Ticket
 from apps.workflow.models import Status
 
@@ -19,9 +20,12 @@ class _DeniedProvider:
 
 
 def _user(groups: list[str]) -> User:
+    # Operational and IT authority is confined to the officer's office, so
+    # every staff actor is based at the seeded ``basic_world`` office.
     user = User.objects.create(
         username=f"matter-user-{uuid4().hex}",
         keycloak_subject=f"matter-subject-{uuid4().hex}",
+        office=Office.objects.get(code="TST-1"),
     )
     vars(user)["_groups"] = list(groups)
     return user

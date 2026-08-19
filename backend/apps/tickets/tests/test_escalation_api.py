@@ -22,6 +22,7 @@ def _scoped_actor(basic_world, *, role_key: str) -> User:
         keycloak_subject=f"subject-{uuid4().hex}",
         display_name=role_key.replace("-", " ").title(),
         is_active=True,
+        office=basic_world["office"],
     )
     role = Role.objects.create(
         keycloak_role=role_key,
@@ -46,9 +47,7 @@ def _ticket(
     assignee: User | None = None,
 ) -> Ticket:
     service = (
-        basic_world["gen_info"]
-        if domain == Ticket.Domain.OPERATIONAL
-        else basic_world["it_inc"]
+        basic_world["gen_info"] if domain == Ticket.Domain.OPERATIONAL else basic_world["it_inc"]
     )
     prefix = "OP" if domain == Ticket.Domain.OPERATIONAL else "IT"
     return Ticket.objects.create(
@@ -187,11 +186,13 @@ def test_it_escalation_api_preserves_owner_without_assignment_evidence(
         username=f"it-agent-{uuid4().hex}",
         keycloak_subject=f"it-agent-subject-{uuid4().hex}",
         keycloak_groups=["it-agents"],
+        office=basic_world["office"],
     )
     owner = User.objects.create(
         username=f"it-owner-{uuid4().hex}",
         keycloak_subject=f"it-owner-subject-{uuid4().hex}",
         keycloak_groups=["it-agents"],
+        office=basic_world["office"],
     )
     ticket = _ticket(
         basic_world,
@@ -235,11 +236,13 @@ def test_it_escalation_api_rejects_submitted_supervisor_without_side_effects(
         username=f"it-agent-{uuid4().hex}",
         keycloak_subject=f"it-agent-subject-{uuid4().hex}",
         keycloak_groups=["it-agents"],
+        office=basic_world["office"],
     )
     owner = User.objects.create(
         username=f"it-owner-{uuid4().hex}",
         keycloak_subject=f"it-owner-subject-{uuid4().hex}",
         keycloak_groups=["it-agents"],
+        office=basic_world["office"],
     )
     ticket = _ticket(
         basic_world,

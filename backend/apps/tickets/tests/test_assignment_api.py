@@ -27,12 +27,15 @@ def _user(
     display_name: str = "",
     active: bool = True,
 ) -> User:
+    # Operational and IT authority is confined to the officer's office, so
+    # every staff actor is based at the seeded ``basic_world`` office.
     user = User.objects.create(
         username=f"staff-{uuid4().hex}",
         keycloak_subject=f"subject-{uuid4().hex}",
         display_name=display_name,
         keycloak_groups=groups or [],
         is_active=active,
+        office=Office.objects.get(code="TST-1"),
     )
     user._groups = groups or []
     return user
@@ -47,9 +50,7 @@ def _ticket(
     assignee: User | None = None,
 ) -> Ticket:
     service = (
-        basic_world["gen_info"]
-        if domain == Ticket.Domain.OPERATIONAL
-        else basic_world["it_inc"]
+        basic_world["gen_info"] if domain == Ticket.Domain.OPERATIONAL else basic_world["it_inc"]
     )
     prefix = "OP" if domain == Ticket.Domain.OPERATIONAL else "IT"
     return Ticket.objects.create(
@@ -114,9 +115,7 @@ def _post_assignment(
 ):
     payload: dict[str, object] = {
         "assignee_id": str(assignee_id) if assignee_id is not None else None,
-        "expected_updated_at": (
-            expected_updated_at or ticket.updated_at
-        ).isoformat(),
+        "expected_updated_at": (expected_updated_at or ticket.updated_at).isoformat(),
     }
     if reason is not None:
         payload["reason"] = reason
@@ -340,10 +339,10 @@ def test_candidate_directory_returns_only_exact_active_staff_with_metadata_and_s
                 "id": str(eligible.id),
                 "username": eligible.username,
                 "display_name": "Naledi Exact",
-                    "designations": ["Senior Accountant"],
-                    "team_labels": ["Finance"],
-                    "role_summaries": [],
-                }
+                "designations": ["Senior Accountant"],
+                "team_labels": ["Finance"],
+                "role_summaries": [],
+            }
         ]
     }
 

@@ -10,6 +10,7 @@ from rest_framework.test import APIClient
 
 from apps.audit.models import AuditEvent
 from apps.identity_access.models import Role, User, UserRole
+from apps.organisations.models import Office
 from apps.tickets.models import OutboxEvent, Ticket, TicketCustodyEvent
 from apps.workflow.models import Status
 
@@ -19,11 +20,14 @@ CORRELATION_ID = "work-state-test-correlation"
 
 
 def _user(groups: list[str], *, display_name: str = "") -> User:
+    # Operational and IT authority is confined to the officer's office, so
+    # every staff actor is based at the seeded ``basic_world`` office.
     user = User.objects.create(
         username=f"agent-{uuid4().hex}",
         keycloak_subject=f"subject-{uuid4().hex}",
         display_name=display_name,
         keycloak_groups=groups,
+        office=Office.objects.get(code="TST-1"),
     )
     user._groups = groups
     return user
@@ -217,9 +221,7 @@ def test_legacy_work_state_owner_change_accepts_separate_reason(
         ticket,
         {
             "updated_at": ticket.updated_at.isoformat(),
-            "assignee": (
-                str(replacement.id) if owner_change == "transfer" else None
-            ),
+            "assignee": (str(replacement.id) if owner_change == "transfer" else None),
             "reason": "Compatibility owner change.",
         },
     )
@@ -230,9 +232,7 @@ def test_legacy_work_state_owner_change_accepts_separate_reason(
     ticket.refresh_from_db()
     assert ticket.assignee_id == expected_owner
     event = TicketCustodyEvent.objects.get(ticket=ticket)
-    assert event.event_type == (
-        "reassigned" if owner_change == "transfer" else "unassigned"
-    )
+    assert event.event_type == ("reassigned" if owner_change == "transfer" else "unassigned")
     assert event.reason == "Compatibility owner change."
 
 
@@ -391,23 +391,21 @@ def test_assignees_are_filtered_by_ticket_domain(basic_world):
                 "id": str(eligible.id),
                 "username": eligible.username,
                 "display_name": "Eligible Agent",
-                    "designations": ["Operational Agent"],
-                    "team_labels": ["Operational"],
-                    "role_summaries": [],
+                "designations": ["Operational Agent"],
+                "team_labels": ["Operational"],
+                "role_summaries": [],
             },
             {
                 "id": str(actor.id),
                 "username": actor.username,
                 "display_name": "Supervisor",
-                    "designations": ["Operational Supervisor"],
-                    "team_labels": ["Operational"],
-                    "role_summaries": [],
+                "designations": ["Operational Supervisor"],
+                "team_labels": ["Operational"],
+                "role_summaries": [],
             },
         ]
     }
-    assert str(administrator.id) not in {
-        result["id"] for result in response.data["results"]
-    }
+    assert str(administrator.id) not in {result["id"] for result in response.data["results"]}
 
 
 @pytest.mark.parametrize(
@@ -485,9 +483,7 @@ def test_ticket_detail_exposes_request_derived_capabilities(basic_world, groups,
             "username": user.username,
             "display_name": user.username,
             "designations": [
-                "Operational Agent"
-                if groups == ["ops-agents"]
-                else "Operational Supervisor"
+                "Operational Agent" if groups == ["ops-agents"] else "Operational Supervisor"
             ],
             "team_labels": ["Operational"],
         }

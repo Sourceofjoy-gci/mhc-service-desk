@@ -5,12 +5,32 @@ from django.test import override_settings
 from rest_framework.exceptions import AuthenticationFailed
 from rest_framework.test import APIRequestFactory
 
-from apps.identity_access.authentication import JSONObject, KeycloakJWTAuthentication
+from apps.identity_access.authentication import (
+    JSONObject,
+    KeycloakJWTAuthentication,
+    _verify_jwt,
+)
 from apps.identity_access.models import Role, User, UserRole
 from apps.identity_access.scope import Scope, get_user_scopes
 from config.settings.dev import _patch_dev_auth
 
 pytestmark = pytest.mark.django_db
+
+
+def test_jwt_verification_requires_the_configured_keycloak_issuer():
+    with patch(
+        "jwt.decode",
+        return_value={"sub": "subject", "iss": "https://idp.example.test/realms/mhc"},
+    ) as decode:
+        _verify_jwt(
+            "signed-token",
+            object(),  # type: ignore[arg-type]
+            audience="mhc-backend",
+            issuer="https://idp.example.test/realms/mhc",
+        )
+
+    assert decode.call_args.kwargs["issuer"] == "https://idp.example.test/realms/mhc"
+    assert decode.call_args.kwargs["options"]["verify_iss"] is True
 
 
 def _authenticate_verified_payload(payload: JSONObject) -> tuple[User, JSONObject]:
@@ -203,7 +223,8 @@ def test_verified_token_safely_provisions_a_first_time_username():
     assert payload["sub"] == "first-time-subject"
 
 
-def test_verified_token_uses_realm_roles_for_staff_authorisation():
+def test_verified_token_uses_realm_roles_for_staff_authorisation(basic_world):
+    office = basic_world["office"]
     user, _ = _authenticate_verified_payload(
         {
             "sub": "realm-role-subject",
@@ -211,6 +232,7 @@ def test_verified_token_uses_realm_roles_for_staff_authorisation():
             "email": "realm-role-agent@example.test",
             "groups": ["/ops-agents"],
             "realm_access": {"roles": ["agent-it", "ops-agents"]},
+            "office": office.code,
             "acr": "mfa",
             "iss": "https://idp.example.test/realms/mhc",
             "aud": "mhc-ticketing",
@@ -221,9 +243,10 @@ def test_verified_token_uses_realm_roles_for_staff_authorisation():
 
     assert user.keycloak_groups == ["ops-agents", "agent-it"]
     assert user._groups == ["ops-agents", "agent-it"]
+    # Realm roles still drive the domains; the office claim confines them.
     assert get_user_scopes(user) == [
-        Scope(domain="operational"),
-        Scope(domain="it"),
+        Scope(domain="operational", office_id=str(office.id)),
+        Scope(domain="it", office_id=str(office.id)),
     ]
 
 

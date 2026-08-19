@@ -1,4 +1,5 @@
 """Custody assertions for authenticated staff-assisted public intake."""
+
 from __future__ import annotations
 
 from uuid import uuid4
@@ -51,6 +52,7 @@ def test_authenticated_staff_assisted_intake_records_the_staff_custody_actor(
         display_name="Intake Staff",
         keycloak_subject="intake-staff-subject",
         keycloak_groups=["ops-agents"],
+        office=basic_world["office"],
     )
     client = APIClient()
     client.force_authenticate(staff)
@@ -73,6 +75,7 @@ def test_staff_intake_rejects_roleless_and_wrong_domain_users(basic_world, group
         username=f"intake-denied-{'-'.join(groups) or 'roleless'}",
         keycloak_subject="intake-denied-subject",
         keycloak_groups=groups,
+        office=basic_world["office"],
     )
     client = APIClient()
     client.force_authenticate(staff)
@@ -91,6 +94,7 @@ def test_staff_intake_rejects_queue_constrained_authority(basic_world) -> None:
     staff = User.objects.create(
         username="queue-constrained-intake",
         keycloak_subject="queue-constrained-subject",
+        office=basic_world["office"],
     )
     role = Role.objects.create(
         keycloak_role=f"queue-intake-{uuid4().hex}",

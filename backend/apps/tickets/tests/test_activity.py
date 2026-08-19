@@ -15,6 +15,7 @@ from apps.audit.models import AuditEvent
 from apps.files.models import Attachment
 from apps.identity_access.models import Role, User, UserRole
 from apps.identity_access.scope import get_authority_snapshot
+from apps.organisations.models import Office
 from apps.sla.models import SlaInstance, SlaPolicy
 from apps.tickets import services as ticket_services
 from apps.tickets.activity import build_ticket_activity
@@ -49,11 +50,14 @@ def _ticket(basic_world, *, domain="operational") -> Ticket:
 
 
 def _user(groups, *, subject="agent-1", display_name="Agent One"):
+    # Operational and IT authority is confined to the officer's office, so
+    # every staff actor is based at the seeded ``basic_world`` office.
     user = User.objects.create(
         username=f"user-{uuid4().hex}",
         keycloak_subject=subject,
         display_name=display_name,
         keycloak_groups=groups,
+        office=Office.objects.get(code="TST-1"),
     )
     user._groups = groups
     return user
@@ -65,6 +69,7 @@ def _scoped_user(basic_world, *, role_key: str, subject: str) -> User:
         keycloak_subject=subject,
         display_name=role_key.replace("-", " ").title(),
         is_active=True,
+        office=basic_world["office"],
     )
     role = Role.objects.create(
         keycloak_role=role_key,
@@ -509,14 +514,10 @@ def test_linked_custody_moves_raw_unresolvable_owner_without_a_duplicate_audit_f
             event_type=event_type,
             source_process="ticket.assignment",
             previous_owner=(
-                CustodyParty.unresolved_reference(before_assignee)
-                if before_assignee
-                else None
+                CustodyParty.unresolved_reference(before_assignee) if before_assignee else None
             ),
             new_owner=(
-                CustodyParty.unresolved_reference(after_assignee)
-                if after_assignee
-                else None
+                CustodyParty.unresolved_reference(after_assignee) if after_assignee else None
             ),
         ),
     )
@@ -563,9 +564,7 @@ def test_linked_custody_moves_raw_unresolvable_queue_without_a_duplicate_audit_f
             previous_queue=(
                 CustodyQueue.unresolved_reference(before_queue) if before_queue else None
             ),
-            new_queue=(
-                CustodyQueue.unresolved_reference(after_queue) if after_queue else None
-            ),
+            new_queue=(CustodyQueue.unresolved_reference(after_queue) if after_queue else None),
         ),
     )
 
@@ -649,8 +648,7 @@ def test_linked_mixed_custody_audit_routes_partial_snapshot_fallbacks_once_per_f
     custody_items = [
         item
         for item in activity
-        if item["type"] == "custody_event"
-        and item["payload"]["source_record_id"] == str(audit.id)
+        if item["type"] == "custody_event" and item["payload"]["source_record_id"] == str(audit.id)
     ]
     work_state = next(item for item in activity if item["type"] == "work_state")
 

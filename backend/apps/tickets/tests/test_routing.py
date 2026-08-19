@@ -33,12 +33,15 @@ def _user(
     display_name: str = "",
     active: bool = True,
 ) -> User:
+    # Operational and IT authority is confined to the officer's office, so
+    # every staff actor is based at the seeded ``basic_world`` office.
     user = User.objects.create(
         username=f"routing-{uuid4().hex}",
         keycloak_subject=f"routing-subject-{uuid4().hex}",
         display_name=display_name,
         keycloak_groups=groups or [],
         is_active=active,
+        office=Office.objects.get(code="TST-1"),
     )
     user._groups = list(groups or [])
     return user
@@ -61,9 +64,7 @@ def _ticket(
     domain: str = Ticket.Domain.OPERATIONAL,
 ) -> Ticket:
     service = (
-        basic_world["gen_info"]
-        if domain == Ticket.Domain.OPERATIONAL
-        else basic_world["it_inc"]
+        basic_world["gen_info"] if domain == Ticket.Domain.OPERATIONAL else basic_world["it_inc"]
     )
     prefix = "OP" if domain == Ticket.Domain.OPERATIONAL else "IT"
     return Ticket.objects.create(
@@ -440,9 +441,7 @@ def test_queue_only_routing_succeeds_when_existing_owner_matches_destination(bas
 
     assert result.ticket.queue_id == destination.id
     assert result.ticket.assignee_id == owner.id
-    assert [event.event_type for event in ticket.custody_events.all()] == [
-        "queue_changed"
-    ]
+    assert [event.event_type for event in ticket.custody_events.all()] == ["queue_changed"]
 
 
 def test_unqueue_requires_non_queue_scope_and_queue_less_owner_eligibility(basic_world):
@@ -524,14 +523,10 @@ def test_persisted_routing_authority_requires_independent_office_matches(
         role_key="estate-examiner",
         queue=destination if routing_kind == "destination" else None,
         assignment_office=(
-            other_office
-            if mismatch_direction == "assignment_office"
-            else ticket.office
+            other_office if mismatch_direction == "assignment_office" else ticket.office
         ),
         configured_office=(
-            other_office
-            if mismatch_direction == "configured_scope_office"
-            else ticket.office
+            other_office if mismatch_direction == "configured_scope_office" else ticket.office
         ),
     )
     previous_updated_at = ticket.updated_at
@@ -683,13 +678,21 @@ def test_paired_routing_records_queue_then_owner_with_one_timestamp_and_audit(
     monkeypatch.setattr("apps.tickets.assignment.timezone.now", lambda: occurred_at)
     current = _queue(basic_world, f"Pair current {owner_change}")
     destination = _queue(basic_world, f"Pair destination {owner_change}")
-    previous = None if owner_change == "assigned" else _user(
-        ["ops-agents"],
-        display_name="Previous Pair Owner",
+    previous = (
+        None
+        if owner_change == "assigned"
+        else _user(
+            ["ops-agents"],
+            display_name="Previous Pair Owner",
+        )
     )
-    target = None if owner_change == "unassigned" else _user(
-        ["ops-agents"],
-        display_name="New Pair Owner",
+    target = (
+        None
+        if owner_change == "unassigned"
+        else _user(
+            ["ops-agents"],
+            display_name="New Pair Owner",
+        )
     )
     ticket = _ticket(basic_world, queue=current, assignee=previous)
 

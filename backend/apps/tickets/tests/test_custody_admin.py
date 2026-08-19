@@ -64,12 +64,15 @@ def _staff_user(
     active: bool = True,
     superuser: bool = False,
 ) -> User:
+    # Operational and IT authority is confined to the officer's office, so
+    # every staff actor is based at the seeded ``basic_world`` office.
     user = User.objects.create(
         username=f"custody-admin-{uuid4().hex}",
         keycloak_subject=f"custody-admin-subject-{uuid4().hex}",
         is_staff=True,
         is_active=active,
         is_superuser=superuser,
+        office=Office.objects.get(code="TST-1"),
     )
     if can_view:
         user.user_permissions.add(

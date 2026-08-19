@@ -1,4 +1,5 @@
 """Tests for SLA business calendar and instance state."""
+
 from __future__ import annotations
 
 from datetime import UTC, datetime, timedelta
@@ -87,9 +88,7 @@ def test_spans_lunch(calendar):
 
 
 def _ticket(basic_world, *, domain="operational", status_code="in_progress"):
-    service = (
-        basic_world["gen_info"] if domain == "operational" else basic_world["it_inc"]
-    )
+    service = basic_world["gen_info"] if domain == "operational" else basic_world["it_inc"]
     return Ticket.objects.create(
         number=f"{domain[:2].upper()}-202607-{Ticket.objects.count() + 992001:06d}",
         domain=domain,
@@ -177,9 +176,9 @@ def test_evaluator_records_one_system_custody_escalation_at_exact_business_thres
             "escalation_notified_at": "2026-07-27 06:09:00+00:00",
         }
     }
-    assert AuditEvent.objects.filter(
-        object_id=str(ticket.id), action="ticket.escalated"
-    ).count() == 1
+    assert (
+        AuditEvent.objects.filter(object_id=str(ticket.id), action="ticket.escalated").count() == 1
+    )
 
 
 def test_evaluator_does_not_escalate_before_business_time_threshold(basic_world):
@@ -198,9 +197,9 @@ def test_evaluator_does_not_escalate_before_business_time_threshold(basic_world)
     instance.refresh_from_db()
     assert instance.escalation_notified_at is None
     assert ticket.custody_events.filter(event_type="escalated").count() == 0
-    assert AuditEvent.objects.filter(
-        object_id=str(ticket.id), action="ticket.escalated"
-    ).count() == 0
+    assert (
+        AuditEvent.objects.filter(object_id=str(ticket.id), action="ticket.escalated").count() == 0
+    )
 
 
 def test_evaluator_respects_microseconds_before_at_and_after_threshold(basic_world):
@@ -362,6 +361,7 @@ def test_resume_preserves_fractional_entitlement_across_slot_boundary_and_remaps
         999999,
         tzinfo=UTC,
     )
+
 
 def test_resume_uses_frozen_microseconds_after_calendar_changes(basic_world):
     """Recomputing a pause under edited calendar rules would lose entitlement."""
@@ -601,9 +601,12 @@ def test_evaluator_rolls_back_escalation_when_custody_recording_fails(basic_worl
         started_at=started_at,
     )
 
-    with freeze_time(threshold_time), patch(
-        "apps.tickets.events.record_custody_events",
-        side_effect=RuntimeError("custody unavailable"),
+    with (
+        freeze_time(threshold_time),
+        patch(
+            "apps.tickets.events.record_custody_events",
+            side_effect=RuntimeError("custody unavailable"),
+        ),
     ):
         with pytest.raises(RuntimeError, match="custody unavailable"):
             evaluate_open_slas()
@@ -611,12 +614,15 @@ def test_evaluator_rolls_back_escalation_when_custody_recording_fails(basic_worl
     instance.refresh_from_db()
     assert instance.escalation_notified_at is None
     assert ticket.custody_events.filter(event_type="escalated").count() == 0
-    assert AuditEvent.objects.filter(
-        object_id=str(ticket.id), action="ticket.escalated"
-    ).count() == 0
-    assert OutboxEvent.objects.filter(
-        aggregate_id=str(ticket.id), event_type="ticket.escalated"
-    ).count() == 0
+    assert (
+        AuditEvent.objects.filter(object_id=str(ticket.id), action="ticket.escalated").count() == 0
+    )
+    assert (
+        OutboxEvent.objects.filter(
+            aggregate_id=str(ticket.id), event_type="ticket.escalated"
+        ).count()
+        == 0
+    )
 
 
 def test_first_outbound_agent_message_completes_first_response_once(basic_world):
@@ -756,9 +762,7 @@ def test_reopen_restarts_existing_resolution_clock_from_reopened_at(basic_world)
     instance.completed_at = reopened_at - timedelta(hours=1)
     instance.breached_at = reopened_at - timedelta(hours=2)
     instance.breach_reason = "Prior breach"
-    instance.save(
-        update_fields=["completed_at", "breached_at", "breach_reason"]
-    )
+    instance.save(update_fields=["completed_at", "breached_at", "breach_reason"])
 
     restarted = restart_resolution_sla(ticket=ticket, at=reopened_at)
 
@@ -793,6 +797,7 @@ def test_transition_service_synchronizes_pause_without_losing_task_four_events(
         username="sla-agent",
         keycloak_subject="sla-agent",
         keycloak_groups=["ops-agents"],
+        office=basic_world["office"],
     )
     actor._groups = ["ops-agents"]
     ticket = _ticket(basic_world)
@@ -809,9 +814,13 @@ def test_transition_service_synchronizes_pause_without_losing_task_four_events(
     assert updated.status.code == "waiting_requester"
     assert instance.state == "paused_requester"
     assert updated.transition_history.count() == 1
-    assert AuditEvent.objects.filter(
-        object_id=str(updated.id), action="ticket.transitioned"
-    ).count() == 1
-    assert OutboxEvent.objects.filter(
-        aggregate_id=str(updated.id), event_type="ticket.transitioned"
-    ).count() == 1
+    assert (
+        AuditEvent.objects.filter(object_id=str(updated.id), action="ticket.transitioned").count()
+        == 1
+    )
+    assert (
+        OutboxEvent.objects.filter(
+            aggregate_id=str(updated.id), event_type="ticket.transitioned"
+        ).count()
+        == 1
+    )

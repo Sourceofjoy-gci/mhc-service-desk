@@ -1,4 +1,5 @@
 """Transaction-integrity regressions for the IT child workflow."""
+
 from __future__ import annotations
 
 from unittest.mock import patch
@@ -35,6 +36,7 @@ def _create_child(parent: Ticket, basic_world) -> Ticket:
         username="ops-integrity-agent",
         keycloak_subject="ops-agent",
         keycloak_groups=["ops-agents"],
+        office=basic_world["office"],
     )
     actor._groups = ["ops-agents"]
     return it_child.create_it_child_ticket(
@@ -45,11 +47,12 @@ def _create_child(parent: Ticket, basic_world) -> Ticket:
     )
 
 
-def _it_actor() -> User:
+def _it_actor(basic_world) -> User:
     actor = User.objects.create(
         username="it-integrity-agent",
         keycloak_subject="it-integrity-subject",
         keycloak_groups=["it-agents"],
+        office=basic_world["office"],
     )
     actor._groups = ["it-agents"]
     return actor
@@ -60,6 +63,7 @@ def _office_actor(office: Office, *, subject: str) -> User:
         username=subject,
         keycloak_subject=subject,
         keycloak_groups=[],
+        office=office,
     )
     actor._groups = []
     role = Role.objects.create(
@@ -187,7 +191,7 @@ def test_resolving_child_rolls_back_when_locked_parent_sync_fails(basic_world) -
     ):
         services.transition_ticket(
             ticket_id=child.id,
-            actor=_it_actor(),
+            actor=_it_actor(basic_world),
             expected_updated_at=child.updated_at,
             to_status_code="resolved",
             resolution_code="FIXED",

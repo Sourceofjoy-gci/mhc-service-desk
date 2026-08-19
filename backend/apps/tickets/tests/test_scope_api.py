@@ -5,6 +5,7 @@ from django.urls import reverse
 from rest_framework.test import APIClient, APIRequestFactory, force_authenticate
 
 from apps.identity_access.models import User
+from apps.organisations.models import Office
 from apps.tickets.models import Ticket
 from apps.tickets.views import TicketViewSet
 from apps.workflow.models import Status
@@ -42,9 +43,12 @@ def scoped_tickets(basic_world):
 
 
 def _user(groups):
+    # Operational and IT authority is confined to the officer's office, so
+    # every staff actor is based at the seeded ``basic_world`` office.
     user = User.objects.create(
         username=f"user-{uuid4().hex}",
         keycloak_subject=f"subject-{uuid4().hex}",
+        office=Office.objects.get(code="TST-1"),
     )
     user._groups = groups
     return user

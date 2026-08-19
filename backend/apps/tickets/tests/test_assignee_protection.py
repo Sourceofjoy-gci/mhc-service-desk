@@ -9,6 +9,7 @@ from django.db.models.deletion import PROTECT, SET_NULL, ProtectedError
 
 from apps.audit.models import AuditEvent
 from apps.identity_access.models import User
+from apps.organisations.models import Office
 from apps.tickets import assignment as assignment_service
 from apps.tickets.assignment import assign_ticket
 from apps.tickets.models import OutboxEvent, Ticket, TicketCustodyEvent
@@ -18,10 +19,13 @@ pytestmark = pytest.mark.django_db(transaction=True)
 
 
 def _user(groups: list[str]) -> User:
+    # Operational and IT authority is confined to the officer's office, so
+    # every staff actor is based at the seeded ``basic_world`` office.
     user = User.objects.create(
         username=f"assignee-protection-{uuid4().hex}",
         keycloak_subject=f"assignee-protection-subject-{uuid4().hex}",
         keycloak_groups=groups,
+        office=Office.objects.get(code="TST-1"),
     )
     user._groups = list(groups)
     return user
@@ -187,9 +191,7 @@ def test_0009_changes_assignee_deletion_from_set_null_to_protect_and_rolls_back(
     try:
         executor = MigrationExecutor(connection)
         executor.migrate([("tickets", previous)])
-        before_apps = executor.loader.project_state(
-            [("tickets", previous)]
-        ).apps
+        before_apps = executor.loader.project_state([("tickets", previous)]).apps
         before_field = before_apps.get_model("tickets", "Ticket")._meta.get_field("assignee")
         assert before_field.remote_field.on_delete is SET_NULL
 
@@ -202,9 +204,7 @@ def test_0009_changes_assignee_deletion_from_set_null_to_protect_and_rolls_back(
         executor = MigrationExecutor(connection)
         executor.migrate([("tickets", previous)])
         rollback_apps = executor.loader.project_state([("tickets", previous)]).apps
-        rollback_field = rollback_apps.get_model("tickets", "Ticket")._meta.get_field(
-            "assignee"
-        )
+        rollback_field = rollback_apps.get_model("tickets", "Ticket")._meta.get_field("assignee")
         assert rollback_field.remote_field.on_delete is SET_NULL
     finally:
         MigrationExecutor(connection).migrate([("tickets", current_leaf)])

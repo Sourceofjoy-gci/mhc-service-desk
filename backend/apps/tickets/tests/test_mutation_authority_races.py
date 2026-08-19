@@ -13,7 +13,7 @@ from apps.audit.models import AuditEvent
 from apps.identity_access.authority_lock import lock_user_authorities
 from apps.identity_access.models import Role, User, UserRole
 from apps.identity_access.scope import AuthoritySnapshot, get_authority_snapshot
-from apps.organisations.models import ServiceLocation
+from apps.organisations.models import Office, ServiceLocation
 from apps.tickets import services
 from apps.tickets.models import (
     OutboxEvent,
@@ -55,12 +55,15 @@ CACHED_AUDITOR_SOURCES: tuple[CachedAuditorSource, ...] = (
 
 def _user() -> User:
     suffix = uuid4().hex
+    # Operational and IT authority is confined to the officer's office, so
+    # every staff actor is based at the seeded ``basic_world`` office.
     return User.objects.create(
         username=f"authority-race-{suffix}",
         keycloak_subject=f"authority-race-subject-{suffix}",
         display_name="Authority Race Actor",
         keycloak_groups=[],
         is_active=True,
+        office=Office.objects.get(code="TST-1"),
     )
 
 
@@ -236,10 +239,13 @@ def _assert_successful_mutation(kind: MutationKind, ticket: Ticket) -> None:
         assert TicketNote.objects.filter(ticket=ticket).count() == 1
     action = expected_actions[kind]
     assert AuditEvent.objects.filter(object_id=str(ticket.id), action=action).count() == 1
-    assert OutboxEvent.objects.filter(
-        aggregate_id=str(ticket.id),
-        event_type=action,
-    ).count() == 1
+    assert (
+        OutboxEvent.objects.filter(
+            aggregate_id=str(ticket.id),
+            event_type=action,
+        ).count()
+        == 1
+    )
 
 
 @pytest.mark.parametrize("kind", MUTATION_KINDS)

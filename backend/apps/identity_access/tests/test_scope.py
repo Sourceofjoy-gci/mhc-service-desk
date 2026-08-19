@@ -1,6 +1,8 @@
 """Tests for the scope-based authorisation helpers."""
+
 from __future__ import annotations
 
+from dataclasses import replace
 from datetime import timedelta
 from types import SimpleNamespace
 from uuid import uuid4
@@ -25,12 +27,33 @@ from apps.identity_access.scope import (
     is_auditor,
     scope_ticket_queryset,
 )
-from apps.organisations.models import Office, ServiceLocation
+from apps.organisations.models import Office, Region, ServiceLocation
 from apps.tickets.models import Ticket
 from apps.tickets.views import operational_dashboard
 from apps.workflow.models import Status
 
 pytestmark = pytest.mark.django_db
+
+
+def _boundary_office() -> Office:
+    """The office every staff identity in this module is based at.
+
+    Operational and IT authority is confined to the officer's office, so a
+    duck-typed or persisted staff identity needs one to hold any authority.
+    Reuse the seeded world office when a fixture created it.
+    """
+    seeded = Office.objects.filter(code="TST-1").first()
+    if seeded is not None:
+        return seeded
+    region, _ = Region.objects.get_or_create(
+        code="BND",
+        defaults={"name": "Boundary region"},
+    )
+    office, _ = Office.objects.get_or_create(
+        code="BND-1",
+        defaults={"region": region, "name": "Boundary office"},
+    )
+    return office
 
 
 def _user_with_scopes(*scopes: Scope):
@@ -82,6 +105,7 @@ def test_security_responder_scopes_are_restricted_only():
             "is_authenticated": True,
             "is_superuser": False,
             "_groups": ["security-responders"],
+            "office": _boundary_office(),
         },
     )()
 
@@ -108,6 +132,7 @@ def test_realm_role_aliases_are_authorised_without_persisted_assignments(
     role,
     expected_scope,
 ):
+    office = _boundary_office()
     user = type(
         "U",
         (),
@@ -116,10 +141,18 @@ def test_realm_role_aliases_are_authorised_without_persisted_assignments(
             "is_authenticated": True,
             "is_superuser": False,
             "_groups": [role],
+            "office": office,
         },
     )()
 
-    assert get_user_scopes(user) == [expected_scope]
+    # Operational and IT authority is bound to the officer's office; ``admin``
+    # is never office-bound.
+    expected = (
+        expected_scope
+        if expected_scope.domain == "admin"
+        else replace(expected_scope, office_id=str(office.id))
+    )
+    assert get_user_scopes(user) == [expected]
 
 
 def test_broader_group_wins_over_restricted_only_scope():
@@ -131,6 +164,7 @@ def test_broader_group_wins_over_restricted_only_scope():
             "is_authenticated": True,
             "is_superuser": False,
             "_groups": ["security-responders", "ops-agents"],
+            "office": _boundary_office(),
         },
     )()
 
@@ -194,6 +228,7 @@ def test_ticket_queryset_enforces_restricted_only_and_privileged_access(basic_wo
                 "is_authenticated": True,
                 "is_superuser": False,
                 "_groups": groups,
+                "office": basic_world["office"],
             },
         )()
         queryset = scope_ticket_queryset(user, Ticket.objects.all())
@@ -234,6 +269,7 @@ def _persisted_user(*, groups):
         username=f"user-{uuid4().hex}",
         keycloak_subject=f"subject-{uuid4().hex}",
         keycloak_groups=groups,
+        office=_boundary_office(),
     )
     user._groups = groups
     return user
@@ -303,10 +339,7 @@ def test_effective_grants_have_stable_role_and_office_order(basic_world):
     )
     UserRole.objects.create(user=user, role=records_role, office=None)
 
-    assert [
-        (grant.role_key, grant.office_id)
-        for grant in get_effective_role_grants(user)
-    ] == [
+    assert [(grant.role_key, grant.office_id) for grant in get_effective_role_grants(user)] == [
         ("estate-examiner", basic_world["office"].id),
         ("records-clerk", None),
         ("records-clerk", basic_world["office"].id),
@@ -335,7 +368,9 @@ def test_legacy_agent_without_persisted_role_keeps_group_authority_fallback():
     user = _persisted_user(groups=["ops-agents"])
 
     assert get_effective_role_grants(user) == ()
-    assert get_authority_snapshot(user).scopes == (Scope(domain="operational"),)
+    assert get_authority_snapshot(user).scopes == (
+        Scope(domain="operational", office_id=str(user.office_id)),
+    )
 
 
 @pytest.mark.parametrize(
@@ -523,18 +558,18 @@ def test_persisted_scope_enforces_office_service_and_queue_ids(basic_world):
 
 
 def test_multiple_persisted_scopes_are_combined_with_or(basic_world):
-    other_office = Office.objects.create(
-        region=basic_world["region"],
-        code="TST-2",
-        name="Other Office",
-    )
+    # Both grants sit inside the officer's own office: operational authority is
+    # confined to it, so a second office could never contribute a branch.
     first_service, first_type = _operational_service(code="FIRST-SVC")
     second_service, second_type = _operational_service(code="SECOND-SVC")
     first_queue = ServiceLocation.objects.create(
         office=basic_world["office"],
         name="First queue",
     )
-    second_queue = ServiceLocation.objects.create(office=other_office, name="Second queue")
+    second_queue = ServiceLocation.objects.create(
+        office=basic_world["office"],
+        name="Second queue",
+    )
     user = _persisted_user(groups=["ops-agents"])
     first_role = Role.objects.create(
         keycloak_role="first-scoped-role",
@@ -559,7 +594,7 @@ def test_multiple_persisted_scopes_are_combined_with_or(basic_world):
         ],
     )
     UserRole.objects.create(user=user, role=first_role, office=basic_world["office"])
-    UserRole.objects.create(user=user, role=second_role, office=other_office)
+    UserRole.objects.create(user=user, role=second_role, office=basic_world["office"])
 
     _ticket_for_scope(
         basic_world=basic_world,
@@ -574,7 +609,7 @@ def test_multiple_persisted_scopes_are_combined_with_or(basic_world):
         basic_world=basic_world,
         number="OP-202607-200002",
         title="second branch",
-        office=other_office,
+        office=basic_world["office"],
         service=second_service,
         request_type=second_type,
         queue=second_queue,
@@ -584,8 +619,8 @@ def test_multiple_persisted_scopes_are_combined_with_or(basic_world):
         number="OP-202607-200003",
         title="mixed dimensions",
         office=basic_world["office"],
-        service=second_service,
-        request_type=second_type,
+        service=first_service,
+        request_type=first_type,
         queue=second_queue,
     )
 
@@ -609,7 +644,13 @@ def test_persisted_unrestricted_scope_replaces_duplicate_restricted_scope(basic_
     )
     UserRole.objects.create(user=user, role=role, office=None)
 
-    assert get_user_scopes(user) == [Scope(domain="operational", restricted_only=False)]
+    assert get_user_scopes(user) == [
+        Scope(
+            domain="operational",
+            office_id=str(user.office_id),
+            restricted_only=False,
+        )
+    ]
 
     _ticket(
         basic_world=basic_world,
@@ -791,7 +832,9 @@ def test_only_expired_persisted_assignments_restore_legacy_group_fallback():
 
     visible = scope_ticket_queryset(user, Ticket.objects.all())
 
-    assert get_user_scopes(user) == [Scope(domain="operational")]
+    assert get_user_scopes(user) == [
+        Scope(domain="operational", office_id=str(user.office_id))
+    ]
     assert set(visible.values_list("title", flat=True)) == {"Operational normal"}
 
 
@@ -816,7 +859,9 @@ def test_reloaded_expired_role_user_uses_durable_legacy_group_fallback(
     reloaded = User.objects.get(pk=user.pk)
     visible = scope_ticket_queryset(reloaded, Ticket.objects.all())
 
-    assert get_user_scopes(reloaded) == [Scope(domain="operational")]
+    assert get_user_scopes(reloaded) == [
+        Scope(domain="operational", office_id=str(reloaded.office_id))
+    ]
     assert set(visible.values_list("title", flat=True)) == {"Operational normal"}
 
 
@@ -986,10 +1031,11 @@ def test_raw_restricted_grant_is_exact_to_its_same_domain_office_branch(basic_wo
 
     visible = scope_ticket_queryset(user, Ticket.objects.all())
 
-    assert set(visible.values_list("title", flat=True)) == {
-        "first restricted",
-        "second normal",
-    }
+    # The restricted-only grant stays exact inside the officer's own office —
+    # "first normal" is still hidden. The grant configured for the other office
+    # now contributes nothing at all: operational authority is confined to the
+    # office the officer is based at, so neither of its rows is visible.
+    assert set(visible.values_list("title", flat=True)) == {"first restricted"}
 
 
 @pytest.mark.usefixtures("_confidentiality_tickets")
@@ -1080,6 +1126,7 @@ def test_ticket_scope_decision_uses_one_immutable_authority_snapshot():
         pk=uuid4(),
         user_roles=manager,
         _groups=["auditors"],
+        office=_boundary_office(),
     )
 
     visible = scope_ticket_queryset(user, Ticket.objects.all())
@@ -1105,6 +1152,7 @@ def test_reused_user_gets_fresh_authority_snapshot_on_the_next_request():
         pk=uuid4(),
         user_roles=manager,
         _groups=[],
+        office=_boundary_office(),
     )
     factory = APIRequestFactory()
 
