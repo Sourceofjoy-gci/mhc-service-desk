@@ -7,11 +7,13 @@ have something to operate on.
 
 from __future__ import annotations
 
+from uuid import uuid4
+
 import pytest
 
 from apps.catalogue.models import RequestType, Service
 from apps.contacts.models import Contact
-from apps.identity_access.models import Role
+from apps.identity_access.models import Role, User
 from apps.identity_access.staff_roles import STAFF_DESIGNATION_ROLE_KEYS
 from apps.organisations.models import Office, Region
 from apps.sla.seed_sla import seed_sla
@@ -46,3 +48,30 @@ def basic_world(db):
         "it_inc": it_inc,
         "contact": contact,
     }
+
+
+@pytest.fixture
+def staff_user(basic_world):
+    """Build a staff user based at an office.
+
+    Office confinement is deny-by-default: a user with no office has no
+    operational or IT authority. Tests that need working authority must have an
+    office, so this factory assigns the seeded one unless told otherwise. Pass
+    ``office=None`` explicitly to build an unassigned officer.
+    """
+    _unset = object()
+
+    def _make(*, groups=(), office=_unset, station=None, **kwargs):
+        group_list = list(groups)
+        user = User.objects.create(
+            username=kwargs.pop("username", f"user-{uuid4().hex}"),
+            keycloak_subject=kwargs.pop("keycloak_subject", f"subject-{uuid4().hex}"),
+            keycloak_groups=group_list,
+            office=basic_world["office"] if office is _unset else office,
+            station=station,
+            **kwargs,
+        )
+        vars(user)["_groups"] = group_list
+        return user
+
+    return _make

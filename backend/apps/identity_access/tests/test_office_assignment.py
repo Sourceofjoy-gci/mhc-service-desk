@@ -175,3 +175,27 @@ def test_authority_lock_preloads_the_office(basic_world):
         with CaptureQueriesContext(connection) as captured:
             assert locked.office.is_active is True
         assert captured.captured_queries == []
+
+
+def test_staff_user_fixture_defaults_to_the_seeded_office(basic_world, staff_user):
+    user = staff_user(groups=["ops-agents"])
+    assert user.office == basic_world["office"]
+    assert user.keycloak_groups == ["ops-agents"]
+    assert vars(user)["_groups"] == ["ops-agents"]
+
+
+def test_staff_user_fixture_accepts_an_explicit_office(basic_world, staff_user):
+    region = basic_world["region"]
+    other = Office.objects.create(region=region, code="ALT-1", name="Alternate")
+    assert staff_user(groups=["ops-agents"], office=other).office == other
+
+
+def test_staff_user_fixture_accepts_no_office(staff_user):
+    assert staff_user(groups=["ops-agents"], office=None).office is None
+
+
+def test_staff_user_fixture_generates_unique_identities(staff_user):
+    first = staff_user(groups=["ops-agents"])
+    second = staff_user(groups=["ops-agents"])
+    assert first.username != second.username
+    assert first.keycloak_subject != second.keycloak_subject
