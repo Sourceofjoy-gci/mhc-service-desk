@@ -39,10 +39,31 @@ def test_service_desk_is_not_in_the_it_domain():
 
 
 def test_service_desk_cannot_reassign():
+    """Neither spelling may reassign tickets: reassignment is a supervisory power."""
     from apps.tickets.permissions import REASSIGN_GROUPS
 
     assert "service-desk-agents" not in REASSIGN_GROUPS
     assert "agent-servicedesk" not in REASSIGN_GROUPS
+
+
+def test_service_desk_cannot_view_restricted_scopes():
+    """Cross-office reach (added later) must never combine with restricted-ticket
+    visibility, so neither spelling may appear among the scope roles that are
+    granted `can_view_restricted_rows=True`."""
+    from apps.identity_access.scope import _RESTRICTED_VIEW_ROLES
+
+    assert "service-desk-agents" not in _RESTRICTED_VIEW_ROLES
+    assert "agent-servicedesk" not in _RESTRICTED_VIEW_ROLES
+
+
+def test_service_desk_is_not_a_restricted_ticket_role():
+    """Restricted tickets (security, fraud, complaint, privacy) must stay invisible
+    to the service desk, so neither spelling may appear in the ticket-eligibility
+    restricted role set."""
+    from apps.tickets.eligibility import _RESTRICTED_ROLE_KEYS
+
+    assert "service-desk-agents" not in _RESTRICTED_ROLE_KEYS
+    assert "agent-servicedesk" not in _RESTRICTED_ROLE_KEYS
 
 
 def test_service_desk_group_is_accepted_by_the_authenticator():
