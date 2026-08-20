@@ -492,7 +492,7 @@ def test_dev_token_fourth_segment_sets_the_office(basic_world, client, settings)
     settings.DEBUG = True
     office = basic_world["office"]
     response = client.get(
-        "/api/v1/me",
+        "/api/v1/identity/me",
         HTTP_AUTHORIZATION=f"Bearer dev:deskofficer:ops-agents:{office.code}",
     )
     assert response.status_code == 200
@@ -503,14 +503,14 @@ def test_dev_token_fourth_segment_sets_the_office(basic_world, client, settings)
 def test_three_segment_dev_token_still_authenticates(basic_world, client, settings):
     settings.DEBUG = True
     response = client.get(
-        "/api/v1/me",
+        "/api/v1/identity/me",
         HTTP_AUTHORIZATION="Bearer dev:legacyofficer:ops-agents",
     )
     assert response.status_code == 200
     assert User.objects.get(username="legacyofficer").office is None
 ```
 
-If `/api/v1/me` is not the mounted path for `identity-me`, confirm the prefix with `docker compose exec backend python manage.py show_urls | grep identity-me` (or read `backend/config/urls.py`) and use the real path in both tests.
+The endpoint path is `/api/v1/identity/me` — `apps.identity_access.urls` is mounted under `api/v1/identity/` in `backend/config/urls.py:31`, and its own urlpatterns declare `path("me", ...)`. Do not use `/api/v1/me`; it does not exist.
 
 - [ ] **Step 6: Run the full identity suite**
 
@@ -549,7 +549,7 @@ def test_me_returns_office_and_station(basic_world, client, settings):
     ServiceLocation.objects.create(office=office, name="Counter-9")
 
     response = client.get(
-        "/api/v1/me",
+        "/api/v1/identity/me",
         HTTP_AUTHORIZATION=f"Bearer dev:contractofficer:ops-agents:{office.code}",
     )
 
@@ -566,7 +566,7 @@ def test_me_returns_office_and_station(basic_world, client, settings):
 def test_me_returns_null_office_when_unassigned(client, settings):
     settings.DEBUG = True
     response = client.get(
-        "/api/v1/me",
+        "/api/v1/identity/me",
         HTTP_AUTHORIZATION="Bearer dev:unassignedofficer:ops-agents",
     )
     assert response.status_code == 200
@@ -1541,8 +1541,25 @@ Expected: "No changes detected".
 
 - [ ] **Step 10: Commit**
 
+**Stage only the files this task edited.** The working tree carries 161 pre-existing modified files under `backend/apps` that are unrelated to this work — `git add backend/apps` would commit all of them. Enumerate the test modules you actually edited in Step 7 and name them:
+
 ```bash
-git add backend/apps/identity_access/scope.py backend/apps/identity_access/tests/test_office_boundary.py backend/conftest.py backend/apps
+git add backend/apps/identity_access/scope.py backend/apps/identity_access/tests/test_office_boundary.py backend/conftest.py
+```
+
+```bash
+git add <each test module you edited in Step 7, listed explicitly>
+```
+
+Confirm nothing unrelated is staged before committing:
+
+```bash
+git status --short --cached
+```
+
+Every staged path must be one you edited in this task. If anything else appears, unstage it with `git restore --staged <path>`.
+
+```bash
 git commit -m "feat(identity): confine operational and IT authority to the officer's office"
 ```
 
