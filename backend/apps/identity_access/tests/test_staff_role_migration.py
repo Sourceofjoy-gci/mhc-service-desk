@@ -1,14 +1,15 @@
 from __future__ import annotations
 
 import pytest
-from django.db import connection
-from django.db.migrations.executor import MigrationExecutor
+
+PREVIOUS = "0002_user_groups"
+SUBJECT = "0003_internal_staff_roles"
 
 
 @pytest.mark.django_db(transaction=True)
-def test_internal_staff_role_migration_adds_missing_roles_and_preserves_configuration():
-    before = [("identity_access", "0002_user_groups")]
-    after = [("identity_access", "0003_internal_staff_roles")]
+def test_internal_staff_role_migration_adds_missing_roles_and_preserves_configuration(
+    migrations,
+):
     expected_descriptions = {
         "records-officer": (
             "Register new estate matters; capture metadata; receive and index "
@@ -33,41 +34,33 @@ def test_internal_staff_role_migration_adds_missing_roles_and_preserves_configur
         ),
     }
 
-    try:
-        executor = MigrationExecutor(connection)
-        executor.migrate(before)
-        old_apps = executor.loader.project_state(before).apps
-        old_role = old_apps.get_model("identity_access", "Role")
-        old_role.objects.filter(keycloak_role__in=expected_descriptions).delete()
-        old_role.objects.create(
-            keycloak_role="master",
-            name="Configured Master",
-            description="",
-            scopes=[{"domain": "operational", "office": "configured-office"}],
-        )
+    old_apps = migrations.migrate("identity_access", PREVIOUS)
+    old_role = old_apps.get_model("identity_access", "Role")
+    old_role.objects.filter(keycloak_role__in=expected_descriptions).delete()
+    old_role.objects.create(
+        keycloak_role="master",
+        name="Configured Master",
+        description="",
+        scopes=[{"domain": "operational", "office": "configured-office"}],
+    )
 
-        executor = MigrationExecutor(connection)
-        executor.migrate(after)
-        new_apps = executor.loader.project_state(after).apps
-        migrated_role = new_apps.get_model("identity_access", "Role")
-        roles = {
-            role.keycloak_role: role
-            for role in migrated_role.objects.filter(
-                keycloak_role__in=expected_descriptions,
-            )
-        }
-
-        assert set(roles) == set(expected_descriptions)
-        assert roles["master"].name == "Configured Master"
-        assert roles["master"].scopes == [{"domain": "operational", "office": "configured-office"}]
-        assert {
-            role_key: role.description for role_key, role in roles.items()
-        } == expected_descriptions
-        assert all(
-            role.scopes == [{"domain": "operational"}]
-            for role_key, role in roles.items()
-            if role_key != "master"
+    new_apps = migrations.migrate("identity_access", SUBJECT)
+    migrated_role = new_apps.get_model("identity_access", "Role")
+    roles = {
+        role.keycloak_role: role
+        for role in migrated_role.objects.filter(
+            keycloak_role__in=expected_descriptions,
         )
-    finally:
-        executor = MigrationExecutor(connection)
-        executor.migrate(executor.loader.graph.leaf_nodes("identity_access"))
+    }
+
+    assert set(roles) == set(expected_descriptions)
+    assert roles["master"].name == "Configured Master"
+    assert roles["master"].scopes == [{"domain": "operational", "office": "configured-office"}]
+    assert {
+        role_key: role.description for role_key, role in roles.items()
+    } == expected_descriptions
+    assert all(
+        role.scopes == [{"domain": "operational"}]
+        for role_key, role in roles.items()
+        if role_key != "master"
+    )

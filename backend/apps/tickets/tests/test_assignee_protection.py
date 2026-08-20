@@ -182,29 +182,16 @@ def test_assignment_wins_concurrent_user_delete_without_deadlock_or_silent_unass
     assert _event_counts(ticket) == (1, 1, 1)
 
 
-def test_0009_changes_assignee_deletion_from_set_null_to_protect_and_rolls_back() -> None:
-    from django.db.migrations.executor import MigrationExecutor
-
+def test_0009_changes_assignee_deletion_from_set_null_to_protect_and_rolls_back(
+    migrations,
+) -> None:
     previous = "0008_harden_ticket_custody_contract"
-    leaf = "0009_protect_ticket_assignee"
-    current_leaf = "0013_escalated_workflow"
-    try:
-        executor = MigrationExecutor(connection)
-        executor.migrate([("tickets", previous)])
-        before_apps = executor.loader.project_state([("tickets", previous)]).apps
-        before_field = before_apps.get_model("tickets", "Ticket")._meta.get_field("assignee")
-        assert before_field.remote_field.on_delete is SET_NULL
+    subject = "0009_protect_ticket_assignee"
 
-        executor = MigrationExecutor(connection)
-        executor.migrate([("tickets", leaf)])
-        after_apps = executor.loader.project_state([("tickets", leaf)]).apps
-        after_field = after_apps.get_model("tickets", "Ticket")._meta.get_field("assignee")
-        assert after_field.remote_field.on_delete is PROTECT
+    def _on_delete(apps):
+        field = apps.get_model("tickets", "Ticket")._meta.get_field("assignee")
+        return field.remote_field.on_delete
 
-        executor = MigrationExecutor(connection)
-        executor.migrate([("tickets", previous)])
-        rollback_apps = executor.loader.project_state([("tickets", previous)]).apps
-        rollback_field = rollback_apps.get_model("tickets", "Ticket")._meta.get_field("assignee")
-        assert rollback_field.remote_field.on_delete is SET_NULL
-    finally:
-        MigrationExecutor(connection).migrate([("tickets", current_leaf)])
+    assert _on_delete(migrations.migrate("tickets", previous)) is SET_NULL
+    assert _on_delete(migrations.migrate("tickets", subject)) is PROTECT
+    assert _on_delete(migrations.migrate("tickets", previous)) is SET_NULL

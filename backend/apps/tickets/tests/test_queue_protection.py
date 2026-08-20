@@ -5,7 +5,7 @@ from __future__ import annotations
 from uuid import uuid4
 
 import pytest
-from django.db import connection, transaction
+from django.db import transaction
 from django.db.models.deletion import PROTECT, SET_NULL, ProtectedError
 from django.urls import reverse
 
@@ -113,29 +113,16 @@ def test_service_location_admin_disables_hard_delete_but_allows_deactivation(
     assert _evidence_counts(ticket) == before
 
 
-def test_0010_changes_queue_deletion_from_set_null_to_protect_and_rolls_back() -> None:
-    from django.db.migrations.executor import MigrationExecutor
-
+def test_0010_changes_queue_deletion_from_set_null_to_protect_and_rolls_back(
+    migrations,
+) -> None:
     previous = "0009_protect_ticket_assignee"
-    leaf = "0010_protect_ticket_queue"
-    try:
-        executor = MigrationExecutor(connection)
-        executor.migrate([("tickets", previous)])
-        before_apps = executor.loader.project_state([("tickets", previous)]).apps
-        before_field = before_apps.get_model("tickets", "Ticket")._meta.get_field("queue")
-        assert before_field.remote_field.on_delete is SET_NULL
+    subject = "0010_protect_ticket_queue"
 
-        executor = MigrationExecutor(connection)
-        executor.migrate([("tickets", leaf)])
-        after_apps = executor.loader.project_state([("tickets", leaf)]).apps
-        after_field = after_apps.get_model("tickets", "Ticket")._meta.get_field("queue")
-        assert after_field.remote_field.on_delete is PROTECT
+    def _on_delete(apps):
+        field = apps.get_model("tickets", "Ticket")._meta.get_field("queue")
+        return field.remote_field.on_delete
 
-        executor = MigrationExecutor(connection)
-        executor.migrate([("tickets", previous)])
-        rollback_apps = executor.loader.project_state([("tickets", previous)]).apps
-        rollback_field = rollback_apps.get_model("tickets", "Ticket")._meta.get_field("queue")
-        assert rollback_field.remote_field.on_delete is SET_NULL
-    finally:
-        executor = MigrationExecutor(connection)
-        executor.migrate(executor.loader.graph.leaf_nodes("tickets"))
+    assert _on_delete(migrations.migrate("tickets", previous)) is SET_NULL
+    assert _on_delete(migrations.migrate("tickets", subject)) is PROTECT
+    assert _on_delete(migrations.migrate("tickets", previous)) is SET_NULL

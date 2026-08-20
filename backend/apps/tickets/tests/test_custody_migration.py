@@ -20,38 +20,25 @@ from apps.workflow.models import Status, TransitionHistory
 pytestmark = pytest.mark.django_db(transaction=True)
 
 
-def test_0005_table_rolls_back_and_restores_through_current_leaf():
+def test_0005_table_rolls_back_and_restores_through_current_leaf(migrations):
     """The original custody-table migration must reverse and replay cleanly."""
-    from django.db.migrations.executor import MigrationExecutor
-
-    leaf = "0013_escalated_workflow"
     table = "ticket_custody_event"
-    try:
-        executor = MigrationExecutor(connection)
-        executor.migrate([("tickets", "0004_ticket_next_action_ticket_next_action_at")])
+    previous = "0004_ticket_next_action_ticket_next_action_at"
 
-        executor = MigrationExecutor(connection)
-        executor.migrate([("tickets", "0005_ticketcustodyevent")])
-        forward_apps = executor.loader.project_state([("tickets", "0005_ticketcustodyevent")]).apps
-        assert forward_apps.get_model("tickets", "TicketCustodyEvent") is not None
-        assert table in connection.introspection.table_names()
+    migrations.migrate("tickets", previous)
 
-        executor = MigrationExecutor(connection)
-        executor.migrate([("tickets", "0004_ticket_next_action_ticket_next_action_at")])
-        backward_apps = executor.loader.project_state(
-            [("tickets", "0004_ticket_next_action_ticket_next_action_at")]
-        ).apps
-        with pytest.raises(LookupError):
-            backward_apps.get_model("tickets", "TicketCustodyEvent")
-        assert table not in connection.introspection.table_names()
+    forward_apps = migrations.migrate("tickets", "0005_ticketcustodyevent")
+    assert forward_apps.get_model("tickets", "TicketCustodyEvent") is not None
+    assert table in connection.introspection.table_names()
 
-        executor = MigrationExecutor(connection)
-        executor.migrate([("tickets", leaf)])
-        restored_apps = executor.loader.project_state([("tickets", leaf)]).apps
-        assert restored_apps.get_model("tickets", "TicketCustodyEvent") is not None
-        assert table in connection.introspection.table_names()
-    finally:
-        MigrationExecutor(connection).migrate([("tickets", leaf)])
+    backward_apps = migrations.migrate("tickets", previous)
+    with pytest.raises(LookupError):
+        backward_apps.get_model("tickets", "TicketCustodyEvent")
+    assert table not in connection.introspection.table_names()
+
+    restored_apps = migrations.migrate_to_leaf("tickets")
+    assert restored_apps.get_model("tickets", "TicketCustodyEvent") is not None
+    assert table in connection.introspection.table_names()
 
 
 def _ticket(basic_world, *, number: str) -> Ticket:
@@ -286,7 +273,7 @@ def test_backfill_and_activity_keep_later_transition_to_an_initial_status(basic_
 
 
 @pytest.mark.django_db(transaction=True)
-def test_0006_rollback_restores_trigger_fk_index_and_legacy_data(basic_world):
+def test_0006_rollback_restores_trigger_fk_index_and_legacy_data(basic_world, migrations):
     """Rollback intentionally keeps backfill rows but must remove DB protection."""
     if connection.vendor != "postgresql":
         pytest.skip("PostgreSQL migration coverage")
@@ -350,10 +337,10 @@ def test_0006_rollback_restores_trigger_fk_index_and_legacy_data(basic_world):
             with transaction.atomic(), connection.cursor() as cursor:
                 cursor.execute("DELETE FROM ticket WHERE id = %s", [ticket.pk])
     finally:
-        MigrationExecutor(connection).migrate([("tickets", "0013_escalated_workflow")])
+        migrations.migrate_to_leaf("tickets")
 
 
-def test_0007_keeps_database_cascade_while_collector_skips_custody():
+def test_0007_keeps_database_cascade_while_collector_skips_custody(migrations):
     """The ORM state omits custody, but the database cascade remains authoritative."""
     if connection.vendor != "postgresql":
         pytest.skip("PostgreSQL migration coverage")
@@ -415,12 +402,10 @@ def test_0007_keeps_database_cascade_while_collector_skips_custody():
             )
             assert cursor.fetchone() == ("c",)
     finally:
-        MigrationExecutor(connection).migrate(
-            [("tickets", "0013_escalated_workflow")]
-        )
+        migrations.migrate_to_leaf("tickets")
 
 
-def test_0007_0008_and_rollback_enforce_their_distinct_delete_contracts(basic_world):
+def test_0007_0008_and_rollback_enforce_their_distinct_delete_contracts(basic_world, migrations):
     """Only 0008 may require the approved gate, and it must reject child deletes."""
     if connection.vendor != "postgresql":
         pytest.skip("PostgreSQL migration coverage")
@@ -456,16 +441,12 @@ def test_0007_0008_and_rollback_enforce_their_distinct_delete_contracts(basic_wo
 
     try:
         MigrationExecutor(connection).migrate([("tickets", "0005_ticketcustodyevent")])
-        MigrationExecutor(connection).migrate(
-            [("tickets", "0007_ticket_custody_collector_state")]
-        )
+        MigrationExecutor(connection).migrate([("tickets", "0007_ticket_custody_collector_state")])
         fresh_0007 = ticket_with_custody("OP-MIGRATION-0007-FRESH")
         raw_parent_delete(fresh_0007.pk)
         assert not Ticket._base_manager.filter(pk=fresh_0007.pk).exists()
 
-        MigrationExecutor(connection).migrate(
-            [("tickets", "0009_protect_ticket_assignee")]
-        )
+        MigrationExecutor(connection).migrate([("tickets", "0009_protect_ticket_assignee")])
         upgraded_0008 = ticket_with_custody("OP-MIGRATION-0008-GUARDED")
         upgraded_event = upgraded_0008.custody_events.get()
         with pytest.raises(DatabaseError, match="immutable"):
@@ -477,16 +458,12 @@ def test_0007_0008_and_rollback_enforce_their_distinct_delete_contracts(basic_wo
             cursor.execute("DELETE FROM ticket WHERE id = %s", [upgraded_0008.pk])
         assert not Ticket._base_manager.filter(pk=upgraded_0008.pk).exists()
 
-        MigrationExecutor(connection).migrate(
-            [("tickets", "0007_ticket_custody_collector_state")]
-        )
+        MigrationExecutor(connection).migrate([("tickets", "0007_ticket_custody_collector_state")])
         rolled_back_0007 = ticket_with_custody("OP-MIGRATION-0007-ROLLBACK")
         raw_parent_delete(rolled_back_0007.pk)
         assert not Ticket._base_manager.filter(pk=rolled_back_0007.pk).exists()
     finally:
-        MigrationExecutor(connection).migrate(
-            [("tickets", "0013_escalated_workflow")]
-        )
+        migrations.migrate_to_leaf("tickets")
 
 
 def test_backfill_synthesizes_only_a_minimal_legacy_created_event(basic_world):
@@ -632,9 +609,7 @@ def test_backfilled_unresolved_facts_do_not_depend_on_the_linked_audit(basic_wor
     )
 
     activity = build_ticket_activity(ticket)
-    owner_event = next(
-        item for item in activity if item["payload"].get("action") == "unassigned"
-    )
+    owner_event = next(item for item in activity if item["payload"].get("action") == "unassigned")
     queue_event = next(
         item for item in activity if item["payload"].get("action") == "queue_changed"
     )
@@ -644,12 +619,18 @@ def test_backfilled_unresolved_facts_do_not_depend_on_the_linked_audit(basic_wor
 
     AuditEvent.objects.filter(pk=audit.pk).delete()
     after_delete = build_ticket_activity(ticket)
-    assert next(
-        item for item in after_delete if item["payload"].get("action") == "unassigned"
-    )["payload"]["previous_owner"]["id"] == "deleted-owner"
-    assert next(
-        item for item in after_delete if item["payload"].get("action") == "queue_changed"
-    )["payload"]["previous_queue"]["id"] == "deleted-queue"
+    assert (
+        next(item for item in after_delete if item["payload"].get("action") == "unassigned")[
+            "payload"
+        ]["previous_owner"]["id"]
+        == "deleted-owner"
+    )
+    assert (
+        next(item for item in after_delete if item["payload"].get("action") == "queue_changed")[
+            "payload"
+        ]["previous_queue"]["id"]
+        == "deleted-queue"
+    )
 
 
 def test_blank_actors_on_real_legacy_sources_are_not_claimed_as_system(basic_world):
