@@ -94,6 +94,9 @@ def _ticket(
     )
 
 
+_UNSET_OFFICE = object()
+
+
 def _user(
     *,
     username: str | None = None,
@@ -101,11 +104,14 @@ def _user(
     groups: list[str] | None = None,
     active: bool = True,
     user_id: UUID | None = None,
-    office: Office | None = None,
+    office: Office | None = _UNSET_OFFICE,
 ) -> User:
     # Operational and IT authority is confined to the officer's office, and
     # candidate lookups apply that boundary too, so every staff actor is based
-    # at the seeded office unless a test is about crossing offices.
+    # at the seeded office unless a test is about crossing offices. A sentinel
+    # rather than ``office or ...`` keeps ``office=None`` meaning what it says:
+    # this module is about office boundaries, so it must stay able to build an
+    # officer with no office at all.
     resolved_username = username or f"staff-{uuid4().hex}"
     user = User.objects.create(
         id=user_id or uuid4(),
@@ -114,7 +120,7 @@ def _user(
         display_name=display_name,
         keycloak_groups=groups or [],
         is_active=active,
-        office=office or Office.objects.get(code="TST-1"),
+        office=Office.objects.get(code="TST-1") if office is _UNSET_OFFICE else office,
     )
     user._groups = groups or []
     return user

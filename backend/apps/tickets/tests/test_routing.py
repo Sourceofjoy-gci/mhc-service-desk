@@ -11,9 +11,11 @@ from rest_framework.test import APIClient
 
 from apps.audit.models import AuditEvent
 from apps.identity_access.models import Role, User, UserRole
+from apps.identity_access.scope import get_authority_snapshot
 from apps.organisations.models import Office, ServiceLocation
 from apps.tickets import assignment as assignment_service
 from apps.tickets.models import OutboxEvent, Ticket, TicketCustodyEvent
+from apps.tickets.permissions import can_route_ticket, can_unqueue_ticket
 from apps.tickets.services import (
     TicketConflictError,
     TicketPermissionError,
@@ -1064,3 +1066,111 @@ def test_office_less_persisted_supervisor_cannot_route_another_office(basic_worl
     ticket.refresh_from_db()
     assert ticket.queue_id == current.id
     assert _counts(ticket) == (0, 0, 0)
+
+
+@pytest.mark.parametrize("routing_kind", ["destination", "unqueue"])
+def test_office_less_persisted_supervisor_with_desk_role_routes_own_restricted_work(
+    basic_world,
+    routing_kind,
+):
+    """A combined desk/supervisor identity keeps its supervisor half intact.
+
+    Holding a service desk role makes the whole identity cross-office, and the
+    national reach that grants comes from one appended unconfined operational
+    scope -- not from the role grants. Exempting the grants from confinement as
+    well left them carrying no office at all, so routing's restricted-visibility
+    lookup missed the office-keyed entry that confinement had just written and
+    denied a supervisor the restricted work of their own office: the very
+    lockout already fixed for identities without a desk role.
+    """
+    current = _queue(basic_world, f"Desk supervisor current {routing_kind}")
+    destination = _queue(basic_world, f"Desk supervisor target {routing_kind}")
+    ticket = _ticket(
+        basic_world,
+        queue=current,
+        confidentiality=Ticket.Confidentiality.RESTRICTED,
+    )
+    actor = _user(display_name="Desk Supervisor")
+    supervision = _grant_with_keycloak_office_only(actor, role_key="ops-supervisors")
+    desk = _grant_with_keycloak_office_only(actor, role_key="service-desk-agents")
+    assert supervision.office_id is None
+    assert desk.office_id is None
+    assert actor.office_id == ticket.office_id
+    # Without the desk half this is the plain office-less supervisor case, so
+    # pin that the cross-office branch is the one under test.
+    assert get_authority_snapshot(actor).cross_office_identity is True
+
+    result = _route(
+        ticket,
+        actor,
+        queue_id=destination.id if routing_kind == "destination" else None,
+        assignee_id=None,
+        reason="Route my own office's restricted work while also on the desk.",
+    )
+
+    ticket.refresh_from_db()
+    assert result.ticket.id == ticket.id
+    assert ticket.queue_id == (destination.id if routing_kind == "destination" else None)
+    assert ticket.confidentiality == Ticket.Confidentiality.RESTRICTED
+    assert _counts(ticket) == (1, 1, 1)
+
+
+def test_grant_bound_to_another_office_is_inert_in_both_offices(basic_world):
+    """Confinement rewrites a foreign-office grant instead of dropping it.
+
+    A grant issued for another office is deliberately kept rather than discarded,
+    on the argument that confinement leaves it unable to match anything. Pin both
+    halves of that argument. The grant's scopes arrive carrying no office of their
+    own, so confinement rewrites them to the officer's office while the issued
+    office stays on the grant itself; every consumer requires the grant's office
+    and its scope's office to *both* equal the ticket's, so the survivor is inert
+    in the officer's office (the grant's office disagrees) and equally inert in
+    the office it names (the rewritten scope disagrees).
+
+    The shape assertions are the guard here: with no scope surviving in either
+    office this actor's routing denial is carried by confinement of the snapshot
+    scopes, so the behavioural half alone would still pass if grant confinement
+    were removed -- exactly the weakness of
+    ``test_office_less_persisted_supervisor_cannot_route_another_office``.
+    """
+    issued_office = Office.objects.create(
+        region=basic_world["region"],
+        code=f"ISSUED-{uuid4().hex[:8]}",
+        name="Office the grant was issued for",
+    )
+    home_queue = _queue(basic_world, "Home destination")
+    issued_queue = _queue(basic_world, "Issued destination", office=issued_office)
+
+    actor = _user(display_name="Supervisor Granted Elsewhere")
+    assert actor.office_id == basic_world["office"].id
+    role = Role.objects.create(
+        keycloak_role="ops-supervisors",
+        name=f"ops-supervisors-{uuid4().hex[:8]}",
+    )
+    assignment = UserRole.objects.create(user=actor, role=role, office=issued_office)
+    assert assignment.office_id == issued_office.id
+
+    home_ticket = _ticket(basic_world, queue=_queue(basic_world, "Home current"))
+    issued_ticket = _ticket(basic_world, queue=issued_queue)
+    Ticket.objects.filter(pk=issued_ticket.pk).update(office=issued_office)
+    issued_ticket.refresh_from_db()
+    assert home_ticket.office_id == basic_world["office"].id
+    assert issued_ticket.office_id == issued_office.id
+
+    snapshot = get_authority_snapshot(actor)
+    # Kept, not dropped -- and confined: the issued office stays on the grant
+    # while its scope is rewritten to the officer's own office.
+    assert [grant.role_key for grant in snapshot.role_grants] == ["ops-supervisors"]
+    survivor = snapshot.role_grants[0]
+    assert survivor.office_id == issued_office.id
+    assert [scope.office_id for scope in survivor.scopes] == [str(basic_world["office"].id)]
+    # The officer's own scopes were confined away entirely, so the grant is the
+    # only authority left standing and it matches no office at all.
+    assert snapshot.scopes == ()
+
+    # At the officer's own office the grant's issued office rules it out.
+    assert can_route_ticket(actor, home_ticket, home_queue) is False
+    assert can_unqueue_ticket(actor, home_ticket) is False
+    # At the office the grant names, its confined scope rules it out.
+    assert can_route_ticket(actor, issued_ticket, issued_queue) is False
+    assert can_unqueue_ticket(actor, issued_ticket) is False

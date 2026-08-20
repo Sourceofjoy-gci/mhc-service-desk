@@ -578,11 +578,7 @@ def _apply_office_boundary(
         snapshot,
         scopes=tuple(_normalise_scopes(scopes)),
         restricted_scope_keys=frozenset(restricted_scope_keys),
-        role_grants=(
-            snapshot.role_grants
-            if snapshot.cross_office_identity
-            else _bounded_role_grants(snapshot.role_grants, boundary)
-        ),
+        role_grants=_bounded_role_grants(snapshot.role_grants, boundary),
     )
 
 
