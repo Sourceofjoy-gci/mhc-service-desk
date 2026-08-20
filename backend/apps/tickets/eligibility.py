@@ -22,6 +22,9 @@ from apps.identity_access.scope import (
     scope_ticket_queryset,
 )
 from apps.identity_access.scope import (
+    _apply_office_boundary as apply_office_boundary,
+)
+from apps.identity_access.scope import (
     _scope_key as scope_key,
 )
 from apps.identity_access.scope import (
@@ -177,9 +180,17 @@ def _authority_for_candidate(
     active_assignments: list[UserRole],
     groups: set[str],
 ) -> AuthoritySnapshot:
+    """Resolve a candidate's authority through the same office boundary.
+
+    Candidate pickers are the one place that builds a snapshot outside
+    ``_build_authority_snapshot``, so the boundary has to be re-applied here or
+    officers of other offices leak into the assignee and escalation lists.
+    """
     if active_assignments:
-        return snapshot_from_persisted(cast(Any, active_assignments))
-    return snapshot_from_groups(SimpleNamespace(_groups=groups))
+        snapshot = snapshot_from_persisted(cast(Any, active_assignments))
+    else:
+        snapshot = snapshot_from_groups(SimpleNamespace(_groups=groups))
+    return apply_office_boundary(snapshot, user)
 
 
 def _scope_matches_ticket(scope: Scope, ticket: Ticket) -> bool:
@@ -603,10 +614,15 @@ def _eligible_candidates(
     search: str,
     allowed_designation_role_keys: frozenset[str] | None,
 ) -> tuple[AssigneeCandidate, ...]:
-    users = User.objects.filter(is_active=True).prefetch_related(
-        "user_roles__role",
-        "user_roles__office",
-        "groups",
+    users = (
+        User.objects.filter(is_active=True)
+        # The office boundary reads ``user.office``; without this the candidate
+        # sweep would issue one query per member of staff.
+        .select_related("office").prefetch_related(
+            "user_roles__role",
+            "user_roles__office",
+            "groups",
+        )
     )
     candidates = tuple(
         candidate

@@ -478,6 +478,49 @@ def _office_boundary_id(user: object) -> str | None:
     return str(office.id)
 
 
+def _bounded_role_grants(
+    grants: tuple[EffectiveRoleGrant, ...],
+    boundary: str | None,
+) -> tuple[EffectiveRoleGrant, ...]:
+    """Confine grants exactly as ``_apply_office_boundary`` confines scopes.
+
+    Routing authority reads its restricted-visibility key off the grant rather
+    than off ``snapshot.scopes``. Rewriting the scopes while leaving the grants
+    alone would make that lookup miss the rewritten key, silently denying a
+    supervisor the restricted work of their own office.
+
+    A grant already bound to another office keeps that binding: every consumer
+    requires ``grant.office_id`` to equal the ticket's office, so once its own
+    scopes are confined here such a grant can no longer match anything.
+    """
+    bounded: list[EffectiveRoleGrant] = []
+    for grant in grants:
+        scopes: list[Scope] = []
+        for scope in grant.scopes:
+            if scope.domain not in _OFFICE_BOUND_DOMAINS:
+                scopes.append(scope)
+                continue
+            if boundary is None:
+                continue
+            if scope.office_id is not None and scope.office_id != boundary:
+                continue
+            scopes.append(replace(scope, office_id=boundary))
+        if not scopes:
+            continue
+
+        office_id = grant.office_id
+        # A grant that still carries non-office-bound (``admin``) authority keeps
+        # its own office: administration is exempt per scope, never per identity.
+        if (
+            office_id is None
+            and boundary is not None
+            and all(scope.domain in _OFFICE_BOUND_DOMAINS for scope in scopes)
+        ):
+            office_id = UUID(boundary)
+        bounded.append(replace(grant, scopes=tuple(scopes), office_id=office_id))
+    return tuple(bounded)
+
+
 def _apply_office_boundary(
     snapshot: AuthoritySnapshot,
     user: object,
@@ -485,14 +528,22 @@ def _apply_office_boundary(
     """Confine operational and IT authority to the officer's office.
 
     ``admin`` scopes pass through untouched so a Keycloak misconfiguration can
-    never lock out system administration. Cross-office identities — the service
-    desk and auditors — are exempt entirely.
+    never lock out system administration. Auditors are exempt entirely: their
+    mandate is national and deliberately includes restricted work.
+
+    The service desk is national too, but only for the work it actually answers.
+    Confining a desk identity like anyone else and then appending one unconfined,
+    non-restricted operational scope keeps the two halves of a combined identity
+    honest: the appended scope's key is deliberately absent from
+    ``restricted_scope_keys``, so its ``scope_ticket_queryset`` branch excludes
+    restricted rows in every office, while a supervisor half stays bound to its
+    own office and keeps restricted visibility only there.
 
     ``_scope_key`` includes ``office_id``, so every rewritten scope must have its
     restricted-view key remapped in the same pass. Skipping that would silently
     strip restricted-ticket visibility from every supervisor.
     """
-    if snapshot.cross_office_identity:
+    if snapshot.auditor_identity:
         return snapshot
 
     boundary = _office_boundary_id(user)
@@ -518,10 +569,20 @@ def _apply_office_boundary(
         if was_restricted:
             restricted_scope_keys.add(_scope_key(bound))
 
+    if snapshot.cross_office_identity:
+        # The service desk half answers nationally and never sees restricted
+        # work, so its key stays out of ``restricted_scope_keys``.
+        scopes.append(Scope(domain="operational"))
+
     return replace(
         snapshot,
         scopes=tuple(_normalise_scopes(scopes)),
         restricted_scope_keys=frozenset(restricted_scope_keys),
+        role_grants=(
+            snapshot.role_grants
+            if snapshot.cross_office_identity
+            else _bounded_role_grants(snapshot.role_grants, boundary)
+        ),
     )
 
 

@@ -14,6 +14,7 @@ from apps.identity_access.models import Role, User, UserRole
 from apps.identity_access.scope import get_authority_snapshot
 from apps.organisations.models import Office, ServiceLocation
 from apps.tickets import eligibility as ticket_eligibility
+from apps.tickets import permissions as ticket_permissions
 from apps.tickets.custody import CustodyParty
 from apps.tickets.eligibility import (
     DESIGNATIONS,
@@ -100,7 +101,11 @@ def _user(
     groups: list[str] | None = None,
     active: bool = True,
     user_id: UUID | None = None,
+    office: Office | None = None,
 ) -> User:
+    # Operational and IT authority is confined to the officer's office, and
+    # candidate lookups apply that boundary too, so every staff actor is based
+    # at the seeded office unless a test is about crossing offices.
     resolved_username = username or f"staff-{uuid4().hex}"
     user = User.objects.create(
         id=user_id or uuid4(),
@@ -109,6 +114,7 @@ def _user(
         display_name=display_name,
         keycloak_groups=groups or [],
         is_active=active,
+        office=office or Office.objects.get(code="TST-1"),
     )
     user._groups = groups or []
     return user
@@ -218,8 +224,7 @@ def test_escalation_supervisors_include_only_active_scoped_canonical_roles(
         master.id,
     }
     assert all(
-        set(candidate.designations)
-        <= {"Assistant Master", "Deputy Master", "Master"}
+        set(candidate.designations) <= {"Assistant Master", "Deputy Master", "Master"}
         for candidate in candidates
     )
     assert {
@@ -361,11 +366,7 @@ def test_designation_requires_role_and_assignment_offices_to_both_match(
     role_office = basic_world["office"]
     ticket = _ticket(
         basic_world,
-        office=(
-            role_office
-            if ticket_office_source == "role"
-            else assignment_office
-        ),
+        office=(role_office if ticket_office_source == "role" else assignment_office),
     )
     user = _user()
     _grant(
@@ -421,18 +422,17 @@ def test_each_primary_designation_is_an_explainable_exact_scope_candidate(
         designations=(display_name,),
         team_labels=(team_label,),
         role_summaries=(
-            (INTERNAL_ROLE_SUMMARIES[role_key],)
-            if role_key in INTERNAL_ROLE_SUMMARIES
-            else ()
+            (INTERNAL_ROLE_SUMMARIES[role_key],) if role_key in INTERNAL_ROLE_SUMMARIES else ()
         ),
     )
     assert is_eligible_assignee(ticket, user) is True
 
 
 def test_designation_table_is_complete_and_stable():
-    assert tuple(
-        (item.role_key, item.display_name, item.team_label) for item in DESIGNATIONS
-    ) == DESIGNATION_CASES
+    assert (
+        tuple((item.role_key, item.display_name, item.team_label) for item in DESIGNATIONS)
+        == DESIGNATION_CASES
+    )
 
 
 @pytest.mark.parametrize(
@@ -645,9 +645,7 @@ def test_every_auditor_identity_source_excludes_a_functional_designation_target(
 
     assert is_eligible_assignee(ticket, user) is False
     if auditor_source != "request":
-        assert user.id not in {
-            candidate.id for candidate in eligible_assignees(ticket)
-        }
+        assert user.id not in {candidate.id for candidate in eligible_assignees(ticket)}
 
 
 def test_only_expired_persisted_rows_allow_legacy_target_fallback(basic_world):
@@ -822,15 +820,9 @@ def test_search_matches_name_username_designation_and_team_case_insensitively(
     )
 
     assert [item.id for item in eligible_assignees(ticket, search="ADA")] == [finance.id]
-    assert [item.id for item in eligible_assignees(ticket, search="LEDGER")] == [
-        finance.id
-    ]
-    assert [item.id for item in eligible_assignees(ticket, search="estate EXAM")] == [
-        examiner.id
-    ]
-    assert [item.id for item in eligible_assignees(ticket, search="FINANCE")] == [
-        finance.id
-    ]
+    assert [item.id for item in eligible_assignees(ticket, search="LEDGER")] == [finance.id]
+    assert [item.id for item in eligible_assignees(ticket, search="estate EXAM")] == [examiner.id]
+    assert [item.id for item in eligible_assignees(ticket, search="FINANCE")] == [finance.id]
 
 
 def test_candidate_order_is_display_name_then_username_then_uuid(basic_world):
@@ -901,3 +893,60 @@ def test_custody_party_uses_stable_explainable_candidate_snapshot(basic_world):
         designations=("Estate Examiner",),
         team_labels=("Estate Administration",),
     )
+
+
+def test_candidate_pickers_exclude_officers_of_another_office(basic_world):
+    """Candidate lookups build the only authority snapshot outside
+    ``_build_authority_snapshot``. Without the office boundary re-applied here,
+    an officer of another office — holding their role through the group fallback,
+    with no ``UserRole`` row at all — leaks into this office's assignee and
+    escalation pickers."""
+    other_office = Office.objects.create(
+        region=basic_world["region"],
+        code="ELIG-OTHER",
+        name="Other eligibility office",
+    )
+    ticket = _ticket(basic_world)
+    local = _user(display_name="Local Agent", groups=["ops-agents"])
+    remote = _user(
+        display_name="Remote Agent",
+        groups=["ops-agents"],
+        office=other_office,
+    )
+    assert not remote.user_roles.exists()
+
+    candidate_ids = {candidate.id for candidate in eligible_assignees(ticket)}
+
+    assert local.id in candidate_ids
+    assert remote.id not in candidate_ids
+    assert is_eligible_assignee(ticket, local) is True
+    assert is_eligible_assignee(ticket, remote) is False
+    assert set(
+        ticket_permissions.eligible_assignee_queryset(ticket).values_list("id", flat=True)
+    ) == {local.id}
+
+
+def test_escalation_supervisor_picker_excludes_officers_of_another_office(basic_world):
+    other_office = Office.objects.create(
+        region=basic_world["region"],
+        code="ELIG-ESC-OTHER",
+        name="Other escalation office",
+    )
+    ticket = _ticket(basic_world)
+    local = _user(display_name="Local Master")
+    remote = _user(display_name="Remote Master", office=other_office)
+    _grant(
+        local,
+        role_key="master",
+        role_name="Master",
+        scopes=[{"domain": "operational"}],
+    )
+    UserRole.objects.create(user=remote, role=local.user_roles.get().role)
+
+    candidate_ids = {
+        candidate.id
+        for candidate in ticket_eligibility.eligible_escalation_supervisors(ticket)
+    }
+
+    assert local.id in candidate_ids
+    assert remote.id not in candidate_ids

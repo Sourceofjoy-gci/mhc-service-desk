@@ -158,3 +158,76 @@ def test_station_is_recorded_but_never_confines(basic_world, staff_user, ticket_
 
     assert queueless in visible
     assert all(scope.queue_id is None for scope in get_user_scopes(officer))
+
+
+def _desk_supervisor(staff_user):
+    """A national service desk agent who is also a supervisor of one office."""
+    return staff_user(groups=["service-desk-agents", "ops-supervisors"])
+
+
+def test_service_desk_supervisor_is_confined_then_granted_a_national_desk_scope(
+    basic_world,
+    staff_user,
+):
+    """The two halves of a combined identity keep exactly their own power: the
+    supervisor half stays bound to its office and keeps restricted visibility
+    there, the desk half reaches every office but never restricted work."""
+    office_id = str(basic_world["office"].id)
+    snapshot = get_authority_snapshot(_desk_supervisor(staff_user))
+
+    assert set(snapshot.scopes) == {
+        Scope(domain="operational", office_id=office_id),
+        Scope(domain="operational"),
+    }
+    assert snapshot.restricted_scope_keys == frozenset(
+        {("operational", office_id, None, None)}
+    )
+
+
+def test_service_desk_supervisor_sees_restricted_work_of_own_office_only(
+    basic_world,
+    other_office,
+    staff_user,
+    ticket_factory,
+):
+    mine = ticket_factory(office=basic_world["office"], confidentiality="restricted")
+    theirs = ticket_factory(office=other_office, confidentiality="restricted")
+
+    visible = scope_ticket_queryset(_desk_supervisor(staff_user), Ticket.objects.all())
+
+    assert mine in visible
+    assert theirs not in visible
+
+
+def test_service_desk_supervisor_still_answers_every_office(
+    basic_world,
+    other_office,
+    staff_user,
+    ticket_factory,
+):
+    mine = ticket_factory(office=basic_world["office"])
+    theirs = ticket_factory(office=other_office)
+
+    visible = scope_ticket_queryset(_desk_supervisor(staff_user), Ticket.objects.all())
+
+    assert mine in visible
+    assert theirs in visible
+
+
+def test_auditor_stays_unconfined_including_restricted_work(
+    basic_world,
+    other_office,
+    staff_user,
+    ticket_factory,
+):
+    """Auditors are cross-office by mandate, restricted work included."""
+    mine = ticket_factory(office=basic_world["office"], confidentiality="restricted")
+    theirs = ticket_factory(office=other_office, confidentiality="restricted")
+
+    visible = scope_ticket_queryset(
+        staff_user(groups=["auditors"], office=None),
+        Ticket.objects.all(),
+    )
+
+    assert mine in visible
+    assert theirs in visible

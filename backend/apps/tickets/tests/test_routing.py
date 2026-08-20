@@ -991,3 +991,76 @@ def test_routing_api_validates_required_fields(basic_world, payload, field):
     assert response.data["code"] == "invalid_routing"
     assert field in response.data["fields"]
     assert _counts(ticket) == (0, 0, 0)
+
+
+def _grant_with_keycloak_office_only(user: User, *, role_key: str) -> UserRole:
+    """Grant a role the way offices are sourced now: from Keycloak, not from the
+    ``UserRole`` row, so the assignment itself carries no office at all."""
+    role = Role.objects.create(
+        keycloak_role=role_key,
+        name=f"{role_key}-{uuid4().hex[:8]}",
+    )
+    return UserRole.objects.create(user=user, role=role, office=None)
+
+
+@pytest.mark.parametrize("routing_kind", ["destination", "unqueue"])
+def test_office_less_persisted_supervisor_routes_restricted_work_of_own_office(
+    basic_world,
+    routing_kind,
+):
+    """Confinement rewrites the snapshot's scopes, and routing reads its
+    restricted-visibility key off the role grant. Leaving the grant unconfined
+    made that lookup miss, locking a supervisor out of their own office's
+    restricted work — precisely the configuration Keycloak-sourced offices
+    produce, because those ``UserRole`` rows carry no office."""
+    current = _queue(basic_world, f"Office-less supervisor current {routing_kind}")
+    destination = _queue(basic_world, f"Office-less supervisor target {routing_kind}")
+    ticket = _ticket(
+        basic_world,
+        queue=current,
+        confidentiality=Ticket.Confidentiality.RESTRICTED,
+    )
+    actor = _user(display_name="Office-less Supervisor")
+    assignment = _grant_with_keycloak_office_only(actor, role_key="ops-supervisors")
+    assert assignment.office_id is None
+    assert actor.office_id == ticket.office_id
+
+    result = _route(
+        ticket,
+        actor,
+        queue_id=destination.id if routing_kind == "destination" else None,
+        assignee_id=None,
+        reason="Route restricted work inside my own office.",
+    )
+
+    ticket.refresh_from_db()
+    assert result.ticket.id == ticket.id
+    assert ticket.queue_id == (destination.id if routing_kind == "destination" else None)
+    assert ticket.confidentiality == Ticket.Confidentiality.RESTRICTED
+    assert _counts(ticket) == (1, 1, 1)
+
+
+def test_office_less_persisted_supervisor_cannot_route_another_office(basic_world):
+    """The same grant must not become a national one: confinement binds it to
+    the officer's own office, not to every office."""
+    other_office = Office.objects.create(
+        region=basic_world["region"],
+        code=f"OTHER-{uuid4().hex[:8]}",
+        name="Another office entirely",
+    )
+    current = _queue(basic_world, "Foreign current", office=other_office)
+    destination = _queue(basic_world, "Foreign target", office=other_office)
+    ticket = _ticket(basic_world, queue=current)
+    Ticket.objects.filter(pk=ticket.pk).update(office=other_office)
+    ticket.refresh_from_db()
+    actor = _user(display_name="Office-less Supervisor Abroad")
+    _grant_with_keycloak_office_only(actor, role_key="ops-supervisors")
+
+    # The confined snapshot does not even make the foreign ticket visible, so
+    # the denial lands one step earlier than a permission refusal.
+    with pytest.raises(TicketScopeError):
+        _route(ticket, actor, queue_id=destination.id, assignee_id=None)
+
+    ticket.refresh_from_db()
+    assert ticket.queue_id == current.id
+    assert _counts(ticket) == (0, 0, 0)
