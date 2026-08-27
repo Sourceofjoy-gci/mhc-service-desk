@@ -8,6 +8,7 @@ PRD §19.8: alert correlation must prevent a single outage from creating
 excessive independent tickets. We collapse alerts that share a
 `deduplication_key` (e.g. alertname+instance).
 """
+
 from __future__ import annotations
 
 import hashlib
@@ -36,9 +37,10 @@ def _coalesce(alerts: list[MonitoringAlert]) -> list[list[MonitoringAlert]]:
     """Group alerts by their deduplication key, preserving order."""
     buckets: dict[str, list[MonitoringAlert]] = defaultdict(list)
     for alert in alerts:
-        key = alert.get("deduplication_key") or hashlib.sha256(
-            (alert.get("title") or "").encode()
-        ).hexdigest()[:12]
+        key = (
+            alert.get("deduplication_key")
+            or hashlib.sha256((alert.get("title") or "").encode()).hexdigest()[:12]
+        )
         buckets[key].append(alert)
     return list(buckets.values())
 
@@ -56,16 +58,17 @@ def monitoring_webhook(request: Request) -> Response:
     for group in groups:
         first = group[0]
         # Idempotency
-        ext_id = first.get("external_id") or hashlib.sha256(
-            f"{first.get('title','')}|{first.get('deduplication_key','')}".encode()
-        ).hexdigest()
+        ext_id = (
+            first.get("external_id")
+            or hashlib.sha256(
+                f"{first.get('title','')}|{first.get('deduplication_key','')}".encode()
+            ).hexdigest()
+        )
         if Ticket.objects.filter(external_message_id=ext_id).exists():
             continue
         service = Service.objects.filter(domain="it", is_active=True).first()
         request_type = (
-            RequestType.objects.filter(service=service, is_active=True).first()
-            if service
-            else None
+            RequestType.objects.filter(service=service, is_active=True).first() if service else None
         )
         office = Office.objects.filter(is_active=True).first()
         requester, _ = Contact.objects.get_or_create(

@@ -1,4 +1,5 @@
 """Models for the Notifications app."""
+
 from __future__ import annotations
 
 import uuid
@@ -19,4 +20,3 @@ class Notification(models.Model):
 
     def __str__(self) -> str:
         return f"notification:{self.pk}"
-

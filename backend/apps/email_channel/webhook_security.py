@@ -10,6 +10,7 @@ The adapter sends three headers:
 The shared secret comes from ``EMAIL_WEBHOOK_SECRET``. Events outside
 ``CHANNEL_WEBHOOK_MAX_AGE_SECONDS`` (300 seconds by default) are rejected.
 """
+
 from __future__ import annotations
 
 import hashlib
@@ -59,11 +60,14 @@ def authenticate_email_adapter(
         return WebhookAuthentication(authenticated=False, configured=True)
 
     canonical = f"{timestamp}.{event_id}.".encode() + raw_body
-    expected = "sha256=" + hmac.new(
-        secret.encode(),
-        canonical,
-        hashlib.sha256,
-    ).hexdigest()
+    expected = (
+        "sha256="
+        + hmac.new(
+            secret.encode(),
+            canonical,
+            hashlib.sha256,
+        ).hexdigest()
+    )
     return WebhookAuthentication(
         authenticated=hmac.compare_digest(expected, supplied),
         configured=True,

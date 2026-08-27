@@ -50,6 +50,7 @@ import {
   hasContent,
   isOptionalEmailValid,
 } from "@/lib/form-validation";
+import { OFFICE_OPTIONS } from "@/features/tickets/intake-options";
 
 const SERVICES = [
   { value: "GEN-INFO", label: "General information" },
@@ -63,11 +64,6 @@ const REQUEST_TYPES = [
   { value: "NEW-EST", label: "New estate enquiry" },
   { value: "STATUS", label: "Estate status check" },
   { value: "SEARCH", label: "Will search request" },
-];
-
-const OFFICES = [
-  { value: "MHC-MBA", label: "Mbabane (Main)" },
-  { value: "MHC-MAN", label: "Manzini" },
 ];
 
 interface FormState {
@@ -239,7 +235,7 @@ export default function PublicFormPage() {
                 <Field>
                   <FieldLabel htmlFor="public-office">Office</FieldLabel>
                   <Select
-                    items={OFFICES}
+                    items={OFFICE_OPTIONS}
                     value={form.office_code}
                     onValueChange={(v) => {
                       if (v == null) return;
@@ -251,7 +247,7 @@ export default function PublicFormPage() {
                     </SelectTrigger>
                     <SelectContent>
                       <SelectGroup>
-                        {OFFICES.map((s) => (
+                        {OFFICE_OPTIONS.map((s) => (
                           <SelectItem key={s.value} value={s.value}>
                             {s.label}
                           </SelectItem>

@@ -7,6 +7,7 @@ duration of the overlap window so in-flight JWTs can be verified.
 The command does not modify the database — Django sessions are invalidated
 on key change and the JWT verifier (Keycloak) is unaffected.
 """
+
 from __future__ import annotations
 
 import secrets
@@ -43,7 +44,9 @@ class Command(BaseCommand):
         **opts: Unpack[RotateSecretOptions],
     ) -> None:
         new = _generate(opts["length"])
-        self.stdout.write(self.style.SUCCESS(
-            f"New {opts['what']} secret ({len(new)} chars). Update the vault, then redeploy."
-        ))
+        self.stdout.write(
+            self.style.SUCCESS(
+                f"New {opts['what']} secret ({len(new)} chars). Update the vault, then redeploy."
+            )
+        )
         self.stdout.write(new)

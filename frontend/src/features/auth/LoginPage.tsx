@@ -30,7 +30,7 @@ export default function LoginPage() {
   const isDevelopmentSession = auth.state === "authenticated" && auth.isDevAuth;
 
   return (
-    <div className="grid min-h-[calc(100vh-12rem)] items-center gap-8 lg:grid-cols-2">
+    <div className="grid min-h-[calc(100dvh-12rem)] items-center gap-8 lg:grid-cols-2">
       <BrandPanel />
       <div className="mx-auto w-full max-w-md">
         <Card aria-busy={authAction.pending || auth.state === "loading"}>

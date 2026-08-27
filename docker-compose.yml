@@ -105,12 +105,15 @@ services:
       start_period: 120s
 
   keycloak:
-    image: quay.io/keycloak/keycloak:26.0
+    image: quay.io/keycloak/keycloak:26.7.0
     restart: unless-stopped
     command: ["start-dev", "--import-realm"]
     environment:
-      KEYCLOAK_ADMIN: ${KEYCLOAK_ADMIN}
-      KEYCLOAK_ADMIN_PASSWORD: ${KEYCLOAK_ADMIN_PASSWORD}
+      KC_BOOTSTRAP_ADMIN_USERNAME: ${KEYCLOAK_ADMIN}
+      KC_BOOTSTRAP_ADMIN_PASSWORD: ${KEYCLOAK_ADMIN_PASSWORD}
+      LOCAL_BASE_URL: ${LOCAL_BASE_URL:-http://localhost:5173}
+      LAN_BASE_URL: ${LAN_BASE_URL:-http://localhost:5173}
+      PUBLIC_BASE_URL: ${PUBLIC_BASE_URL:-http://localhost:5173}
       KC_HEALTH_ENABLED: "true"
       KC_LOG_LEVEL: info
     volumes:
@@ -137,6 +140,8 @@ services:
       CELERY_RESULT_BACKEND: redis://:${REDIS_PASSWORD}@redis:6379/1
       REDIS_URL: redis://:${REDIS_PASSWORD}@redis:6379/0
       DJANGO_SETTINGS_MODULE: config.settings.dev
+      KEYCLOAK_PUBLIC_URL: ${PUBLIC_BASE_URL:-http://localhost:5173}
+      KEYCLOAK_ALLOWED_ISSUERS: ${LOCAL_BASE_URL:-http://localhost:5173}/realms/${KEYCLOAK_REALM:-mhc},${LAN_BASE_URL:-http://localhost:5173}/realms/${KEYCLOAK_REALM:-mhc},${PUBLIC_BASE_URL:-http://localhost:5173}/realms/${KEYCLOAK_REALM:-mhc}
     depends_on:
       postgres:
         condition: service_healthy
@@ -153,6 +158,7 @@ services:
     command: ["./scripts/dev.sh"]
     volumes:
       - ./backend:/app
+      - ./infrastructure:/infrastructure:ro
     healthcheck:
       test: ["CMD", "curl", "-fsS", "http://localhost:8000/api/v1/health"]
       interval: 10s
@@ -207,8 +213,13 @@ services:
     restart: unless-stopped
     env_file: .env
     environment:
-      VITE_API_BASE_URL: ${API_BASE_URL}
-      VITE_KEYCLOAK_URL: ${KEYCLOAK_PUBLIC_URL}
+      # Browser traffic stays on the origin that served the app. Vite proxies
+      # these paths over Docker's private network, so no workstation IP is
+      # baked into the frontend bundle.
+      VITE_API_BASE_URL: ""
+      API_PROXY_TARGET: http://backend:8000
+      VITE_KEYCLOAK_URL: same-origin
+      KEYCLOAK_PROXY_TARGET: http://keycloak:8080
       VITE_KEYCLOAK_REALM: ${KEYCLOAK_REALM}
       VITE_KEYCLOAK_CLIENT_ID: ${KEYCLOAK_CLIENT_ID}
       VITE_DEV_AUTH: ${VITE_DEV_AUTH:-0}
@@ -223,6 +234,34 @@ services:
       # Keep source and dependencies on Docker's Linux filesystem. Bind mounts
       # from Windows can leave Vite blocked in uninterruptible file I/O.
       - frontend-node-modules:/app/node_modules
+    # Without a source bind mount the container serves whatever was baked into
+    # the image, so edits stay invisible until a rebuild. `docker compose watch`
+    # copies changed files in instead of mounting them: Vite's watcher sees a
+    # real filesystem event inside the container, so HMR works without exposing
+    # the dev server to Windows bind-mount I/O. Run `make watch`, not `make up`,
+    # while working on the frontend.
+    develop:
+      watch:
+        - action: sync
+          path: ./frontend/src
+          target: /app/src
+        - action: sync
+          path: ./frontend/public
+          target: /app/public
+        - action: sync
+          path: ./frontend/index.html
+          target: /app/index.html
+        # Vite restarts itself when its own config changes, but only once the
+        # new file is actually inside the container.
+        - action: sync+restart
+          path: ./frontend/vite.config.ts
+          target: /app/vite.config.ts
+        # Dependency changes need a real install, which the entrypoint performs
+        # when the lockfile hash stops matching the one recorded in the volume.
+        - action: rebuild
+          path: ./frontend/package.json
+        - action: rebuild
+          path: ./frontend/package-lock.json
 
   prometheus:
     image: prom/prometheus:latest

@@ -3,6 +3,7 @@
 The formatter redacts well-known sensitive keys before serialisation.
 Never log message bodies, full contact records, or ticket content.
 """
+
 from __future__ import annotations
 
 import json
@@ -11,9 +12,19 @@ import re
 from datetime import UTC, datetime
 
 REDACT_KEYS = {
-    "password", "secret", "token", "authorization", "cookie",
-    "id_number", "national_id", "passport", "phone", "email",
-    "full_name", "address", "attachment_body",
+    "password",
+    "secret",
+    "token",
+    "authorization",
+    "cookie",
+    "id_number",
+    "national_id",
+    "passport",
+    "phone",
+    "email",
+    "full_name",
+    "address",
+    "attachment_body",
 }
 
 _REDACT_PATTERNS = [

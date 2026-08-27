@@ -1,4 +1,5 @@
 """Email channel HTTP endpoints."""
+
 from __future__ import annotations
 
 import json
@@ -26,26 +27,42 @@ def _verified_payload(
     raw_body = request.body
     authentication = authenticate_email_adapter(request, raw_body)
     if not authentication.configured:
-        return None, "", Response(
-            {"status": "unavailable"},
-            status=status.HTTP_503_SERVICE_UNAVAILABLE,
+        return (
+            None,
+            "",
+            Response(
+                {"status": "unavailable"},
+                status=status.HTTP_503_SERVICE_UNAVAILABLE,
+            ),
         )
     if not authentication.authenticated:
-        return None, "", Response(
-            {"status": "unauthorized"},
-            status=status.HTTP_401_UNAUTHORIZED,
+        return (
+            None,
+            "",
+            Response(
+                {"status": "unauthorized"},
+                status=status.HTTP_401_UNAUTHORIZED,
+            ),
         )
     try:
         parsed: object = json.loads(raw_body)
     except (UnicodeDecodeError, json.JSONDecodeError):
-        return None, "", Response(
-            {"status": "invalid_payload"},
-            status=status.HTTP_400_BAD_REQUEST,
+        return (
+            None,
+            "",
+            Response(
+                {"status": "invalid_payload"},
+                status=status.HTTP_400_BAD_REQUEST,
+            ),
         )
     if not isinstance(parsed, dict):
-        return None, "", Response(
-            {"status": "invalid_payload"},
-            status=status.HTTP_400_BAD_REQUEST,
+        return (
+            None,
+            "",
+            Response(
+                {"status": "invalid_payload"},
+                status=status.HTTP_400_BAD_REQUEST,
+            ),
         )
     return parsed, authentication.event_id, None
 
@@ -111,9 +128,7 @@ def inbound_email(request: Request) -> Response:
             transaction.set_rollback(True)
     if outcome.get("status") == "error":
         return Response(outcome, status=status.HTTP_400_BAD_REQUEST)
-    response_status = (
-        status.HTTP_201_CREATED if outcome.get("status") == "created" else 200
-    )
+    response_status = status.HTTP_201_CREATED if outcome.get("status") == "created" else 200
     return Response(outcome, status=response_status)
 
 

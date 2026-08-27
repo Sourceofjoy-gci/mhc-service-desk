@@ -225,7 +225,7 @@ export function StaffCombobox({
                 aria-invalid={error ? true : undefined}
                 aria-describedby={error ? errorId : undefined}
                 placeholder="Search by name, username, designation, or team"
-                className="h-8 w-full min-w-0 rounded-t-lg border-b border-input bg-transparent px-2.5 py-1 text-base outline-none placeholder:text-muted-foreground focus-visible:border-ring disabled:pointer-events-none disabled:cursor-not-allowed disabled:bg-input/50 disabled:opacity-50 aria-invalid:border-destructive md:text-sm dark:bg-input/30 dark:disabled:bg-input/80"
+                className="h-8 w-full min-w-0 rounded-t-lg border-b border-field-border bg-transparent px-2.5 py-1 text-base outline-none placeholder:text-muted-foreground focus-visible:border-ring disabled:pointer-events-none disabled:cursor-not-allowed disabled:bg-input/50 disabled:opacity-50 aria-invalid:border-destructive md:text-sm dark:bg-input/30 dark:disabled:bg-input/80"
               />
               <StaffResultsStatus loading={loading} error={error} />
               <Combobox.List className="max-h-[min(18rem,var(--available-height))] overflow-y-auto overscroll-contain p-1 scroll-py-1 outline-none data-empty:p-0">

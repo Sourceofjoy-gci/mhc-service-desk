@@ -3,6 +3,7 @@
 The bytes live in MinIO. Short-lived signed URLs are issued on demand
 (FR-095). ClamAV scan results are recorded before any download.
 """
+
 from __future__ import annotations
 
 import uuid
@@ -64,9 +65,7 @@ class AttachmentAccessLog(models.Model):
     """Every download is audited (FR-095, FR-097)."""
 
     id = models.UUIDField(primary_key=True, default=uuid.uuid4, editable=False)
-    attachment = models.ForeignKey(
-        Attachment, on_delete=models.CASCADE, related_name="access_log"
-    )
+    attachment = models.ForeignKey(Attachment, on_delete=models.CASCADE, related_name="access_log")
     actor_subject = models.CharField(max_length=255)
     ip_address = models.GenericIPAddressField(null=True)
     user_agent = models.CharField(max_length=512, blank=True)

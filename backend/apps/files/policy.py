@@ -6,6 +6,7 @@ failure. Keeping this policy in the files app makes the fail-closed defaults
 explicit; a later governed configuration feature can expose these values
 without coupling validation to Django's request parser.
 """
+
 from __future__ import annotations
 
 from collections.abc import Iterator
@@ -72,9 +73,7 @@ def validate_attachment_content(*, data: bytes, content_type: str) -> None:
         raise AttachmentValidationError("File is empty.")
     signatures = ATTACHMENT_SIGNATURES.get(content_type)
     if not signatures or not data.startswith(signatures):
-        raise AttachmentValidationError(
-            "File contents do not match the declared type."
-        )
+        raise AttachmentValidationError("File contents do not match the declared type.")
 
 
 def read_attachment_bounded(upload: ChunkedUpload) -> bytes:

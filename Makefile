@@ -1,4 +1,4 @@
-.PHONY: help up down logs build ps restart migrate seed backup restore test lint type verify pilot-smoke fmt clean keycloak-export
+.PHONY: help up watch down logs build ps restart migrate seed backup restore test lint type verify pilot-smoke fmt clean keycloak-export
 
 define run_frontend
 docker compose run --rm --no-deps --build --volume /app/node_modules frontend $(1)
@@ -7,6 +7,7 @@ endef
 help:
 	@echo "MHC e-Ticketing — make targets"
 	@echo "  up            Start full stack"
+	@echo "  watch         Start full stack with frontend live-reload (use while editing UI)"
 	@echo "  down          Stop stack"
 	@echo "  logs          Tail logs"
 	@echo "  build         Rebuild images"
@@ -26,6 +27,13 @@ help:
 
 up:
 	docker compose up -d
+
+# Frontend edits are copied into the container as you save them. The container
+# has no source bind mount, so plain `up` serves whatever the image was built
+# with — use this target while working on the UI.
+watch:
+	docker compose up -d
+	docker compose watch frontend
 
 down:
 	docker compose down
@@ -71,6 +79,7 @@ pilot-smoke:
 	docker compose exec backend python /app/scripts/pilot_foundation_smoke.py
 
 verify:
+	docker compose run --rm --no-deps --volume .:/workspace:ro backend python /workspace/scripts/check_prod_compose.py
 	docker compose exec backend python manage.py makemigrations --check --dry-run
 	docker compose exec backend pytest -q
 	docker compose exec backend ruff check .

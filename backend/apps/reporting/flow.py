@@ -4,6 +4,7 @@ Computes throughput, lead time, cycle time, WIP and blocked time from the
 status history table. Numbers are returned as JSON; visualisations live in
 the SPA or Metabase in P2.
 """
+
 from __future__ import annotations
 
 import statistics
@@ -43,9 +44,7 @@ def flow_metrics(request: Request) -> Response:
         request.user,
         Ticket.objects.all(),
         request=request,
-    ).filter(
-        created_at__gte=datetime.fromtimestamp(window_start, tz=UTC)
-    )
+    ).filter(created_at__gte=datetime.fromtimestamp(window_start, tz=UTC))
     if domain:
         qs = qs.filter(domain=domain)
     closed = qs.filter(status__is_terminal=True)
@@ -58,9 +57,7 @@ def flow_metrics(request: Request) -> Response:
             lead_times.append((t.closed_at - t.created_at).total_seconds())
 
     wip = qs.exclude(status__is_terminal=True).count()
-    by_status = list(
-        qs.values("status__code", "status__name").annotate(count=Count("id"))
-    )
+    by_status = list(qs.values("status__code", "status__name").annotate(count=Count("id")))
 
     def pctile(values: list[float], p: int) -> float | None:
         if not values:
@@ -72,20 +69,22 @@ def flow_metrics(request: Request) -> Response:
         )
         return round(value, 1)
 
-    return Response({
-        "domain": domain,
-        "window_days": days,
-        "wip": wip,
-        "throughput": closed.count(),
-        "lead_time_hours": {
-            "avg": round(statistics.mean(lead_times) / 3600, 1) if lead_times else None,
-            "p50": pctile(lead_times, 50),
-            "p95": pctile(lead_times, 95),
-        },
-        "cycle_time_hours": {
-            "avg": round(statistics.mean(cycle_times) / 3600, 1) if cycle_times else None,
-            "p50": pctile(cycle_times, 50),
-            "p95": pctile(cycle_times, 95),
-        },
-        "by_status": by_status,
-    })
+    return Response(
+        {
+            "domain": domain,
+            "window_days": days,
+            "wip": wip,
+            "throughput": closed.count(),
+            "lead_time_hours": {
+                "avg": round(statistics.mean(lead_times) / 3600, 1) if lead_times else None,
+                "p50": pctile(lead_times, 50),
+                "p95": pctile(lead_times, 95),
+            },
+            "cycle_time_hours": {
+                "avg": round(statistics.mean(cycle_times) / 3600, 1) if cycle_times else None,
+                "p50": pctile(cycle_times, 50),
+                "p95": pctile(cycle_times, 95),
+            },
+            "by_status": by_status,
+        }
+    )

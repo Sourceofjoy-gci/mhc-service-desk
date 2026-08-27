@@ -35,8 +35,13 @@ export function isDevAuthEnabled(): boolean {
 
 export function getKeycloak(): Keycloak {
   if (!lifecycle.keycloak) {
+    const configuredUrl = import.meta.env.VITE_KEYCLOAK_URL?.trim();
+    const keycloakUrl =
+      !configuredUrl || configuredUrl === "same-origin"
+        ? window.location.origin
+        : configuredUrl;
     lifecycle.keycloak = new Keycloak({
-      url: import.meta.env.VITE_KEYCLOAK_URL,
+      url: keycloakUrl,
       realm: import.meta.env.VITE_KEYCLOAK_REALM,
       clientId: import.meta.env.VITE_KEYCLOAK_CLIENT_ID,
     });
@@ -73,6 +78,16 @@ async function initializeKeycloak(): Promise<AuthState> {
   try {
     const authenticated = await kc.init({
       onLoad: "check-sso",
+      // Resolve an existing realm session inside a hidden iframe. Without a
+      // silent redirect URI keycloak-js answers `check-sso` by navigating the
+      // whole document to the realm and back, so every cold load — including
+      // one that only wants the sign-in page — flashes through Keycloak.
+      // `silentCheckSsoRedirectUri` must stay inside the client's registered
+      // redirect URIs; `public/silent-check-sso.html` is served from the app
+      // origin for exactly that reason.
+      silentCheckSsoRedirectUri: `${window.location.origin}/silent-check-sso.html`,
+      // A browser that cannot run the probe reports "no session" rather than
+      // falling back to the full-page redirect this option exists to avoid.
       silentCheckSsoFallback: false,
       checkLoginIframe: false,
     });

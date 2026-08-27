@@ -19,6 +19,7 @@ interface MessageComposerProps {
   onCreated: () => void | Promise<void>;
   canAddMessage?: boolean;
   canAddNote?: boolean;
+  compact?: boolean;
 }
 
 type ComposerMode = "reply" | "note";
@@ -46,6 +47,7 @@ export function MessageComposer({
   onCreated,
   canAddMessage = true,
   canAddNote = true,
+  compact = false,
 }: MessageComposerProps) {
   const [preferredMode, setPreferredMode] = useState<ComposerMode>("reply");
   const [reply, setReply] = useState("");
@@ -110,14 +112,17 @@ export function MessageComposer({
 
   return (
     <section
-      aria-labelledby="message-composer-heading"
-      className="border-t pt-5"
+      aria-labelledby={compact ? undefined : "message-composer-heading"}
+      aria-label={compact ? "Add to activity" : undefined}
+      className={cn("border-t", compact ? "mt-auto pt-0" : "pt-5")}
     >
-      <h2 id="message-composer-heading" className="text-base font-semibold">
-        Add to activity
-      </h2>
+      {!compact ? (
+        <h2 id="message-composer-heading" className="text-base font-semibold">
+          Add to activity
+        </h2>
+      ) : null}
       <Tabs
-        className="mt-3"
+        className={cn("flex-col", compact ? "mt-0" : "mt-3")}
         value={mode}
         onValueChange={(value) => {
           if (value === "reply" || value === "note") setPreferredMode(value);
@@ -142,10 +147,16 @@ export function MessageComposer({
               }}
             >
               <Field data-invalid={Boolean(replyProblem?.fields.body_text)}>
-                <FieldLabel htmlFor="ticket-reply">Reply message</FieldLabel>
+                <FieldLabel
+                  htmlFor="ticket-reply"
+                  className={compact ? "sr-only" : undefined}
+                >
+                  Reply message
+                </FieldLabel>
                 <Textarea
                   id="ticket-reply"
                   value={reply}
+                  placeholder={compact ? "Type your reply…" : undefined}
                   disabled={replyMutation.isPending}
                   aria-invalid={Boolean(replyProblem?.fields.body_text)}
                   aria-describedby={cn(
@@ -154,7 +165,10 @@ export function MessageComposer({
                   )}
                   onChange={(event) => setReply(event.target.value)}
                 />
-                <FieldDescription id="ticket-reply-description">
+                <FieldDescription
+                  id="ticket-reply-description"
+                  className={compact ? "sr-only" : undefined}
+                >
                   This message is visible to the requester.
                 </FieldDescription>
                 <FieldError

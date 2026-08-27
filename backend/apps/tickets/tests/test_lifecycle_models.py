@@ -135,6 +135,4 @@ def test_keycloak_snapshot_preserves_django_auth_groups():
 
     user.groups.add(django_group)
 
-    assert list(user.groups.values_list("name", flat=True)) == [
-        "application-administrators"
-    ]
+    assert list(user.groups.values_list("name", flat=True)) == ["application-administrators"]

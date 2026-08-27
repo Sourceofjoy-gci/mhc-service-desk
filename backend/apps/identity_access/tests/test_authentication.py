@@ -1,6 +1,7 @@
 from unittest.mock import patch
 
 import pytest
+from django.conf import settings
 from django.test import override_settings
 from rest_framework.exceptions import AuthenticationFailed
 from rest_framework.test import APIRequestFactory
@@ -31,6 +32,42 @@ def test_jwt_verification_requires_the_configured_keycloak_issuer():
 
     assert decode.call_args.kwargs["issuer"] == "https://idp.example.test/realms/mhc"
     assert decode.call_args.kwargs["options"]["verify_iss"] is True
+
+
+def test_authentication_accepts_only_the_explicitly_configured_issuer_set():
+    request = APIRequestFactory().get(
+        "/api/v1/tickets/",
+        HTTP_AUTHORIZATION="Bearer signed-token",
+    )
+    accepted_issuers = (
+        "http://localhost:5173/realms/mhc",
+        "http://192.168.3.34:5173/realms/mhc",
+    )
+    keycloak_settings = {**settings.KEYCLOAK, "ISSUERS": accepted_issuers}
+
+    with (
+        override_settings(KEYCLOAK=keycloak_settings),
+        patch("apps.identity_access.authentication.AccessToken"),
+        patch(
+            "apps.identity_access.authentication._decode_unverified_header",
+            return_value={"alg": "RS256", "kid": "key-1", "typ": "JWT"},
+        ),
+        patch(
+            "apps.identity_access.authentication._get_jwks",
+            return_value={"keys": [{"kid": "key-1"}]},
+        ),
+        patch(
+            "apps.identity_access.authentication._build_public_key",
+            return_value=object(),
+        ),
+        patch(
+            "apps.identity_access.authentication._verify_jwt",
+            return_value={"sub": "multi-origin-user"},
+        ) as verify,
+    ):
+        KeycloakJWTAuthentication().authenticate(request)
+
+    assert verify.call_args.kwargs["issuer"] == accepted_issuers
 
 
 def _authenticate_verified_payload(payload: JSONObject) -> tuple[User, JSONObject]:

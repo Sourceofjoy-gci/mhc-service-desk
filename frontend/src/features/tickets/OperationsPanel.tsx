@@ -1,5 +1,5 @@
 import { useMutation } from "@tanstack/react-query";
-import { AlertCircle } from "lucide-react";
+import { AlertCircle, Settings } from "lucide-react";
 import {
   useEffect,
   useLayoutEffect,
@@ -32,6 +32,7 @@ import {
   type TicketDetail,
   type TicketWorkStateUpdate,
 } from "@/lib/api";
+import { cn } from "@/lib/utils";
 import { AssignmentControl } from "./AssignmentControl";
 
 interface OperationsPanelProps {
@@ -39,6 +40,7 @@ interface OperationsPanelProps {
   onUpdated: (ticket: TicketDetail) => void;
   onReload: () => void;
   onActivityChanged?: () => void | Promise<void>;
+  compact?: boolean;
 }
 
 interface FormValues {
@@ -196,6 +198,7 @@ function ScopedOperationsPanel({
   onUpdated,
   onReload,
   onActivityChanged,
+  compact = false,
 }: OperationsPanelProps) {
   const [form, dispatch] = useReducer(formReducer, ticket, (initialTicket) =>
     cleanFormState(initialTicket.number, valuesFromTicket(initialTicket)),
@@ -315,34 +318,49 @@ function ScopedOperationsPanel({
         },
         ...WAITING_REASON_SELECT_ITEMS,
       ];
+  const compactFieldClassName = compact
+    ? "gap-2 sm:grid sm:grid-cols-[7.25rem_minmax(0,1fr)] sm:items-start [&>[data-slot=field-error]]:sm:col-start-2 [&>[data-slot=field-label]]:sm:pt-2"
+    : undefined;
 
   return (
-    <div className="flex flex-col gap-5">
+    <div className={cn("flex flex-col", compact ? "gap-4" : "gap-5")}>
       <AssignmentControl
         ticket={ticket}
         onUpdated={onUpdated}
         onReload={onReload}
         onActivityChanged={onActivityChanged}
+        compact={compact}
       />
       <section
-        className="flex flex-col gap-4"
+        className={cn("flex flex-col", compact ? "gap-3" : "gap-4")}
         aria-labelledby="operations-heading"
       >
         <div>
-          <h2 id="operations-heading" className="text-base font-semibold">
-            Operations
-          </h2>
+          <div className="flex items-center gap-2">
+            {compact ? (
+              <Settings className="size-4 text-muted-foreground" aria-hidden />
+            ) : null}
+            <h2 id="operations-heading" className="text-base font-semibold">
+              Operations
+            </h2>
+          </div>
           <p className="text-sm text-muted-foreground">
             Work state and the next planned action.
           </p>
         </div>
 
         {hasEditableFields ? (
-          <form onSubmit={submit} className="flex flex-col gap-4">
-            <FieldGroup className="gap-3">
+          <form
+            onSubmit={submit}
+            className={cn("flex flex-col", compact ? "gap-3" : "gap-4")}
+          >
+            <FieldGroup className={compact ? "gap-2" : "gap-3"}>
               {canEditWorkState ? (
                 <>
-                  <Field data-invalid={Boolean(fieldErrors.team)}>
+                  <Field
+                    className={compactFieldClassName}
+                    data-invalid={Boolean(fieldErrors.team)}
+                  >
                     <FieldLabel htmlFor="operations-team">Team</FieldLabel>
                     <Input
                       id="operations-team"
@@ -356,7 +374,10 @@ function ScopedOperationsPanel({
                     />
                   </Field>
 
-                  <Field data-invalid={Boolean(fieldErrors.waiting_reason)}>
+                  <Field
+                    className={compactFieldClassName}
+                    data-invalid={Boolean(fieldErrors.waiting_reason)}
+                  >
                     <FieldLabel htmlFor="operations-waiting-reason">
                       Waiting reason
                     </FieldLabel>
@@ -396,12 +417,16 @@ function ScopedOperationsPanel({
                     />
                   </Field>
 
-                  <Field data-invalid={Boolean(fieldErrors.blocked_reason)}>
+                  <Field
+                    className={compactFieldClassName}
+                    data-invalid={Boolean(fieldErrors.blocked_reason)}
+                  >
                     <FieldLabel htmlFor="operations-blocked-reason">
                       Blocked reason
                     </FieldLabel>
                     <Textarea
                       id="operations-blocked-reason"
+                      className={compact ? "min-h-9" : undefined}
                       value={values.blocked_reason}
                       disabled={disabled}
                       aria-invalid={Boolean(fieldErrors.blocked_reason)}
@@ -416,7 +441,10 @@ function ScopedOperationsPanel({
                     />
                   </Field>
 
-                  <Field data-invalid={Boolean(fieldErrors.next_action)}>
+                  <Field
+                    className={compactFieldClassName}
+                    data-invalid={Boolean(fieldErrors.next_action)}
+                  >
                     <FieldLabel htmlFor="operations-next-action">
                       Next action
                     </FieldLabel>
@@ -436,7 +464,10 @@ function ScopedOperationsPanel({
                     />
                   </Field>
 
-                  <Field data-invalid={Boolean(fieldErrors.next_action_at)}>
+                  <Field
+                    className={compactFieldClassName}
+                    data-invalid={Boolean(fieldErrors.next_action_at)}
+                  >
                     <FieldLabel htmlFor="operations-next-action-at">
                       Next action time
                     </FieldLabel>
@@ -485,7 +516,10 @@ function ScopedOperationsPanel({
               )}
 
               {canChangeConfidentiality ? (
-                <Field data-invalid={Boolean(fieldErrors.confidentiality)}>
+                <Field
+                  className={compactFieldClassName}
+                  data-invalid={Boolean(fieldErrors.confidentiality)}
+                >
                   <FieldLabel htmlFor="operations-confidentiality">
                     Confidentiality
                   </FieldLabel>
@@ -554,26 +588,28 @@ function ScopedOperationsPanel({
               </Alert>
             ) : null}
 
-            <div className="flex justify-end">
-              {stale ? (
-                <Button type="button" disabled={disabled} onClick={onReload}>
-                  {disabled ? (
-                    <Spinner aria-hidden data-icon="inline-start" />
-                  ) : null}
-                  Reload
-                </Button>
-              ) : (
-                <Button
-                  type="submit"
-                  disabled={disabled || Object.keys(dirty).length === 0}
-                >
-                  {disabled ? (
-                    <Spinner aria-hidden data-icon="inline-start" />
-                  ) : null}
-                  Save
-                </Button>
-              )}
-            </div>
+            {!compact || stale || Object.keys(dirty).length > 0 ? (
+              <div className="flex justify-end">
+                {stale ? (
+                  <Button type="button" disabled={disabled} onClick={onReload}>
+                    {disabled ? (
+                      <Spinner aria-hidden data-icon="inline-start" />
+                    ) : null}
+                    Reload
+                  </Button>
+                ) : (
+                  <Button
+                    type="submit"
+                    disabled={disabled || Object.keys(dirty).length === 0}
+                  >
+                    {disabled ? (
+                      <Spinner aria-hidden data-icon="inline-start" />
+                    ) : null}
+                    Save
+                  </Button>
+                )}
+              </div>
+            ) : null}
           </form>
         ) : (
           <dl className="grid gap-3" aria-label="Read-only ticket operations">

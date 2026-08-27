@@ -4,6 +4,7 @@ Problem: a cluster of related incidents. Change: a planned modification to a
 service or system. Both are stored as Ticket records with a `kind` flag so
 the same domain logic (numbering, status, SLA, scope) continues to work.
 """
+
 from __future__ import annotations
 
 import logging

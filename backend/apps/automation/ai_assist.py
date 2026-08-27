@@ -9,6 +9,7 @@ implement) and the audit record shape. The actual model invocation is
 deliberately stubbed — the operator is expected to wire their approved
 provider (with DPIA and a recorded policy review).
 """
+
 from __future__ import annotations
 
 import logging
@@ -30,15 +31,17 @@ class AiSuggestion:
 
     None of these fields are applied to the ticket until a human approves.
     """
+
     suggestion_id: str
     ticket_number: str
-    kind: str                # "draft_reply" | "classify" | "summarise" | "kb_suggest"
+    kind: str  # "draft_reply" | "classify" | "summarise" | "kb_suggest"
     payload: dict[str, Any]  # kind-specific output (e.g. {"body_text": "..."})
-    confidence: float        # 0.0 .. 1.0
+    confidence: float  # 0.0 .. 1.0
     model_id: str
     model_version: str
-    prompt_hash: str         # SHA-256 of the prompt used (for audit)
+    prompt_hash: str  # SHA-256 of the prompt used (for audit)
     created_at: str
+
 
 def record_suggestion(*, ticket: Ticket, suggestion: AiSuggestion) -> None:
     """Persist the suggestion as an audit event + outbox record.

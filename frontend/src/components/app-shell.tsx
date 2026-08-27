@@ -15,6 +15,12 @@ import { useAuth, type AuthUser } from "@/features/auth/AuthProvider";
 import { useAuthAction } from "@/features/auth/useAuthAction";
 import { cn } from "@/lib/utils";
 import { BrandLockup, BrandMark } from "./brand";
+import {
+  MAIN_CONTENT_ID,
+  RouteAnnouncer,
+  SkipLink,
+} from "./navigation-a11y";
+import { RouteSuspense } from "./route-suspense";
 import { ThemeToggle } from "./theme-toggle";
 import { Button } from "./ui/button";
 import {
@@ -92,6 +98,7 @@ export function AppShell() {
 
   return (
     <div className="flex min-h-full flex-col bg-background">
+      <SkipLink />
       <header className="sticky top-0 z-40 border-b border-border/60 bg-background/80 backdrop-blur supports-[backdrop-filter]:bg-background/60">
         <div className="mx-auto flex w-full max-w-7xl items-center gap-2 px-4 py-2 sm:gap-4 sm:px-6">
           <Link
@@ -162,10 +169,20 @@ export function AppShell() {
 
       <main
         key={location.pathname}
-        className="mx-auto w-full max-w-7xl flex-1 animate-fade-in px-4 py-6 sm:px-6"
+        id={MAIN_CONTENT_ID}
+        tabIndex={-1}
+        // --app-chrome is the vertical space this shell occupies above a
+        // full-height route (header, main padding, page heading). It lives
+        // here, next to the chrome it measures, so a board sizing itself
+        // against it cannot drift when the header changes. Mobile is taller:
+        // it carries a second nav row.
+        className="mx-auto w-full max-w-7xl flex-1 animate-fade-in px-4 py-6 outline-none [--app-chrome:17.5rem] sm:px-6 md:[--app-chrome:13.75rem]"
       >
-        <Outlet />
+        <RouteSuspense>
+          <Outlet />
+        </RouteSuspense>
       </main>
+      <RouteAnnouncer />
 
       <footer className="border-t border-border/60 bg-muted/30 py-4 text-center text-xs text-muted-foreground">
         <div className="mx-auto flex max-w-7xl flex-wrap items-center justify-center gap-x-3 gap-y-1 px-4">
@@ -176,7 +193,7 @@ export function AppShell() {
           <span aria-hidden>·</span>
           <span>v0.1.0</span>
           <span aria-hidden>·</span>
-          <span>build {new Date().getFullYear()}</span>
+          <span>build {__BUILD_ID__}</span>
         </div>
       </footer>
     </div>

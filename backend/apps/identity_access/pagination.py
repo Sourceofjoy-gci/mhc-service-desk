@@ -23,8 +23,7 @@ def _has_concrete_field(model: type[Model], name: str) -> bool:
 
 def _reverse_ordering(ordering: Sequence[str]) -> tuple[str, ...]:
     return tuple(
-        field.removeprefix("-") if field.startswith("-") else f"-{field}"
-        for field in ordering
+        field.removeprefix("-") if field.startswith("-") else f"-{field}" for field in ordering
     )
 
 
@@ -57,16 +56,12 @@ class SafeCursorPagination(CursorPagination):
                 raise NotFound(self.invalid_cursor_message)
             current_position = raw_position
 
-        query_ordering = (
-            _reverse_ordering(ordering) if reverse else ordering
-        )
+        query_ordering = _reverse_ordering(ordering) if reverse else ordering
         queryset = queryset.order_by(*query_ordering)
         if current_position is not None:
             values = self._decode_position(current_position, ordering)
             try:
-                queryset = queryset.filter(
-                    self._position_filter(ordering, values, reverse=reverse)
-                )
+                queryset = queryset.filter(self._position_filter(ordering, values, reverse=reverse))
             except (DjangoValidationError, TypeError, ValueError) as exc:
                 raise NotFound(self.invalid_cursor_message) from exc
 
@@ -108,9 +103,7 @@ class SafeCursorPagination(CursorPagination):
         for field in ordering:
             name = field.removeprefix("-")
             value: object = (
-                instance[name]
-                if isinstance(instance, Mapping)
-                else getattr(instance, name)
+                instance[name] if isinstance(instance, Mapping) else getattr(instance, name)
             )
             values.append(str(value))
         return json.dumps(values, separators=(",", ":"))

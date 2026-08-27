@@ -6,6 +6,7 @@ import App from "./app/App";
 import { ThemeProvider } from "./components/theme-provider";
 import { Toaster } from "./components/ui/sonner";
 import { AuthProvider } from "./features/auth/AuthProvider";
+import "@fontsource-variable/geist";
 import "./index.css";
 
 const queryClient = new QueryClient({
@@ -45,9 +46,7 @@ ReactDOM.createRoot(root).render(
   <React.StrictMode>
     <ThemeProvider>
       <QueryClientProvider client={queryClient}>
-        <BrowserRouter
-          future={{ v7_startTransition: true, v7_relativeSplatPath: true }}
-        >
+        <BrowserRouter>
           <AuthProvider>
             <App />
           </AuthProvider>

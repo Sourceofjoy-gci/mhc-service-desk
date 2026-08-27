@@ -3,6 +3,7 @@
 Covers the categories in `docs/threat-model.md` STRIDE table. The intent is
 to fail the build on a regression of any of these defences.
 """
+
 from __future__ import annotations
 
 import io
@@ -33,15 +34,17 @@ def test_unauthenticated_me_is_401(client):
 def test_intake_rejects_anonymous_submissions(client):
     r = client.post(
         "/api/v1/tickets/public/intake/",
-        data=json.dumps({
-            "request_type_code": "HOURS",
-            "service_code": "GEN-INFO",
-            "office_code": "MHC-MBA",
-            "title": "Test",
-            "description": "Test",
-            "requester_name": "Tester",
-            "consent": True,
-        }),
+        data=json.dumps(
+            {
+                "request_type_code": "HOURS",
+                "service_code": "GEN-INFO",
+                "office_code": "MHC-MBA",
+                "title": "Test",
+                "description": "Test",
+                "requester_name": "Tester",
+                "consent": True,
+            }
+        ),
         content_type="application/json",
     )
     assert r.status_code == 401
@@ -52,6 +55,7 @@ def test_attachments_size_limit(monkeypatch):
     from rest_framework.test import APIClient
 
     from apps.identity_access.models import User
+
     user, _ = User.objects.get_or_create(
         username="attachee",
         defaults={"keycloak_subject": "dev:attachee:ops-agents"},

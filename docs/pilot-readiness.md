@@ -105,12 +105,12 @@ Latest evidence shows:
 - [x] The inbound-email sanitizer security regression passed through the
   persisted service path.
 - [x] Ruff passed against the explicitly authorized current dirty worktree.
-- [ ] Reproducible clean-checkout Ruff remains open: its fixes exist only in
-  preserved, unstaged user-owned hunks. Exact findings are in the dated record.
+- [x] Ruff formatting and lint passed across the current backend tree.
 - [x] The fresh verified backend image was recreated on host port 8001 and the
   health endpoint became healthy.
 - [x] Final isolated current-source frontend tests, TypeScript, ESLint, and the
-  production build passed. Non-fatal font and bundle-size warnings remain.
+  production build passed. The font warning is resolved; a non-fatal
+  bundle-size warning remains.
 - [x] Final live Operational/IT pilot smoke passed with fresh development
   tickets.
 - [x] Independent reviews passed for identity, tickets/frontend, attachments,
@@ -122,10 +122,11 @@ into this page.
 
 ## Manual verification required
 
-- [ ] Desktop browser verification for public and protected shells, ticket
-  queue/workspace, Operational and IT dashboards, and all controlled states.
-- [ ] Mobile browser verification for layout order, overflow, dialogs, labels,
-  keyboard focus, and unavailable-action behavior.
+- [x] Desktop and mobile browser verification passed for the public health and
+  staff sign-in boundaries with no overflow or console errors.
+- [ ] Protected shell, ticket queue/workspace, Operational and IT dashboards,
+  dialogs, keyboard focus, and unavailable-action behavior still require
+  role-based browser verification with pilot identities.
 - [ ] User acceptance testing with Operational agents, IT agents, supervisors,
   auditors, security responders, and administrators.
 - [ ] Restore drill against operator-owned backup media and recovery targets.
@@ -135,9 +136,6 @@ into this page.
 - [ ] Any environment that applied an earlier unshipped revision of SLA
   migration `0004` must manually reconcile affected paused rows. Fresh
   deployments and the current live pilot rows are correct.
-
-A supported browser-verification tool was unavailable for the latest run, so
-browser verification is open rather than passed.
 
 ## External sign-off required
 
@@ -174,8 +172,8 @@ listed above.
 ## Decision
 
 **Pilot readiness is open.** The application must not be labelled pilot-ready
-until clean-checkout Ruff, required browser checks, and owner-controlled
-prerequisites all have passing evidence. Production WhatsApp also remains
+until protected role-based browser checks and owner-controlled prerequisites
+all have passing evidence. Production WhatsApp also remains
 disabled until its P1 dispatch and retry-deduplication work is complete.
 
 | Role | Name | Date | Decision/signature |

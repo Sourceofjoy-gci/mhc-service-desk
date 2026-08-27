@@ -104,8 +104,16 @@
       "directAccessGrantsEnabled": false,
       "rootUrl": "${PUBLIC_BASE_URL}",
       "baseUrl": "${PUBLIC_BASE_URL}",
-      "redirectUris": ["${PUBLIC_BASE_URL}/*"],
-      "webOrigins": ["${PUBLIC_BASE_URL}"],
+      "redirectUris": [
+        "${LOCAL_BASE_URL}/*",
+        "${LAN_BASE_URL}/*",
+        "${PUBLIC_BASE_URL}/*"
+      ],
+      "webOrigins": [
+        "${LOCAL_BASE_URL}",
+        "${LAN_BASE_URL}",
+        "${PUBLIC_BASE_URL}"
+      ],
       "attributes": {
         "pkce.code.challenge.method": "S256"
       },

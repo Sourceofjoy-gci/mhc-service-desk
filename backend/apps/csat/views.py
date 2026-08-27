@@ -1,4 +1,5 @@
 """CSAT public survey endpoint."""
+
 from __future__ import annotations
 
 import hashlib

@@ -184,9 +184,7 @@ class Ticket(models.Model):
         if not self._state.adding:
             loaded_number = self._loaded_number
             if loaded_number is None:
-                loaded_number = (
-                    type(self).objects.only("number").get(pk=self.pk).number
-                )
+                loaded_number = type(self).objects.only("number").get(pk=self.pk).number
             if self.number != loaded_number:
                 raise ValidationError("Ticket reference is immutable.")
         super().save(

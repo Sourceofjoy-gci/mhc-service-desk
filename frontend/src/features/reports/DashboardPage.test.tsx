@@ -79,7 +79,6 @@ function renderDashboard({
     <QueryClientProvider client={queryClient}>
       <MemoryRouter
         initialEntries={[route]}
-        future={{ v7_startTransition: true, v7_relativeSplatPath: true }}
       >
         <DashboardPage />
         <LocationProbe />

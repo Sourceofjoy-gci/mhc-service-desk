@@ -1,4 +1,5 @@
 """DRF serializers for the catalogue app."""
+
 from __future__ import annotations
 
 from rest_framework import serializers
@@ -6,16 +7,13 @@ from rest_framework import serializers
 from .models import CustomFieldDefinition, RequestType, Service
 
 
-class CustomFieldDefinitionSerializer(
-    serializers.ModelSerializer[CustomFieldDefinition]
-):
+class CustomFieldDefinitionSerializer(serializers.ModelSerializer[CustomFieldDefinition]):
     class Meta:
         model = CustomFieldDefinition
         fields = ("id", "key", "label", "kind", "required", "choices", "help_text", "order")
 
 
 class RequestTypeSerializer(serializers.ModelSerializer[RequestType]):
-
     def get_fields(
         self,
     ) -> dict[str, serializers.Field[object, object, object, object]]:

@@ -6,6 +6,7 @@ attachments are copied. IT cannot see the parent message body or
 attachments by default. Status summaries sync back to the parent without
 exposing the IT child to the requester.
 """
+
 from __future__ import annotations
 
 import logging
@@ -43,7 +44,7 @@ logger = logging.getLogger(__name__)
 # when the agent creates a child ticket. Anything not listed here stays in the
 # operational parent and is invisible to the IT domain.
 SANITISED_CARRY_OVER = {
-    "office",            # the office that needs the technical work
+    "office",  # the office that needs the technical work
     "matter_reference",  # limited identifier; agent must authorise
 }
 
@@ -54,12 +55,17 @@ def _resolve_it_service_and_type() -> tuple[Service, RequestType]:
     service = Service.objects.filter(domain="it", code="IT-INC").first()
     if not service:
         service = Service.objects.create(
-            code="IT-INC", name="IT incident report", domain="it", is_active=True,
+            code="IT-INC",
+            name="IT incident report",
+            domain="it",
+            is_active=True,
         )
     request_type = RequestType.objects.filter(service=service, code="OUTAGE").first()
     if not request_type:
         request_type = RequestType.objects.create(
-            service=service, code="OUTAGE", name="System outage",
+            service=service,
+            code="OUTAGE",
+            name="System outage",
             default_priority="P2",
         )
     return service, request_type
@@ -131,9 +137,7 @@ def create_it_child_ticket(
             "service": service,
             "request_type": request_type,
             "office": office,
-            "matter_reference": (
-                parent.matter_reference if carry_matter_reference else ""
-            ),
+            "matter_reference": (parent.matter_reference if carry_matter_reference else ""),
             "confidentiality": "sensitive",
         },
     )
@@ -234,23 +238,21 @@ def sync_child_status_to_parent(*, child: Ticket, actor_subject: str = "") -> No
       * child resolved/closed -> parent moves from waiting_it to in_progress
         (operational agent verifies the outcome before closing the parent)
     """
-    child = (
-        Ticket.objects.select_for_update(of=("self",))
-        .select_related("status")
-        .get(id=child.id)
-    )
+    child = Ticket.objects.select_for_update(of=("self",)).select_related("status").get(id=child.id)
     if child.domain != "it" or child.status.code not in {"resolved", "closed"}:
         return
-    parent_id = TicketLink.objects.filter(
-        from_ticket=child,
-        kind="it_child",
-    ).values_list("to_ticket_id", flat=True).first()
+    parent_id = (
+        TicketLink.objects.filter(
+            from_ticket=child,
+            kind="it_child",
+        )
+        .values_list("to_ticket_id", flat=True)
+        .first()
+    )
     if parent_id is None:
         return
     parent = (
-        Ticket.objects.select_for_update(of=("self",))
-        .select_related("status")
-        .get(id=parent_id)
+        Ticket.objects.select_for_update(of=("self",)).select_related("status").get(id=parent_id)
     )
     if parent.status.code not in ("waiting_it",):
         return  # parent isn't waiting on IT; nothing to sync

@@ -1,4 +1,5 @@
 """Append-only Operational/IT lifecycle smoke for the local development stack."""
+
 from __future__ import annotations
 
 import os
@@ -16,13 +17,15 @@ API_BASE = os.getenv("PILOT_API_BASE", "http://localhost:8001/api/v1").rstrip("/
 REQUEST_TIMEOUT = 10
 
 OPS_HEADERS: Mapping[str, str] = MappingProxyType(
-    {"Authorization": "Bearer dev:pilot-ops:ops-agents"}
+    # The fourth dev-token segment carries the Keycloak office claim, which
+    # _synchronize_office mirrors onto the local identity on every request.
+    {"Authorization": "Bearer dev:pilot-ops:ops-agents:MHC-MBA"}
 )
 IT_HEADERS: Mapping[str, str] = MappingProxyType(
-    {"Authorization": "Bearer dev:pilot-it:it-agents"}
+    {"Authorization": "Bearer dev:pilot-it:it-agents:MHC-MBA"}
 )
 OPS_LEAD_HEADERS: Mapping[str, str] = MappingProxyType(
-    {"Authorization": "Bearer dev:pilot-lead:ops-supervisors"}
+    {"Authorization": "Bearer dev:pilot-lead:ops-supervisors:MHC-MBA"}
 )
 
 
@@ -311,9 +314,7 @@ def run(session: requests.Session) -> tuple[str, str, str]:
         expected_status=201,
         label="Operational staff intake",
     )
-    operational_number = str(
-        _require_field(intake, "ticket_number", "Operational staff intake")
-    )
+    operational_number = str(_require_field(intake, "ticket_number", "Operational staff intake"))
 
     ticket = _get_json(
         session,
@@ -414,9 +415,7 @@ def run(session: requests.Session) -> tuple[str, str, str]:
     )
     items = activity.get("results")
     _require(isinstance(items, list), "Operational activity missing results")
-    activity_types = {
-        item.get("type") for item in items if isinstance(item, dict)
-    }
+    activity_types = {item.get("type") for item in items if isinstance(item, dict)}
     _require("message" in activity_types, "Operational activity missing message")
     _require("internal_note" in activity_types, "Operational activity missing note")
     _require("work_state" in activity_types, "Operational activity missing work-state")
@@ -452,9 +451,7 @@ def run(session: requests.Session) -> tuple[str, str, str]:
         expected_status=201,
         label="IT child parent intake",
     )
-    parent_number = str(
-        _require_field(parent_intake, "ticket_number", "IT child parent intake")
-    )
+    parent_number = str(_require_field(parent_intake, "ticket_number", "IT child parent intake"))
     child_result = _post_json(
         session,
         f"/tickets/{parent_number}/it-child/",

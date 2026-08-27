@@ -1,5 +1,14 @@
 import { useQuery, useQueryClient } from "@tanstack/react-query";
-import { AlertCircle, ArrowLeft } from "lucide-react";
+import {
+  AlertCircle,
+  ArrowLeft,
+  ChevronRight,
+  Mail,
+  Phone,
+  Tag,
+  UserRound,
+  UsersRound,
+} from "lucide-react";
 import { Link, useLocation, useParams } from "react-router-dom";
 import {
   ChannelBadge,
@@ -129,23 +138,34 @@ function BackToQueue({ to }: { to: string }) {
 function TicketLoading() {
   return (
     <section
-      className="flex flex-col gap-6"
+      className="flex flex-col xl:relative xl:left-1/2 xl:w-[calc(100vw-8rem)] xl:max-w-[84rem] xl:-translate-x-1/2"
       aria-busy="true"
       aria-label="Loading ticket"
     >
-      <Skeleton className="h-7 w-32" />
-      <div className="flex flex-col gap-3">
-        <Skeleton className="h-4 w-28" />
-        <Skeleton className="h-9 w-3/4" />
-        <Skeleton className="h-5 w-2/3" />
-        <Skeleton className="h-20 w-full" />
-      </div>
-      <div className="grid grid-cols-1 gap-6 lg:grid-cols-[minmax(0,2fr)_minmax(18rem,1fr)]">
-        <Skeleton className="h-96 w-full" />
-        <div className="flex flex-col gap-4">
-          <Skeleton className="h-72 w-full" />
-          <Skeleton className="h-40 w-full" />
+      <Skeleton className="mb-4 h-7 w-32" />
+      <div className="grid gap-6 pb-3 lg:grid-cols-[minmax(0,1fr)_auto] lg:items-end">
+        <div className="flex flex-col gap-3">
+          <Skeleton className="h-4 w-28" />
+          <Skeleton className="h-9 w-3/4" />
+          <Skeleton className="h-5 w-2/3" />
+          <Skeleton className="h-5 w-1/2" />
         </div>
+        <div className="flex flex-col gap-4 lg:items-end">
+          <Skeleton className="h-6 w-52" />
+          <Skeleton className="h-9 w-32" />
+        </div>
+      </div>
+      <div className="border-y border-border/70 bg-card py-3 [box-shadow:0_0_0_100vmax_var(--card)] [clip-path:inset(0_-100vmax)]">
+        <Skeleton className="mb-3 h-5 w-32" />
+        <div className="grid gap-6 md:grid-cols-2 xl:grid-cols-3 xl:gap-8">
+          <Skeleton className="h-32 w-full" />
+          <Skeleton className="h-32 w-full" />
+          <Skeleton className="h-32 w-full md:col-span-2 xl:col-span-1" />
+        </div>
+      </div>
+      <div className="grid grid-cols-1 items-stretch gap-5 xl:grid-cols-[minmax(0,1.9fr)_minmax(21rem,1fr)]">
+        <Skeleton className="h-[34rem] w-full" />
+        <Skeleton className="h-[34rem] w-full" />
       </div>
     </section>
   );
@@ -202,20 +222,27 @@ function Relationships({
   relationships: TicketRelationship[];
 }) {
   return (
-    <section
-      aria-labelledby="relationships-heading"
-      className="flex flex-col gap-3"
-    >
-      <div>
+    <section aria-labelledby="relationships-heading" className="flex flex-col">
+      <div className="flex items-center gap-2 px-4 py-3">
+        <UsersRound className="size-4 text-muted-foreground" aria-hidden />
         <h2 id="relationships-heading" className="text-base font-semibold">
           Relationships
         </h2>
-        <p className="text-sm text-muted-foreground">
-          Tickets linked to the current request.
-        </p>
+      </div>
+      <div className="flex items-center justify-between gap-3 border-t px-4 py-3 text-sm">
+        <span className="text-muted-foreground">Linked tickets</span>
+        <span className="flex items-center gap-3">
+          <span className="rounded-full bg-muted px-2.5 py-1 text-xs font-medium">
+            {relationships.length}
+          </span>
+          <ChevronRight className="size-4 text-muted-foreground" aria-hidden />
+        </span>
       </div>
       {relationships.length ? (
-        <ul className="divide-y border-y" aria-label="Ticket relationships">
+        <ul
+          className="divide-y border-t px-4"
+          aria-label="Ticket relationships"
+        >
           {relationships.map((relationship) => (
             <li
               key={relationship.id}
@@ -239,103 +266,100 @@ function Relationships({
           ))}
         </ul>
       ) : (
-        <p className="border-y py-3 text-sm text-muted-foreground">
-          No related tickets.
-        </p>
+        <p className="sr-only">No related tickets.</p>
       )}
     </section>
   );
 }
 
-function RequesterCard({ ticket }: { ticket: TicketDetail }) {
+function RequesterSection({ ticket }: { ticket: TicketDetail }) {
   return (
-    <Card className="rounded-lg!">
-      <CardHeader>
-        <CardTitle>
-          <h2>Requester</h2>
-        </CardTitle>
-        <CardDescription>Contact details for this ticket.</CardDescription>
-      </CardHeader>
-      <CardContent>
-        <dl className="text-sm">
-          <div className="flex items-start justify-between gap-4">
-            <dt className="text-muted-foreground">Full name</dt>
-            <dd className="text-right font-medium">
-              {ticket.requester.full_name}
+    <section
+      aria-labelledby="requester-heading"
+      className="flex flex-col gap-3"
+    >
+      <div className="flex items-center gap-2">
+        <UserRound className="size-4 text-muted-foreground" aria-hidden />
+        <h2 id="requester-heading" className="text-base font-semibold">
+          Requester
+        </h2>
+      </div>
+      <p className="text-sm font-medium">{ticket.requester.full_name}</p>
+      <dl className="flex flex-col gap-2.5 text-sm">
+        {ticket.requester.email ? (
+          <div>
+            <dt className="sr-only">Email</dt>
+            <dd>
+              <a
+                className="flex w-fit items-center gap-2 font-medium text-primary underline-offset-4 hover:underline"
+                href={`mailto:${ticket.requester.email}`}
+              >
+                <Mail className="size-3.5" aria-hidden />
+                {ticket.requester.email}
+              </a>
             </dd>
           </div>
-          {ticket.requester.email ? (
-            <>
-              <Separator className="my-3" />
-              <div className="flex items-start justify-between gap-4">
-                <dt className="text-muted-foreground">Email</dt>
-                <dd className="break-all text-right">
-                  {ticket.requester.email}
-                </dd>
-              </div>
-            </>
-          ) : null}
-          {ticket.requester.phone_e164 ? (
-            <>
-              <Separator className="my-3" />
-              <div className="flex items-start justify-between gap-4">
-                <dt className="text-muted-foreground">Phone</dt>
-                <dd className="text-right">{ticket.requester.phone_e164}</dd>
-              </div>
-            </>
-          ) : null}
-        </dl>
-      </CardContent>
-    </Card>
+        ) : null}
+        {ticket.requester.phone_e164 ? (
+          <div>
+            <dt className="sr-only">Phone</dt>
+            <dd>
+              <a
+                className="flex w-fit items-center gap-2 font-medium text-primary underline-offset-4 hover:underline"
+                href={`tel:${ticket.requester.phone_e164}`}
+              >
+                <Phone className="size-3.5" aria-hidden />
+                {ticket.requester.phone_e164}
+              </a>
+            </dd>
+          </div>
+        ) : null}
+      </dl>
+    </section>
   );
 }
 
-function ClassificationCard({ ticket }: { ticket: TicketDetail }) {
+function ClassificationSection({ ticket }: { ticket: TicketDetail }) {
   return (
-    <Card className="rounded-lg!">
-      <CardHeader>
-        <CardTitle>
-          <h2>Classification</h2>
-        </CardTitle>
-        <CardDescription>Routing and matter details.</CardDescription>
-      </CardHeader>
-      <CardContent>
-        <dl className="text-sm">
-          <div className="flex items-center justify-between gap-4">
-            <dt className="text-muted-foreground">Channel</dt>
-            <dd>
-              <ChannelBadge channel={ticket.channel} />
+    <section
+      aria-labelledby="classification-heading"
+      className="flex flex-col gap-4"
+    >
+      <div className="flex items-center gap-2">
+        <Tag className="size-4 text-muted-foreground" aria-hidden />
+        <h2 id="classification-heading" className="text-base font-semibold">
+          Classification
+        </h2>
+      </div>
+      <dl className="grid gap-2 text-sm">
+        <div className="grid grid-cols-[6.5rem_minmax(0,1fr)] items-center gap-3">
+          <dt className="text-muted-foreground">Channel</dt>
+          <dd>
+            <ChannelBadge channel={ticket.channel} />
+          </dd>
+        </div>
+        <div className="grid grid-cols-[6.5rem_minmax(0,1fr)] items-start gap-3">
+          <dt className="text-muted-foreground">Office</dt>
+          <dd>{ticket.office}</dd>
+        </div>
+        <div className="grid grid-cols-[6.5rem_minmax(0,1fr)] items-start gap-3">
+          <dt className="text-muted-foreground">Service</dt>
+          <dd>{ticket.service}</dd>
+        </div>
+        <div className="grid grid-cols-[6.5rem_minmax(0,1fr)] items-start gap-3">
+          <dt className="text-muted-foreground">Type</dt>
+          <dd>{ticket.request_type}</dd>
+        </div>
+        {ticket.matter_reference ? (
+          <div className="grid grid-cols-[6.5rem_minmax(0,1fr)] items-start gap-3">
+            <dt className="text-muted-foreground">Matter</dt>
+            <dd className="break-all text-sm font-medium">
+              {ticket.matter_reference}
             </dd>
           </div>
-          <Separator className="my-3" />
-          <div className="flex items-start justify-between gap-4">
-            <dt className="text-muted-foreground">Office</dt>
-            <dd className="text-right">{ticket.office}</dd>
-          </div>
-          <Separator className="my-3" />
-          <div className="flex items-start justify-between gap-4">
-            <dt className="text-muted-foreground">Service</dt>
-            <dd className="text-right">{ticket.service}</dd>
-          </div>
-          <Separator className="my-3" />
-          <div className="flex items-start justify-between gap-4">
-            <dt className="text-muted-foreground">Type</dt>
-            <dd className="text-right">{ticket.request_type}</dd>
-          </div>
-          {ticket.matter_reference ? (
-            <>
-              <Separator className="my-3" />
-              <div className="flex items-start justify-between gap-4">
-                <dt className="text-muted-foreground">Matter</dt>
-                <dd className="break-all text-right text-xs">
-                  {ticket.matter_reference}
-                </dd>
-              </div>
-            </>
-          ) : null}
-        </dl>
-      </CardContent>
-    </Card>
+        ) : null}
+      </dl>
+    </section>
   );
 }
 
@@ -382,13 +406,19 @@ export default function TicketDetailPage() {
   };
 
   return (
-    <section className="flex flex-col gap-6">
-      <div>
+    <section
+      className="flex flex-col xl:relative xl:left-1/2 xl:w-[calc(100vw-8rem)] xl:max-w-[84rem] xl:-translate-x-1/2"
+      data-testid="ticket-detail-page"
+    >
+      <div className="pb-4">
         <BackToQueue to={returnTo} />
       </div>
 
-      <header className="flex flex-col gap-4">
-        <div className="flex flex-col justify-between gap-4 md:flex-row md:items-start">
+      <header
+        className="grid gap-6 pb-3 lg:grid-cols-[minmax(0,1fr)_auto] lg:items-end"
+        data-testid="ticket-header"
+      >
+        <div className="flex min-w-0 flex-col gap-3">
           <div className="flex min-w-0 flex-col gap-1">
             <p className="font-mono text-xs text-muted-foreground">
               {ticket.number}
@@ -401,7 +431,17 @@ export default function TicketDetailPage() {
               · {ticket.request_type}
             </p>
           </div>
-          <div className="flex flex-wrap items-center gap-2 md:justify-end">
+          {ticket.description ? (
+            <p className="max-w-4xl whitespace-pre-line text-sm leading-relaxed text-foreground">
+              {ticket.description}
+            </p>
+          ) : null}
+        </div>
+        <div
+          className="flex flex-col items-start gap-4 lg:items-end"
+          data-testid="ticket-header-actions"
+        >
+          <div className="flex flex-wrap items-center gap-2 lg:justify-end">
             <StatusBadge code={ticket.status_code} label={ticket.status_name} />
             <PriorityBadge code={ticket.priority} />
             <ChannelBadge channel={ticket.channel} />
@@ -409,26 +449,59 @@ export default function TicketDetailPage() {
               {ticket.age_hours.toFixed(1)}h old
             </span>
           </div>
+          <div className="[&_[role=group]]:justify-end [&_[role=group]>button:first-child]:border-primary [&_[role=group]>button:first-child]:bg-primary [&_[role=group]>button:first-child]:text-primary-foreground">
+            <TransitionActions
+              ticket={ticket}
+              onUpdated={replaceTicket}
+              onActivityChanged={refreshActivity}
+            />
+          </div>
         </div>
-        {ticket.description ? (
-          <p className="max-w-4xl whitespace-pre-line text-sm leading-relaxed text-foreground">
-            {ticket.description}
-          </p>
-        ) : null}
       </header>
 
-      <TransitionActions
-        ticket={ticket}
-        onUpdated={replaceTicket}
-        onActivityChanged={refreshActivity}
-      />
+      <section
+        id="ticket-context"
+        aria-labelledby="ticket-essentials-heading"
+        className="border-y border-border/70 bg-card [box-shadow:0_0_0_100vmax_var(--card)] [clip-path:inset(0_-100vmax)]"
+      >
+        <div className="w-full py-3">
+          <h2
+            id="ticket-essentials-heading"
+            className="text-base font-semibold"
+          >
+            Ticket essentials
+          </h2>
+          <div
+            className="mt-2 grid gap-6 md:grid-cols-2 xl:grid-cols-3 xl:gap-0"
+            data-testid="ticket-essentials-grid"
+          >
+            <div className="min-w-0 xl:border-r xl:border-border/70 xl:pr-8">
+              <RequesterSection ticket={ticket} />
+            </div>
+            <div className="min-w-0 xl:border-r xl:border-border/70 xl:px-8">
+              <ClassificationSection ticket={ticket} />
+            </div>
+            <div className="min-w-0 md:col-span-2 xl:col-span-1 xl:pl-8">
+              <AttachmentUploader
+                ticketNumber={ticket.number}
+                canUpload={ticket.capabilities.can_upload_attachment}
+                embedded
+                compact
+              />
+            </div>
+          </div>
+        </div>
+      </section>
 
       <div
         data-testid="ticket-workspace-layout"
-        className="grid grid-cols-1 gap-6 lg:grid-cols-[minmax(0,2fr)_minmax(18rem,1fr)]"
+        className="grid grid-cols-1 items-stretch gap-5 xl:grid-cols-[minmax(0,1.9fr)_minmax(21rem,1fr)]"
       >
         <section className="min-w-0" aria-label="Ticket activity workspace">
-          <Card className="rounded-lg!">
+          <Card
+            className="h-full overflow-hidden rounded-lg!"
+            data-testid="ticket-activity-card"
+          >
             <CardHeader>
               <CardTitle>
                 <h2>Activity</h2>
@@ -437,8 +510,10 @@ export default function TicketDetailPage() {
                 Requester messages and internal ticket changes in one stream.
               </CardDescription>
             </CardHeader>
-            <CardContent>
-              <ActivityTimeline ticketNumber={ticket.number} />
+            <CardContent className="flex min-h-0 flex-1 flex-col">
+              <div className="min-h-0" data-testid="ticket-activity-scroll">
+                <ActivityTimeline ticketNumber={ticket.number} />
+              </div>
               {ticket.capabilities.can_add_message ||
               ticket.capabilities.can_add_note ? (
                 <MessageComposer
@@ -446,6 +521,7 @@ export default function TicketDetailPage() {
                   onCreated={refreshActivity}
                   canAddMessage={ticket.capabilities.can_add_message}
                   canAddNote={ticket.capabilities.can_add_note}
+                  compact
                 />
               ) : null}
             </CardContent>
@@ -453,29 +529,23 @@ export default function TicketDetailPage() {
         </section>
 
         <aside
-          className="flex min-w-0 flex-col gap-5"
-          aria-label="Ticket context"
+          className="min-w-0 overflow-x-clip rounded-lg bg-card ring-1 ring-foreground/10"
+          aria-label="Ticket operations"
+          data-testid="ticket-operations-rail"
         >
-          <div className="border-b pb-5">
+          <div className="p-4">
             <OperationsPanel
               ticket={ticket}
               onUpdated={replaceTicket}
               onReload={reloadTicket}
               onActivityChanged={refreshActivity}
+              compact
             />
           </div>
-          <div className="border-b pb-5">
-            <SlaClocks clocks={ticket.sla_clocks} />
-          </div>
-          <div className="border-b pb-5">
-            <Relationships relationships={ticket.relationships} />
-          </div>
-          <AttachmentUploader
-            ticketNumber={ticket.number}
-            canUpload={ticket.capabilities.can_upload_attachment}
-          />
-          <RequesterCard ticket={ticket} />
-          <ClassificationCard ticket={ticket} />
+          <Separator />
+          <SlaClocks clocks={ticket.sla_clocks} compact />
+          <Separator />
+          <Relationships relationships={ticket.relationships} />
         </aside>
       </div>
     </section>

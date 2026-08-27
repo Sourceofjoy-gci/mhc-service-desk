@@ -127,6 +127,10 @@ function DraggableTicket({ ticket }: { ticket: TicketSummary }) {
       <button
         ref={setActivatorNodeRef}
         type="button"
+        // The only control in the app that is not the Button primitive, and so
+        // the only one the coarse-pointer touch floor was missing — on the
+        // board where dragging is the whole interaction.
+        data-slot="button"
         {...listeners}
         {...attributes}
         aria-label={`Move ticket ${ticket.number}`}
@@ -390,7 +394,7 @@ export default function KanbanPage() {
 
       {data ? (
         <DndContext sensors={sensors} onDragEnd={handleDragEnd}>
-          <div className="flex h-[calc(100vh-220px)] gap-3 overflow-x-auto pb-2">
+          <div className="flex h-[calc(100dvh-var(--app-chrome,13.75rem))] min-h-0 gap-3 overflow-x-auto pb-2">
             {columns.map((code) => (
               <DroppableColumn
                 key={code}
@@ -409,8 +413,9 @@ export default function KanbanPage() {
 function KanbanSkeleton({ columns }: { columns: string[] }) {
   return (
     <div
-      className="flex h-[calc(100vh-220px)] gap-3 overflow-x-auto pb-2"
+      role="status"
       aria-label="Loading Kanban"
+      className="flex h-[calc(100dvh-var(--app-chrome,13.75rem))] min-h-0 gap-3 overflow-x-auto pb-2"
     >
       {columns.map((code) => (
         <div

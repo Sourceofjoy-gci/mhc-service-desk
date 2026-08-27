@@ -1,4 +1,5 @@
 """Reporting views — CSV export and dashboards."""
+
 from __future__ import annotations
 
 import csv
@@ -53,18 +54,39 @@ def export_tickets_csv(request: Request) -> StreamingHttpResponse:
 
     def rows() -> Iterator[str]:
         writer = csv.writer(Echo())
-        yield writer.writerow([
-            "number", "domain", "title", "status", "priority",
-            "requester", "office", "channel", "created_at", "updated_at",
-            "resolution_code", "matter_reference",
-        ])
+        yield writer.writerow(
+            [
+                "number",
+                "domain",
+                "title",
+                "status",
+                "priority",
+                "requester",
+                "office",
+                "channel",
+                "created_at",
+                "updated_at",
+                "resolution_code",
+                "matter_reference",
+            ]
+        )
         for t in qs.iterator(chunk_size=200):
-            yield writer.writerow([
-                t.number, t.domain, t.title, t.status.code, t.priority,
-                t.requester.full_name, t.office.code, t.channel,
-                t.created_at.isoformat(), t.updated_at.isoformat(),
-                t.resolution_code, t.matter_reference,
-            ])
+            yield writer.writerow(
+                [
+                    t.number,
+                    t.domain,
+                    t.title,
+                    t.status.code,
+                    t.priority,
+                    t.requester.full_name,
+                    t.office.code,
+                    t.channel,
+                    t.created_at.isoformat(),
+                    t.updated_at.isoformat(),
+                    t.resolution_code,
+                    t.matter_reference,
+                ]
+            )
 
     response = StreamingHttpResponse(rows(), content_type="text/csv")
     response["Content-Disposition"] = 'attachment; filename="tickets.csv"'
@@ -95,24 +117,45 @@ def operational_dashboard(request: Request) -> Response:
         request=request,
     ).filter(domain="operational")
     now = timezone.now()
-    return Response({
-        "totals": {
-            "open": qs.exclude(status__code__in=[
-                "closed", "resolved", "cancelled", "rejected", "duplicate", "spam"
-            ]).count(),
-            "today": qs.filter(created_at__date=now.date()).count(),
-            "this_week": qs.filter(created_at__gte=now - timedelta(days=7)).count(),
-        },
-        "by_priority": list(qs.values("priority").annotate(count=Count("id")).order_by("priority")),
-        "by_status": list(
-            qs.values("status__code", "status__name").annotate(count=Count("id"))
-            .order_by("status__order")
-        ),
-        "unassigned": qs.filter(assignee__isnull=True).exclude(
-            status__code__in=["closed", "resolved", "cancelled", "rejected", "duplicate", "spam"]
-        ).count(),
-        "breached_sla": qs.filter(sla_instances__state="breached").distinct().count(),
-    })
+    return Response(
+        {
+            "totals": {
+                "open": qs.exclude(
+                    status__code__in=[
+                        "closed",
+                        "resolved",
+                        "cancelled",
+                        "rejected",
+                        "duplicate",
+                        "spam",
+                    ]
+                ).count(),
+                "today": qs.filter(created_at__date=now.date()).count(),
+                "this_week": qs.filter(created_at__gte=now - timedelta(days=7)).count(),
+            },
+            "by_priority": list(
+                qs.values("priority").annotate(count=Count("id")).order_by("priority")
+            ),
+            "by_status": list(
+                qs.values("status__code", "status__name")
+                .annotate(count=Count("id"))
+                .order_by("status__order")
+            ),
+            "unassigned": qs.filter(assignee__isnull=True)
+            .exclude(
+                status__code__in=[
+                    "closed",
+                    "resolved",
+                    "cancelled",
+                    "rejected",
+                    "duplicate",
+                    "spam",
+                ]
+            )
+            .count(),
+            "breached_sla": qs.filter(sla_instances__state="breached").distinct().count(),
+        }
+    )
 
 
 @api_view(["GET"])
@@ -134,23 +177,26 @@ def it_dashboard(request: Request) -> Response:
         request=request,
     ).filter(domain="it")
     now = timezone.now()
-    return Response({
-        "totals": {
-            "open": qs.exclude(status__code__in=[
-                "closed", "resolved", "cancelled"
-            ]).count(),
-            "today": qs.filter(created_at__date=now.date()).count(),
-            "this_week": qs.filter(created_at__gte=now - timedelta(days=7)).count(),
-        },
-        "by_priority": list(qs.values("priority").annotate(count=Count("id")).order_by("priority")),
-        "by_status": list(
-            qs.values("status__code", "status__name").annotate(count=Count("id"))
-            .order_by("status__order")
-        ),
-        "unassigned": qs.filter(assignee__isnull=True).exclude(
-            status__code__in=["closed", "resolved", "cancelled"]
-        ).count(),
-        "p1p2": qs.filter(priority__in=["P1", "P2"]).exclude(
-            status__code__in=["closed", "resolved", "cancelled"]
-        ).count(),
-    })
+    return Response(
+        {
+            "totals": {
+                "open": qs.exclude(status__code__in=["closed", "resolved", "cancelled"]).count(),
+                "today": qs.filter(created_at__date=now.date()).count(),
+                "this_week": qs.filter(created_at__gte=now - timedelta(days=7)).count(),
+            },
+            "by_priority": list(
+                qs.values("priority").annotate(count=Count("id")).order_by("priority")
+            ),
+            "by_status": list(
+                qs.values("status__code", "status__name")
+                .annotate(count=Count("id"))
+                .order_by("status__order")
+            ),
+            "unassigned": qs.filter(assignee__isnull=True)
+            .exclude(status__code__in=["closed", "resolved", "cancelled"])
+            .count(),
+            "p1p2": qs.filter(priority__in=["P1", "P2"])
+            .exclude(status__code__in=["closed", "resolved", "cancelled"])
+            .count(),
+        }
+    )

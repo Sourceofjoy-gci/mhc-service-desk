@@ -37,12 +37,14 @@ import {
   type TicketAssignee,
   type TicketDetail,
 } from "@/lib/api";
+import { cn } from "@/lib/utils";
 
 export interface AssignmentControlProps {
   ticket: TicketDetail;
   onUpdated: (ticket: TicketDetail) => void;
   onReload: () => void;
   onActivityChanged?: () => void | Promise<void>;
+  compact?: boolean;
 }
 
 type AssignmentAction = "assign" | "transfer" | "unassign";
@@ -161,6 +163,7 @@ function ScopedAssignmentControl({
   onUpdated,
   onReload,
   onActivityChanged,
+  compact = false,
 }: AssignmentControlProps) {
   const queryClient = useQueryClient();
   const panelRef = useRef<HTMLElement>(null);
@@ -505,7 +508,12 @@ function ScopedAssignmentControl({
     <section
       ref={panelRef}
       aria-labelledby="ticket-assignment-heading"
-      className="flex flex-col gap-4 border-b border-border pb-5"
+      className={cn(
+        "flex flex-col border-b border-border",
+        compact
+          ? "gap-2 pb-3 [&_[data-slot=field-label]]:sr-only"
+          : "gap-4 pb-5",
+      )}
     >
       <div className="flex flex-col gap-1">
         <h2 id="ticket-assignment-heading" className="text-base font-semibold">

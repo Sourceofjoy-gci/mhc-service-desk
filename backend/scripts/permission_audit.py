@@ -7,6 +7,7 @@ Run from the backend directory:
 Helps reviewers verify that the matrix in `docs/permission-matrix.md`
 matches the actual code. Drift should be caught in PR review.
 """
+
 from __future__ import annotations
 
 import inspect
@@ -79,9 +80,7 @@ def _class_names(classes) -> tuple[str, ...]:
 def _route_methods(callback, cls, pattern_name):
     actions = getattr(callback, "actions", None)
     if actions:
-        yield from sorted(
-            (method.upper(), action) for method, action in actions.items()
-        )
+        yield from sorted((method.upper(), action) for method, action in actions.items())
         return
 
     for method in cls.http_method_names:
@@ -108,9 +107,7 @@ def _walk_patterns(patterns, prefix=""):
         if not path.startswith("api/v1/") or "<format>" in path:
             continue
         initkwargs = getattr(callback, "initkwargs", {})
-        permissions = tuple(
-            initkwargs.get("permission_classes", cls.permission_classes)
-        )
+        permissions = tuple(initkwargs.get("permission_classes", cls.permission_classes))
         authentication = initkwargs.get(
             "authentication_classes",
             cls.authentication_classes,
@@ -189,10 +186,7 @@ def main():
     print("METHOD ACTION PATH | AUTHENTICATION | PERMISSIONS | SCOPE / PUBLIC")
     print("-" * 120)
     for route in routes:
-        print(
-            f"{route.method} {route.action} {route.path} "
-            f"| {_metadata_label(route)}"
-        )
+        print(f"{route.method} {route.action} {route.path} " f"| {_metadata_label(route)}")
 
     if not routes:
         print("\nERROR: no API views found")

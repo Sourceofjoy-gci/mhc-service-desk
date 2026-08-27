@@ -4,6 +4,7 @@ Provider-agnostic: a webhook posts a normalised payload. We apply
 idempotency, thread matching, contact reconciliation, and either attach
 the message to an existing ticket or create a new one.
 """
+
 from __future__ import annotations
 
 import logging
@@ -24,8 +25,23 @@ from .models import Mailbox
 logger = logging.getLogger(__name__)
 
 ALLOWED_TAGS = [
-    "a", "b", "blockquote", "br", "code", "em", "i", "li", "ol", "p",
-    "pre", "strong", "ul", "u", "span", "div", "hr",
+    "a",
+    "b",
+    "blockquote",
+    "br",
+    "code",
+    "em",
+    "i",
+    "li",
+    "ol",
+    "p",
+    "pre",
+    "strong",
+    "ul",
+    "u",
+    "span",
+    "div",
+    "hr",
 ]
 ALLOWED_ATTRS = {"a": ["href", "title"], "span": ["class"], "div": ["class"]}
 
@@ -57,9 +73,9 @@ def find_target_ticket(
     requester: Contact,
 ) -> Ticket | None:
     """Match an inbound email to an existing ticket by:
-      1. A previous outbound TicketMessage with the same Message-ID
-      2. The In-Reply-To / References chain
-      3. The platform-issued token in the subject
+    1. A previous outbound TicketMessage with the same Message-ID
+    2. The In-Reply-To / References chain
+    3. The platform-issued token in the subject
     """
     eligible_messages = TicketMessage.objects.filter(
         ticket__domain=domain,
@@ -162,9 +178,9 @@ def process_inbound_email(
     if target is None:
         # New ticket — pick a service that actually has request types, prefer
         # GEN-INFO / IT-INC seeds so the ticket lands in a usable request type.
-        candidates = list(
-            Service.objects.filter(domain=mailbox_domain, is_active=True)
-        ) or list(Service.objects.filter(domain="operational", is_active=True))
+        candidates = list(Service.objects.filter(domain=mailbox_domain, is_active=True)) or list(
+            Service.objects.filter(domain="operational", is_active=True)
+        )
         service = None
         request_type = None
         preferred_codes = {"GEN-INFO", "IT-INC", "IT-ACCESS"}

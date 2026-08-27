@@ -86,9 +86,9 @@ const statusBadge = cva("border-transparent font-medium", {
       closed: "bg-muted text-muted-foreground ring-1 ring-inset ring-border",
       cancelled: "bg-muted text-muted-foreground ring-1 ring-inset ring-border",
       rejected:
-        "bg-destructive/10 text-destructive ring-1 ring-inset ring-destructive/30",
+        "bg-destructive-surface text-destructive ring-1 ring-inset ring-destructive/30",
       duplicate: "bg-muted text-muted-foreground ring-1 ring-inset ring-border",
-      spam: "bg-destructive/10 text-destructive ring-1 ring-inset ring-destructive/30",
+      spam: "bg-destructive-surface text-destructive ring-1 ring-inset ring-destructive/30",
     },
   },
   defaultVariants: { code: "new" },

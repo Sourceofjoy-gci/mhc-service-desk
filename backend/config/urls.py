@@ -1,4 +1,5 @@
 """Top-level URL configuration for the MHC e-Ticketing backend."""
+
 from __future__ import annotations
 
 from django.contrib import admin
@@ -12,13 +13,15 @@ from rest_framework.request import Request
 @api_view(["GET"])
 @permission_classes([AllowAny])
 def root(_request: Request) -> JsonResponse:
-    return JsonResponse({
-        "name": "MHC Unified e-Ticketing and Service Desk API",
-        "version": "0.1.0",
-        "environment": __import__("django.conf", fromlist=["settings"]).settings.ENVIRONMENT,
-        "docs": "/api/v1/docs",
-        "health": "/api/v1/health",
-    })
+    return JsonResponse(
+        {
+            "name": "MHC Unified e-Ticketing and Service Desk API",
+            "version": "0.1.0",
+            "environment": __import__("django.conf", fromlist=["settings"]).settings.ENVIRONMENT,
+            "docs": "/api/v1/docs",
+            "health": "/api/v1/health",
+        }
+    )
 
 
 urlpatterns = [

@@ -3,6 +3,7 @@
 Authorisation is server-side: a user must have a scope that matches the
 ticket's domain. The frontend never gets to decide what to show.
 """
+
 from __future__ import annotations
 
 import logging
@@ -109,10 +110,7 @@ def _ticket_action_error(
 def _serializer_error_fields(
     errors: Mapping[str, Sequence[object]],
 ) -> dict[str, list[str]]:
-    return {
-        field: [str(message) for message in messages]
-        for field, messages in errors.items()
-    }
+    return {field: [str(message) for message in messages] for field, messages in errors.items()}
 
 
 def _candidate_payload(candidate: AssigneeCandidate) -> dict[str, object]:
@@ -139,9 +137,7 @@ class TicketViewSet(
     authentication_classes = [KeycloakJWTAuthentication]
     permission_classes = [IsAuthenticated, ScopePermission]
     lookup_field = "number"
-    lookup_value_regex = (
-        "[A-Z][0-9]{5}|[A-Z][A-Z0-9]{1,7}-[0-9]{6}-[0-9]{6}"
-    )
+    lookup_value_regex = "[A-Z][0-9]{5}|[A-Z][A-Z0-9]{1,7}-[0-9]{6}-[0-9]{6}"
     pagination_class = TicketCursorPagination
 
     def permission_denied(
@@ -294,9 +290,7 @@ class TicketViewSet(
                 response_status=status.HTTP_403_FORBIDDEN,
             )
         except services.TicketConflictError as exc:
-            current = serializers.DateTimeField().to_representation(
-                exc.current_updated_at
-            )
+            current = serializers.DateTimeField().to_representation(exc.current_updated_at)
             return _ticket_action_error(
                 request,
                 code="stale_ticket",
@@ -304,9 +298,7 @@ class TicketViewSet(
                 fields={"updated_at": [current]},
                 response_status=status.HTTP_409_CONFLICT,
             )
-        return Response(
-            TicketDetailSerializer(ticket, context=self.get_serializer_context()).data
-        )
+        return Response(TicketDetailSerializer(ticket, context=self.get_serializer_context()).data)
 
     @action(
         detail=True,
@@ -340,11 +332,7 @@ class TicketViewSet(
                 request,
                 code="assignment_must_be_separate",
                 detail="Assignment must be submitted separately.",
-                fields={
-                    "assignee": [
-                        "Use the ticket assignment action for owner changes."
-                    ]
-                },
+                fields={"assignee": ["Use the ticket assignment action for owner changes."]},
                 response_status=status.HTTP_400_BAD_REQUEST,
             )
         try:
@@ -389,9 +377,7 @@ class TicketViewSet(
                 response_status=status.HTTP_403_FORBIDDEN,
             )
         except services.TicketConflictError as exc:
-            current = serializers.DateTimeField().to_representation(
-                exc.current_updated_at
-            )
+            current = serializers.DateTimeField().to_representation(exc.current_updated_at)
             return _ticket_action_error(
                 request,
                 code="stale_ticket",
@@ -445,11 +431,15 @@ class TicketViewSet(
     ) -> Response:
         ticket = self.get_object()
         actor = _authenticated_user(request)
-        can_escalate = available_transitions(
-            ticket,
-            actor,
-            request=request,
-        ).filter(to_status__code="escalated").exists()
+        can_escalate = (
+            available_transitions(
+                ticket,
+                actor,
+                request=request,
+            )
+            .filter(to_status__code="escalated")
+            .exists()
+        )
         if not can_escalate:
             return _ticket_action_error(
                 request,
@@ -495,9 +485,7 @@ class TicketViewSet(
                 ticket_id=ticket.id,
                 actor=actor,
                 assignee_id=serializer.validated_data["assignee_id"],
-                expected_updated_at=serializer.validated_data[
-                    "expected_updated_at"
-                ],
+                expected_updated_at=serializer.validated_data["expected_updated_at"],
                 reason=serializer.validated_data.get("reason", ""),
                 request=request,
             )
@@ -520,9 +508,7 @@ class TicketViewSet(
                 response_status=status.HTTP_403_FORBIDDEN,
             )
         except services.TicketConflictError as exc:
-            current = serializers.DateTimeField().to_representation(
-                exc.current_updated_at
-            )
+            current = serializers.DateTimeField().to_representation(exc.current_updated_at)
             return _ticket_action_error(
                 request,
                 code="stale_ticket",
@@ -586,9 +572,7 @@ class TicketViewSet(
                 response_status=status.HTTP_403_FORBIDDEN,
             )
         except services.TicketConflictError as exc:
-            current = serializers.DateTimeField().to_representation(
-                exc.current_updated_at
-            )
+            current = serializers.DateTimeField().to_representation(exc.current_updated_at)
             return _ticket_action_error(
                 request,
                 code="stale_ticket",
@@ -625,9 +609,9 @@ class TicketViewSet(
         if request.method == "GET":
             from .api import TicketMessageSerializer
 
-            return Response({
-                "results": TicketMessageSerializer(ticket.messages.all(), many=True).data
-            })
+            return Response(
+                {"results": TicketMessageSerializer(ticket.messages.all(), many=True).data}
+            )
         ser = MessageCreateSerializer(data=request.data)
         ser.is_valid(raise_exception=True)
         actor = _authenticated_user(request)
@@ -668,6 +652,7 @@ class TicketViewSet(
         ticket = self.get_object()
         if request.method == "GET":
             from .api import TicketNoteSerializer
+
             return Response({"results": TicketNoteSerializer(ticket.notes.all(), many=True).data})
         ser = NoteCreateSerializer(data=request.data)
         ser.is_valid(raise_exception=True)
@@ -706,6 +691,7 @@ class TicketViewSet(
                "carry_matter_reference": true|false}
         """
         from .it_child import create_it_child_ticket
+
         parent = self.get_object()
         if parent.domain != "operational":
             return Response(
@@ -759,10 +745,12 @@ class TicketViewSet(
             qs = qs.filter(domain=params["domain"])
         # Exclude terminal and out-of-office
         from apps.workflow.models import Status
+
         terminal = Status.objects.filter(is_terminal=True).values_list("code", flat=True)
         qs = qs.exclude(status__code__in=list(terminal))
         grouped: dict[str, list[object]] = {}
         from .api import TicketListSerializer
+
         for ticket in qs.order_by("priority", "-created_at")[:300]:
             code = ticket.status.code
             grouped.setdefault(code, []).append(
@@ -809,8 +797,10 @@ def public_intake(request: Request) -> Response:
         request_type = RequestType.objects.get(service=service, code=data["request_type_code"])
         office = Office.objects.get(code=data["office_code"])
     except (Service.DoesNotExist, RequestType.DoesNotExist, Office.DoesNotExist) as exc:
-        return Response({"detail": "Invalid service or office.", "code": str(exc)},
-                        status=status.HTTP_400_BAD_REQUEST)
+        return Response(
+            {"detail": "Invalid service or office.", "code": str(exc)},
+            status=status.HTTP_400_BAD_REQUEST,
+        )
 
     required_scope = Scope(
         domain="operational",
@@ -819,9 +809,7 @@ def public_intake(request: Request) -> Response:
     )
     actor_scopes = getattr(actor, "_scopes", ())
     if not any(
-        isinstance(scope, Scope)
-        and scope.queue_id is None
-        and scope.matches(required_scope)
+        isinstance(scope, Scope) and scope.queue_id is None and scope.matches(required_scope)
         for scope in actor_scopes
     ):
         raise PermissionDenied(
@@ -925,29 +913,42 @@ def operational_dashboard(request: Request) -> Response:
     ).filter(domain="operational")
     now = timezone.now()
 
-    return Response({
-        "totals": {
-            "open": qs.exclude(status__code__in=[
-                "closed",
-                "resolved",
-                "cancelled",
-                "rejected",
-                "duplicate",
-                "spam",
-            ]).count(),
-            "today": qs.filter(created_at__date=now.date()).count(),
-            "this_week": qs.filter(created_at__gte=now - timedelta(days=7)).count(),
-        },
-        "by_priority": list(
-            qs.values("priority").annotate(count=Count("id")).order_by("priority")
-        ),
-        "by_status": list(
-            qs.values("status__code", "status__name")
-            .annotate(count=Count("id"))
-            .order_by("status__order")
-        ),
-        "unassigned": qs.filter(assignee__isnull=True).exclude(
-            status__code__in=["closed", "resolved", "cancelled", "rejected", "duplicate", "spam"]
-        ).count(),
-        "breached_sla": qs.filter(sla_instances__state="breached").distinct().count(),
-    })
+    return Response(
+        {
+            "totals": {
+                "open": qs.exclude(
+                    status__code__in=[
+                        "closed",
+                        "resolved",
+                        "cancelled",
+                        "rejected",
+                        "duplicate",
+                        "spam",
+                    ]
+                ).count(),
+                "today": qs.filter(created_at__date=now.date()).count(),
+                "this_week": qs.filter(created_at__gte=now - timedelta(days=7)).count(),
+            },
+            "by_priority": list(
+                qs.values("priority").annotate(count=Count("id")).order_by("priority")
+            ),
+            "by_status": list(
+                qs.values("status__code", "status__name")
+                .annotate(count=Count("id"))
+                .order_by("status__order")
+            ),
+            "unassigned": qs.filter(assignee__isnull=True)
+            .exclude(
+                status__code__in=[
+                    "closed",
+                    "resolved",
+                    "cancelled",
+                    "rejected",
+                    "duplicate",
+                    "spam",
+                ]
+            )
+            .count(),
+            "breached_sla": qs.filter(sla_instances__state="breached").distinct().count(),
+        }
+    )

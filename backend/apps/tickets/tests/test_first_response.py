@@ -1,4 +1,5 @@
 """First-response delivery eligibility and PostgreSQL concurrency tests."""
+
 from __future__ import annotations
 
 from concurrent.futures import ThreadPoolExecutor
@@ -50,11 +51,14 @@ def test_unsent_ai_draft_does_not_complete_first_response(basic_world):
         created_at="2026-07-27T08:00:00Z",
     )
 
-    assert apply_suggestion(
-        ticket=ticket,
-        suggestion=suggestion,
-        approver_subject="approver-1",
-    ) is True
+    assert (
+        apply_suggestion(
+            ticket=ticket,
+            suggestion=suggestion,
+            approver_subject="approver-1",
+        )
+        is True
+    )
 
     ticket.refresh_from_db()
     first_response = ticket.sla_instances.get(kind="first_response")
@@ -62,12 +66,16 @@ def test_unsent_ai_draft_does_not_complete_first_response(basic_world):
     assert ticket.first_responded_at is None
     assert first_response.state == "active"
     assert first_response.completed_at is None
-    assert AuditEvent.objects.filter(
-        object_id=str(ticket.id), action="ticket.message.created"
-    ).count() == 1
-    assert OutboxEvent.objects.filter(
-        aggregate_id=str(ticket.id), event_type="ticket.message.created"
-    ).count() == 1
+    assert (
+        AuditEvent.objects.filter(object_id=str(ticket.id), action="ticket.message.created").count()
+        == 1
+    )
+    assert (
+        OutboxEvent.objects.filter(
+            aggregate_id=str(ticket.id), event_type="ticket.message.created"
+        ).count()
+        == 1
+    )
 
 
 def test_concurrent_delivered_replies_choose_one_matching_first_response_timestamp(
@@ -100,9 +108,13 @@ def test_concurrent_delivered_replies_choose_one_matching_first_response_timesta
     assert ticket.first_responded_at is not None
     assert first_response.state == "met"
     assert first_response.completed_at == ticket.first_responded_at
-    assert AuditEvent.objects.filter(
-        object_id=str(ticket.id), action="ticket.message.created"
-    ).count() == 2
-    assert OutboxEvent.objects.filter(
-        aggregate_id=str(ticket.id), event_type="ticket.message.created"
-    ).count() == 2
+    assert (
+        AuditEvent.objects.filter(object_id=str(ticket.id), action="ticket.message.created").count()
+        == 2
+    )
+    assert (
+        OutboxEvent.objects.filter(
+            aggregate_id=str(ticket.id), event_type="ticket.message.created"
+        ).count()
+        == 2
+    )

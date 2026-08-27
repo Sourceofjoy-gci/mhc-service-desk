@@ -1,4 +1,5 @@
 """Attachments and File Service Django app."""
+
 from django.apps import AppConfig
 
 

@@ -5,6 +5,7 @@ Run inside the backend container:
 
     docker compose exec backend python /app/scripts/seed_dev.py
 """
+
 from __future__ import annotations
 
 import os
@@ -18,15 +19,14 @@ django.setup()
 
 from apps.catalogue.models import RequestType, Service  # noqa: E402
 from apps.contacts.models import Contact  # noqa: E402
-from apps.identity_access.models import Role, User  # noqa: E402
+from apps.identity_access.models import Role, User, UserRole  # noqa: E402
 from apps.identity_access.staff_roles import STAFF_DESIGNATIONS  # noqa: E402
 from apps.organisations.models import Office, Region  # noqa: E402
 from apps.sla.seed_sla import seed_sla  # noqa: E402
 from apps.tickets.seed_workflow import seed_workflow  # noqa: E402
 
 PRIMARY_STAFF_ROLES = {
-    designation.role_key: designation.display_name
-    for designation in STAFF_DESIGNATIONS
+    designation.role_key: designation.display_name for designation in STAFF_DESIGNATIONS
 }
 
 
@@ -52,7 +52,8 @@ def ensure_request_type(
     priority: str = "P3",
 ) -> RequestType:
     obj, _ = RequestType.objects.get_or_create(
-        service=service, code=code,
+        service=service,
+        code=code,
         defaults={"name": name, "default_priority": priority},
     )
     return obj
@@ -96,6 +97,31 @@ def ensure_local_admin() -> User:
         email="local-admin@mhc.local",
         password=os.environ.get("DEV_LOCAL_ADMIN_PASSWORD") or None,
         keycloak_subject="local-admin",
+    )
+
+
+def ensure_pilot_approver() -> None:
+    """Give the pilot-smoke operational identity a scoped Master designation.
+
+    The seeded Operational workflow requires leadership approval for
+    resolve/reopen transitions. The smoke's DEBUG-token identity therefore
+    needs a persisted, office-confined ``master`` UserRole so the approval
+    gates are exercised through the real persisted-authority path.
+    """
+    role = Role.objects.filter(keycloak_role="master").first()
+    if role is None:
+        return
+    # The smoke identity is otherwise created lazily on its first authenticated
+    # request; creating it here keeps seeding order-independent. These are the
+    # same fields the DEBUG dev-token resolver uses (subject ``dev:pilot-ops``).
+    user, _ = User.objects.get_or_create(
+        keycloak_subject="dev:pilot-ops",
+        defaults={"username": "pilot-ops"},
+    )
+    UserRole.objects.get_or_create(
+        user=user,
+        role=role,
+        office=Office.objects.get(code="MHC-MBA"),
     )
 
 
@@ -144,6 +170,7 @@ def main() -> None:
     ensure_contact("Walk-in Visitor", "walkin@example.com")
 
     ensure_local_admin()
+    ensure_pilot_approver()
 
     seed_workflow()
     seed_sla()

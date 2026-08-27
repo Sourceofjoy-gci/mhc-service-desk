@@ -48,7 +48,12 @@ _AUDITOR_ROLES = {"auditor", "auditors"}
 # The national service desk answers queries before the responsible office is
 # known, so it is never bound to one office.
 _SERVICE_DESK_ROLES = frozenset({"service-desk-agents", "agent-servicedesk"})
-_CROSS_OFFICE_ROLES = _AUDITOR_ROLES | _SERVICE_DESK_ROLES
+# The Master and Deputy Master head the institution, not one of its offices.
+# Their authority follows the office the work belongs to rather than the office
+# they happen to sit in. Assistant Masters are office appointments and stay
+# confined like any other officer.
+_NATIONAL_PRINCIPAL_ROLES = frozenset({"master", "deputy-master"})
+_CROSS_OFFICE_ROLES = _AUDITOR_ROLES | _SERVICE_DESK_ROLES | _NATIONAL_PRINCIPAL_ROLES
 # System administration is never office-bound: a Keycloak misconfiguration must
 # not be able to lock the platform's administrators out of their own instance.
 _OFFICE_BOUND_DOMAINS = frozenset({"operational", "it"})
@@ -531,13 +536,15 @@ def _apply_office_boundary(
     never lock out system administration. Auditors are exempt entirely: their
     mandate is national and deliberately includes restricted work.
 
-    The service desk is national too, but only for the work it actually answers.
-    Confining a desk identity like anyone else and then appending one unconfined,
-    non-restricted operational scope keeps the two halves of a combined identity
-    honest: the appended scope's key is deliberately absent from
-    ``restricted_scope_keys``, so its ``scope_ticket_queryset`` branch excludes
-    restricted rows in every office, while a supervisor half stays bound to its
-    own office and keeps restricted visibility only there.
+    The service desk and the Master and Deputy Master are national too, but only
+    for the work they actually answer. Confining such an identity like anyone
+    else and then appending one unconfined, non-restricted operational scope
+    keeps the two halves of a combined identity honest: the appended scope's key
+    is deliberately absent from ``restricted_scope_keys``, so its
+    ``scope_ticket_queryset`` branch excludes restricted rows in every office,
+    while a supervisor half stays bound to its own office and keeps restricted
+    visibility only there. Being national widens reach, not clearance — only the
+    auditor mandate carries restricted work across offices.
 
     ``_scope_key`` includes ``office_id``, so every rewritten scope must have its
     restricted-view key remapped in the same pass. Skipping that would silently
@@ -569,9 +576,15 @@ def _apply_office_boundary(
         if was_restricted:
             restricted_scope_keys.add(_scope_key(bound))
 
-    if snapshot.cross_office_identity:
-        # The service desk half answers nationally and never sees restricted
-        # work, so its key stays out of ``restricted_scope_keys``.
+    if snapshot.cross_office_identity and any(
+        scope.domain == "operational" and not scope.restricted_only
+        for scope in snapshot.scopes
+    ):
+        # The national half answers everywhere and never sees restricted work,
+        # so its key stays out of ``restricted_scope_keys``. It is appended only
+        # when unconfined authority already existed to widen: a bare token
+        # designation is identity context, and must not manufacture authority a
+        # group or UserRole never granted.
         scopes.append(Scope(domain="operational"))
 
     return replace(

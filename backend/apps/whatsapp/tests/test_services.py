@@ -1,4 +1,5 @@
 """Provider boundary tests for the official WhatsApp Cloud API adapter."""
+
 from __future__ import annotations
 
 import pytest

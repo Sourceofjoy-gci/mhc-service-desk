@@ -431,12 +431,16 @@ def _actor_can_transition_to_assigned(
     request: Request | None,
     snapshot: AuthoritySnapshot,
 ) -> bool:
-    return available_transitions(
-        ticket,
-        actor,
-        request=request,
-        snapshot=snapshot,
-    ).filter(to_status__code="assigned").exists()
+    return (
+        available_transitions(
+            ticket,
+            actor,
+            request=request,
+            snapshot=snapshot,
+        )
+        .filter(to_status__code="assigned")
+        .exists()
+    )
 
 
 @transaction.atomic

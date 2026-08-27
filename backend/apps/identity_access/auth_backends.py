@@ -1,6 +1,7 @@
 """Django auth backend shim that defers password authentication to the
 local admin user only. Staff login happens through Keycloak OIDC.
 """
+
 from __future__ import annotations
 
 from django.contrib.auth.backends import ModelBackend

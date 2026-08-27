@@ -2,6 +2,7 @@
 
 Called by ``scripts/seed_dev.py``. Idempotent: re-running is safe.
 """
+
 from __future__ import annotations
 
 from apps.workflow.models import Status, Transition
@@ -149,10 +150,13 @@ def seed_workflow() -> None:
         status_map: dict[str, Status] = {}
         for code, name, is_initial, is_terminal, order, public_label in statuses:
             obj, _ = Status.objects.update_or_create(
-                code=code, domain=domain,
+                code=code,
+                domain=domain,
                 defaults={
-                    "name": name, "is_initial": is_initial,
-                    "is_terminal": is_terminal, "order": order,
+                    "name": name,
+                    "is_initial": is_initial,
+                    "is_terminal": is_terminal,
+                    "order": order,
                     "public_label": public_label,
                 },
             )

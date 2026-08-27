@@ -76,7 +76,10 @@ describe("API authentication", () => {
     expect(adapter.refresh).toHaveBeenCalledTimes(1);
   });
 
-  it("redirects to login once when the retried request is still unauthorized", async () => {
+  it("does not restart sign-in when a freshly refreshed token is still rejected", async () => {
+    // A 401 that survives a successful refresh is the backend rejecting the
+    // identity, not an expired session. Signing in again returns the same
+    // token and the same 401, which is what made the app redirect forever.
     vi.spyOn(globalThis, "fetch")
       .mockResolvedValueOnce(jsonResponse(401, { detail: "expired" }))
       .mockResolvedValueOnce(jsonResponse(401, { detail: "unauthorized" }));
@@ -87,8 +90,33 @@ describe("API authentication", () => {
     });
 
     expect(adapter.refresh).toHaveBeenCalledTimes(1);
+    expect(adapter.login).not.toHaveBeenCalled();
+  });
+
+  it("restarts sign-in when the session cannot be refreshed", async () => {
+    adapter.refresh = vi.fn().mockResolvedValue(false);
+    vi.spyOn(globalThis, "fetch").mockResolvedValueOnce(
+      jsonResponse(401, { detail: "expired" }),
+    );
+
+    await expect(api("/tickets/")).rejects.toMatchObject({ status: 401 });
+
+    expect(adapter.refresh).toHaveBeenCalledTimes(1);
     expect(adapter.login).toHaveBeenCalledOnce();
     expect(adapter.login).toHaveBeenCalledWith("/tickets?priority=P1");
+  });
+
+  it("starts at most one sign-in redirect while the page is still loaded", async () => {
+    adapter.getAccessToken = vi.fn().mockResolvedValue("old-token");
+    adapter.refresh = vi.fn().mockResolvedValue(false);
+    vi.spyOn(globalThis, "fetch").mockResolvedValue(
+      jsonResponse(401, { detail: "expired" }),
+    );
+
+    await expect(api("/tickets/")).rejects.toMatchObject({ status: 401 });
+    await expect(api("/tickets/")).rejects.toMatchObject({ status: 401 });
+
+    expect(adapter.login).toHaveBeenCalledOnce();
   });
 
   it("does not redirect to login for forbidden responses", async () => {

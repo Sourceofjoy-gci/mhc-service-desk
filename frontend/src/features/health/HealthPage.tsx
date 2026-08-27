@@ -45,7 +45,7 @@ interface HealthResponse {
 }
 
 async function fetchHealth(): Promise<HealthResponse> {
-  return api<HealthResponse>("/health");
+  return api<HealthResponse>("/health", { auth: false });
 }
 
 const CHECK_META: Record<

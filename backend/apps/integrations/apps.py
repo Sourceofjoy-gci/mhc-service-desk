@@ -1,4 +1,5 @@
 """Integrations Django app."""
+
 from django.apps import AppConfig
 
 

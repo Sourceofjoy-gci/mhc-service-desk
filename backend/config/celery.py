@@ -3,6 +3,7 @@
 Tasks are discovered from every installed app. Long-running or external work
 must go through Celery — never block a request thread.
 """
+
 from __future__ import annotations
 
 import os

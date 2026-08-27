@@ -1,4 +1,5 @@
 """Tests for the email channel: idempotency, threading, sanitisation."""
+
 from __future__ import annotations
 
 import pytest
@@ -134,8 +135,11 @@ def test_inbound_email_uses_canonical_message_event_without_body_or_duplicate_ou
     }
     assert body not in str(event.payload)
     assert "Sensitive subject" not in str(event.payload)
-    assert OutboxEvent.objects.filter(
-        aggregate_id=str(message.ticket_id),
-        event_type="ticket.message.created",
-    ).count() == 1
+    assert (
+        OutboxEvent.objects.filter(
+            aggregate_id=str(message.ticket_id),
+            event_type="ticket.message.created",
+        ).count()
+        == 1
+    )
     assert result["status"] == "created"

@@ -3,6 +3,7 @@
 Everything in this app is configuration, not business data. Administrators
 can change it without code changes (PRD FR-089).
 """
+
 from __future__ import annotations
 
 import uuid
@@ -63,9 +64,7 @@ class CustomFieldDefinition(models.Model):
         BOOLEAN = "boolean", "Boolean"
 
     id = models.UUIDField(primary_key=True, default=uuid.uuid4, editable=False)
-    request_type = models.ForeignKey(
-        RequestType, on_delete=models.CASCADE, related_name="fields"
-    )
+    request_type = models.ForeignKey(RequestType, on_delete=models.CASCADE, related_name="fields")
     key = models.CharField(max_length=64)
     label = models.CharField(max_length=255)
     kind = models.CharField(max_length=16, choices=Kind.choices)

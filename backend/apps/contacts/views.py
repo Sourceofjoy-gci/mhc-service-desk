@@ -1,4 +1,5 @@
 """Contact API views."""
+
 from __future__ import annotations
 
 import hashlib
@@ -36,13 +37,16 @@ class ContactViewSet(viewsets.ModelViewSet[Contact]):
         params = self.request.query_params
         if "search" in params:
             from django.db.models import Q
+
             term = params["search"]
             qs = qs.filter(
                 Q(full_name__icontains=term)
                 | Q(email__icontains=term)
                 | Q(phone_e164__icontains=term)
             )
-        return qs.order_by("full_name")[:100]
+        # Cursor pagination re-orders and slices the queryset itself; a
+        # queryset sliced here would raise TypeError on every list request.
+        return qs
 
     @action(detail=False, methods=["get"], url_path="duplicates")
     def duplicates(self, request: Request) -> Response:
@@ -79,29 +83,25 @@ def requester_status(request: Request, token: str) -> Response:
             {"detail": "Link is invalid or has expired."},
             status=status.HTTP_404_NOT_FOUND,
         )
-    ticket = (
-        Ticket.objects.filter(requester=vt.contact)
-        .order_by("-created_at")
-        .first()
-    )
+    ticket = Ticket.objects.filter(requester=vt.contact).order_by("-created_at").first()
     if ticket is None:
         return Response(
             {"detail": "Link is invalid or has expired."},
             status=status.HTTP_404_NOT_FOUND,
         )
-    safe_messages = [
-        m for m in ticket.messages.all() if m.direction in ("outbound", "inbound")
-    ]
-    return Response({
-        "ticket_number": ticket.number,
-        "title": ticket.title,
-        "status": ticket.status.public_label or ticket.status.name,
-        "domain": ticket.domain,
-        "priority": ticket.priority,
-        "created_at": ticket.created_at,
-        "updated_at": ticket.updated_at,
-        "messages": TicketMessageSerializer(safe_messages, many=True).data,
-    })
+    safe_messages = [m for m in ticket.messages.all() if m.direction in ("outbound", "inbound")]
+    return Response(
+        {
+            "ticket_number": ticket.number,
+            "title": ticket.title,
+            "status": ticket.status.public_label or ticket.status.name,
+            "domain": ticket.domain,
+            "priority": ticket.priority,
+            "created_at": ticket.created_at,
+            "updated_at": ticket.updated_at,
+            "messages": TicketMessageSerializer(safe_messages, many=True).data,
+        }
+    )
 
 
 @api_view(["POST"])
@@ -118,11 +118,7 @@ def requester_reply(request: Request, token: str) -> Response:
     body = (request.data or {}).get("body_text", "").strip()
     if not body:
         return Response({"detail": "body_text is required"}, status=status.HTTP_400_BAD_REQUEST)
-    ticket = (
-        Ticket.objects.filter(requester=vt.contact)
-        .order_by("-created_at")
-        .first()
-    )
+    ticket = Ticket.objects.filter(requester=vt.contact).order_by("-created_at").first()
     if ticket is None:
         return Response(
             {"detail": "Link is invalid or has expired."},

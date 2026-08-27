@@ -1,4 +1,5 @@
 """Runtime contracts for audit background tasks."""
+
 from __future__ import annotations
 
 from apps.audit.tasks import rotate_export_artefacts

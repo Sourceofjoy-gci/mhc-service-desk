@@ -1,6 +1,12 @@
 import { HeartPulse, LogIn } from "lucide-react";
 import { Link, NavLink, Outlet, useLocation } from "react-router-dom";
 import { BrandLockup } from "./brand";
+import {
+  MAIN_CONTENT_ID,
+  RouteAnnouncer,
+  SkipLink,
+} from "./navigation-a11y";
+import { RouteSuspense } from "./route-suspense";
 import { ThemeToggle } from "./theme-toggle";
 import { cn } from "@/lib/utils";
 
@@ -14,6 +20,7 @@ export function PublicShell() {
 
   return (
     <div className="flex min-h-full flex-col bg-background">
+      <SkipLink />
       <header className="border-b border-border/60">
         <div className="mx-auto flex w-full max-w-7xl flex-wrap items-center gap-4 px-4 py-3 sm:px-6">
           <Link
@@ -53,10 +60,15 @@ export function PublicShell() {
 
       <main
         key={location.pathname}
-        className="mx-auto w-full max-w-7xl flex-1 px-4 py-6 sm:px-6"
+        id={MAIN_CONTENT_ID}
+        tabIndex={-1}
+        className="mx-auto w-full max-w-7xl flex-1 animate-fade-in px-4 py-6 outline-none sm:px-6"
       >
-        <Outlet />
+        <RouteSuspense>
+          <Outlet />
+        </RouteSuspense>
       </main>
+      <RouteAnnouncer />
 
       <footer className="border-t border-border/60 py-4 text-center text-xs text-muted-foreground">
         Master of the High Court · Staff access

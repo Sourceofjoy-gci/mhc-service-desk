@@ -4,6 +4,7 @@ The periodic evaluator reads persisted SLA instances from PostgreSQL,
 computes remaining time against the business calendar, and dispatches
 notifications or escalations. SLA timers are never held in queue memory.
 """
+
 from __future__ import annotations
 
 import logging

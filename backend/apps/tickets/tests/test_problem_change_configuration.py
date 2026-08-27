@@ -1,4 +1,5 @@
 """Problem/change catalogue precondition tests."""
+
 from __future__ import annotations
 
 from collections.abc import Callable

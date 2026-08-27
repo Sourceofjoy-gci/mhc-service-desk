@@ -4,9 +4,7 @@ from __future__ import annotations
 
 from dataclasses import dataclass
 
-_OPERATIONAL_AGENT_AUTHORITY = frozenset(
-    {"agent-operational", "ops-agents"}
-)
+_OPERATIONAL_AGENT_AUTHORITY = frozenset({"agent-operational", "ops-agents"})
 _OPERATIONAL_SUPERVISOR_AUTHORITY = frozenset(
     {
         *_OPERATIONAL_AGENT_AUTHORITY,
@@ -32,8 +30,7 @@ STAFF_DESIGNATIONS: tuple[StaffDesignation, ...] = (
         "Office Leadership",
         "Make final decisions on designated approvals and policy exceptions. "
         "Authority: Full approval authority.",
-        _OPERATIONAL_SUPERVISOR_AUTHORITY
-        | {"assistant-master", "deputy-master", "master"},
+        _OPERATIONAL_SUPERVISOR_AUTHORITY | {"assistant-master", "deputy-master", "master"},
     ),
     StaffDesignation(
         "deputy-master",
@@ -41,8 +38,7 @@ STAFF_DESIGNATIONS: tuple[StaffDesignation, ...] = (
         "Office Leadership",
         "Perform higher-level review; handle exceptions; make escalation "
         "decisions. Authority: Senior approval and oversight.",
-        _OPERATIONAL_SUPERVISOR_AUTHORITY
-        | {"assistant-master", "deputy-master", "master"},
+        _OPERATIONAL_SUPERVISOR_AUTHORITY | {"assistant-master", "deputy-master", "master"},
     ),
     StaffDesignation(
         "assistant-master",
@@ -90,7 +86,5 @@ STAFF_DESIGNATIONS: tuple[StaffDesignation, ...] = (
     StaffDesignation("data-clerk", "Data Clerk", "Records and Data"),
 )
 
-STAFF_DESIGNATION_BY_KEY = {
-    designation.role_key: designation for designation in STAFF_DESIGNATIONS
-}
+STAFF_DESIGNATION_BY_KEY = {designation.role_key: designation for designation in STAFF_DESIGNATIONS}
 STAFF_DESIGNATION_ROLE_KEYS = frozenset(STAFF_DESIGNATION_BY_KEY)

@@ -1,4 +1,5 @@
 """Low-level attachment service boundary tests."""
+
 from __future__ import annotations
 
 from dataclasses import replace
@@ -121,6 +122,9 @@ class _VersionedObjectStore:
             "DeleteObject",
         )
 
+    def generate_presigned_url(self, *_args: object, **_kwargs: object) -> str:
+        return "https://files.example.test/signed"
+
 
 def test_conditional_upload_does_not_overwrite_an_existing_object(monkeypatch) -> None:
     """Catch a collision turning an upload into an overwrite."""
@@ -228,3 +232,23 @@ def test_cleanup_without_version_id_never_deletes_by_key_or_etag(
     assert current[1] == b"request"
     assert store.delete_calls == []
     assert "minio_delete_missing_version_id" in caplog.messages
+
+
+def test_signed_url_uses_the_browser_reachable_object_store_endpoint(
+    monkeypatch,
+    settings,
+) -> None:
+    """Catch signed links that expose MinIO's private Docker hostname."""
+    store = _VersionedObjectStore()
+    endpoints: list[str | None] = []
+
+    def fake_s3_client(*, endpoint_url: str | None = None):
+        endpoints.append(endpoint_url)
+        return store
+
+    settings.AWS_S3_PUBLIC_URL = "https://files.example.test"
+    monkeypatch.setattr(services, "_s3_client", fake_s3_client)
+
+    services.generate_signed_url(key="attachments/example.pdf")
+
+    assert endpoints == ["https://files.example.test"]

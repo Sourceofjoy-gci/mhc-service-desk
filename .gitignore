@@ -51,3 +51,4 @@ secrets/
 
 # Local backups
 backups/local/
+.gstack/

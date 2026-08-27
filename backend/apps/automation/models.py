@@ -1,4 +1,5 @@
 """Automation rule model and execution log."""
+
 from __future__ import annotations
 
 import uuid

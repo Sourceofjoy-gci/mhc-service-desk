@@ -5,6 +5,7 @@ platform holds about them. The command bundles every record (contact,
 tickets, messages, notes, attachments metadata, audit log) into a single
 JSON file under ``backups/sar-<id>-<timestamp>.json``.
 """
+
 from __future__ import annotations
 
 import json
@@ -67,7 +68,8 @@ class Command(BaseCommand):
                             "author_subject": m.author_subject,
                             "created_at": m.created_at.isoformat(),
                         }
-                        for m in messages if m.ticket_id == t.id
+                        for m in messages
+                        if m.ticket_id == t.id
                     ],
                     "notes": [
                         {
@@ -75,7 +77,8 @@ class Command(BaseCommand):
                             "author_subject": n.author_subject,
                             "created_at": n.created_at.isoformat(),
                         }
-                        for n in notes if n.ticket_id == t.id
+                        for n in notes
+                        if n.ticket_id == t.id
                     ],
                 }
                 for t in tickets
@@ -96,8 +99,7 @@ class Command(BaseCommand):
             raise CommandError("Output directory must be a string")
         Path(output_directory).mkdir(parents=True, exist_ok=True)
         out_path = Path(output_directory) / (
-            f"sar-{contact.id}-"
-            f"{datetime.now(tz=UTC).strftime('%Y%m%dT%H%M%SZ')}.json"
+            f"sar-{contact.id}-" f"{datetime.now(tz=UTC).strftime('%Y%m%dT%H%M%SZ')}.json"
         )
         out_path.write_text(
             json.dumps(payload, indent=2, sort_keys=True, default=str),

@@ -4,6 +4,7 @@ import type { SlaClock, TicketDetail } from "@/lib/api";
 
 interface SlaClocksProps {
   clocks: TicketDetail["sla_clocks"];
+  compact?: boolean;
 }
 
 const CLOCKS: Array<{
@@ -60,7 +61,52 @@ function stateClassName(state: SlaClock["state"]) {
   return "border-border text-foreground";
 }
 
-export function SlaClocks({ clocks }: SlaClocksProps) {
+export function SlaClocks({ clocks, compact = false }: SlaClocksProps) {
+  if (compact) {
+    const clock = clocks.resolution;
+    const stateLabel = STATE_LABELS[clock.state];
+
+    return (
+      <section aria-labelledby="sla-heading" className="flex flex-col">
+        <div className="flex items-center gap-2 px-4 py-3">
+          <Clock3 className="size-4 text-muted-foreground" aria-hidden />
+          <h2 id="sla-heading" className="text-base font-semibold">
+            SLA
+          </h2>
+        </div>
+        <ul className="divide-y-0">
+          <li
+            aria-label={`Resolution SLA: ${clock.state}`}
+            className="flex flex-wrap items-center justify-between gap-3 border-t px-4 py-3"
+          >
+            <span className="text-sm text-muted-foreground">
+              Resolution target
+            </span>
+            <div className="flex flex-wrap items-center justify-end gap-3 text-right">
+              {clock.due_at ? (
+                <time dateTime={clock.due_at} className="text-sm">
+                  {new Intl.DateTimeFormat(undefined, {
+                    dateStyle: "medium",
+                    timeStyle: "short",
+                  }).format(new Date(clock.due_at))}
+                </time>
+              ) : null}
+              <span
+                className={cn(
+                  "rounded-full border px-2.5 py-1 text-xs font-semibold",
+                  stateClassName(clock.state),
+                )}
+              >
+                {durationLabel(clock)}
+              </span>
+              <span className="sr-only">{stateLabel}</span>
+            </div>
+          </li>
+        </ul>
+      </section>
+    );
+  }
+
   return (
     <section className="flex flex-col gap-3" aria-labelledby="sla-heading">
       <div>

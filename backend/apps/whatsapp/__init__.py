@@ -6,4 +6,5 @@ pipeline can be exercised without a real Meta account.
 
 The platform NEVER uses unofficial WhatsApp automation (PRD §35, FR-067).
 """
+
 default_app_config = "apps.whatsapp.apps.WhatsappConfig"

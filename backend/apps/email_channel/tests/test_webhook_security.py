@@ -1,4 +1,5 @@
 """Trust-boundary tests for normalized email provider webhooks."""
+
 from __future__ import annotations
 
 import hashlib
@@ -147,8 +148,7 @@ def test_inbound_email_rejects_invalid_authentication_before_mutation(
     assert TicketMessage.objects.count() == 0
 
 
-def test_inbound_email_rejects_stale_signed_request_before_mutation(
-) -> None:
+def test_inbound_email_rejects_stale_signed_request_before_mutation() -> None:
     payload = _inbound_payload(message_id="<stale@example.com>")
     raw_body = _raw(payload)
 
@@ -168,8 +168,7 @@ def test_inbound_email_rejects_stale_signed_request_before_mutation(
     assert Ticket.objects.count() == 0
 
 
-def test_valid_email_adapter_signature_allows_inbound_mutation(
-) -> None:
+def test_valid_email_adapter_signature_allows_inbound_mutation() -> None:
     payload = _inbound_payload(message_id="<valid@example.com>")
     raw_body = _raw(payload)
 
@@ -183,13 +182,10 @@ def test_valid_email_adapter_signature_allows_inbound_mutation(
 
     assert response.status_code == 201
     assert response.json()["status"] == "created"
-    assert TicketMessage.objects.filter(
-        external_message_id="<valid@example.com>"
-    ).count() == 1
+    assert TicketMessage.objects.filter(external_message_id="<valid@example.com>").count() == 1
 
 
-def test_email_adapter_event_id_cannot_be_replayed_with_a_new_message(
-) -> None:
+def test_email_adapter_event_id_cannot_be_replayed_with_a_new_message() -> None:
     first = _raw(_inbound_payload(message_id="<replay-first@example.com>"))
     second = _raw(_inbound_payload(message_id="<replay-second@example.com>"))
     client = APIClient()
@@ -342,9 +338,7 @@ def test_bounce_rejects_blank_message_id_even_if_a_blank_delivery_exists(
     message_id: str,
 ) -> None:
     delivery = _delivery(basic_world, message_id=message_id)
-    raw_body = _raw(
-        {"message_id": message_id, "type": "bounce", "error": "rejected"}
-    )
+    raw_body = _raw({"message_id": message_id, "type": "bounce", "error": "rejected"})
 
     response = APIClient().generic(
         "POST",
@@ -366,9 +360,7 @@ def test_bounce_rejects_ambiguous_delivery_lookup_without_mutation(
     message_id = "<ambiguous-delivery@example.com>"
     first = _delivery(basic_world, message_id=message_id)
     second = _delivery(basic_world, message_id=message_id)
-    raw_body = _raw(
-        {"message_id": message_id, "type": "failure", "error": "deferred"}
-    )
+    raw_body = _raw({"message_id": message_id, "type": "failure", "error": "deferred"})
 
     response = APIClient().generic(
         "POST",
@@ -514,9 +506,10 @@ def test_failure_then_terminal_bounce_are_distinct_idempotent_canonical_events(
     delivery.ticket_message.refresh_from_db()
     assert delivery.status == EmailDelivery.Status.BOUNCED
     assert delivery.ticket_message.delivery_status == "bounced"
-    assert set(
-        EmailWebhookEvent.objects.values_list("event_type", flat=True)
-    ) == {"delivery_failure", "delivery_bounce"}
+    assert set(EmailWebhookEvent.objects.values_list("event_type", flat=True)) == {
+        "delivery_failure",
+        "delivery_bounce",
+    }
     events = AuditEvent.objects.filter(
         object_id=str(delivery.ticket_message.ticket_id),
         action="ticket.message.delivery_updated",
@@ -531,9 +524,7 @@ def test_failure_then_terminal_bounce_are_distinct_idempotent_canonical_events(
         event_type="ticket.message.delivery_updated",
     ).order_by("created_at")
     assert outbox_events.count() == 2
-    assert [event.payload for event in events] == [
-        event.payload for event in outbox_events
-    ]
+    assert [event.payload for event in events] == [event.payload for event in outbox_events]
 
 
 def test_terminal_bounce_cannot_be_downgraded_by_later_failure(
@@ -582,10 +573,16 @@ def test_terminal_bounce_cannot_be_downgraded_by_later_failure(
     assert delivery.status == EmailDelivery.Status.BOUNCED
     assert delivery.error == "terminal rejection"
     assert delivery.ticket_message.delivery_status == "bounced"
-    assert EmailWebhookEvent.objects.filter(
-        message_id=delivery.message_id,
-    ).count() == 2
-    assert AuditEvent.objects.filter(
-        object_id=str(delivery.ticket_message.ticket_id),
-        action="ticket.message.delivery_updated",
-    ).count() == 1
+    assert (
+        EmailWebhookEvent.objects.filter(
+            message_id=delivery.message_id,
+        ).count()
+        == 2
+    )
+    assert (
+        AuditEvent.objects.filter(
+            object_id=str(delivery.ticket_message.ticket_id),
+            action="ticket.message.delivery_updated",
+        ).count()
+        == 1
+    )

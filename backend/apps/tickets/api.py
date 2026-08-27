@@ -3,6 +3,7 @@
 Serializers handle field-level masking (PRD §23.1) and field validation.
 Views handle authorisation; the two responsibilities are kept separate.
 """
+
 from __future__ import annotations
 
 import re
@@ -46,18 +47,14 @@ class TicketTrackingLookupSerializer(serializers.Serializer[dict[str, str]]):
 
 
 class TrackingProgressSerializer(serializers.Serializer[dict[str, object]]):
-    status = serializers.ChoiceField(
-        choices=[status.value for status in TrackingStatus]
-    )
+    status = serializers.ChoiceField(choices=[status.value for status in TrackingStatus])
     occurred_at = serializers.DateTimeField()
 
 
 class TicketTrackingSerializer(serializers.Serializer[dict[str, object]]):
     reference = serializers.CharField()
     title = serializers.CharField()
-    tracking_status = serializers.ChoiceField(
-        choices=[status.value for status in TrackingStatus]
-    )
+    tracking_status = serializers.ChoiceField(choices=[status.value for status in TrackingStatus])
     status_updated_at = serializers.DateTimeField()
     created_at = serializers.DateTimeField()
     updated_at = serializers.DateTimeField()
@@ -76,8 +73,15 @@ class TicketMessageSerializer(serializers.ModelSerializer[TicketMessage]):
     class Meta:
         model = TicketMessage
         fields = (
-            "id", "direction", "author_label", "body_text", "body_html_sanitized",
-            "template_key", "template_version", "delivery_status", "created_at",
+            "id",
+            "direction",
+            "author_label",
+            "body_text",
+            "body_html_sanitized",
+            "template_key",
+            "template_version",
+            "delivery_status",
+            "created_at",
         )
         read_only_fields = fields
 
@@ -112,22 +116,39 @@ class TicketListSerializer(serializers.ModelSerializer[Ticket]):
     class Meta:
         model = Ticket
         fields: tuple[str, ...] = (
-            "id", "number", "domain", "title", "channel", "priority", "confidentiality",
-            "status_code", "status_name", "status_public",
-            "requester_name", "office_code", "service_code",
-            "assignee", "waiting_reason", "created_at", "updated_at",
-            "age_hours", "sla_health", "available_transition_codes",
+            "id",
+            "number",
+            "domain",
+            "title",
+            "channel",
+            "priority",
+            "confidentiality",
+            "status_code",
+            "status_name",
+            "status_public",
+            "requester_name",
+            "office_code",
+            "service_code",
+            "assignee",
+            "waiting_reason",
+            "created_at",
+            "updated_at",
+            "age_hours",
+            "sla_health",
+            "available_transition_codes",
         )
         read_only_fields: tuple[str, ...] = fields
 
     def get_age_hours(self, obj: Ticket) -> float:
         from django.utils import timezone
+
         delta = timezone.now() - obj.created_at
         return round(delta.total_seconds() / 3600, 1)
 
     def get_sla_health(self, obj: Ticket) -> str:
         # Compressed view: worst active SLA instance
         from apps.sla.models import SlaInstance
+
         inst = (
             SlaInstance.objects.filter(
                 ticket=obj,
@@ -148,6 +169,7 @@ class TicketListSerializer(serializers.ModelSerializer[Ticket]):
         if inst.state == "breached":
             return "breached"
         from django.utils import timezone
+
         if inst.due_at < timezone.now():
             return "breached"
         # consumption percent is a stub; full impl reads consumed_business_seconds
@@ -260,11 +282,7 @@ class TicketDetailSerializer(TicketListSerializer):
 
         can_update = can_update_work_state(user, obj, request=request)
         can_add_content = can_add_ticket_content(user, obj, request=request)
-        can_self_assign = (
-            can_update
-            and obj.assignee_id is None
-            and is_eligible_assignee(obj, user)
-        )
+        can_self_assign = can_update and obj.assignee_id is None and is_eligible_assignee(obj, user)
         self_assignee_detail = None
         if can_self_assign:
             party = custody_party_for_user(obj, user)
@@ -308,13 +326,34 @@ class TicketDetailSerializer(TicketListSerializer):
 
     class Meta(TicketListSerializer.Meta):
         fields = TicketListSerializer.Meta.fields + (
-            "description", "requester", "organisation", "service", "request_type", "office",
-            "matter_reference", "tags", "custom_fields",
-            "team", "blocked_reason", "next_action", "next_action_at",
-            "resolution_code", "resolution_summary",
-            "acknowledged_at", "first_responded_at", "resolved_at", "closed_at",
-            "reopened_at", "assignee_detail", "relationships", "sla_clocks",
-            "attachments", "messages", "notes", "links", "capabilities",
+            "description",
+            "requester",
+            "organisation",
+            "service",
+            "request_type",
+            "office",
+            "matter_reference",
+            "tags",
+            "custom_fields",
+            "team",
+            "blocked_reason",
+            "next_action",
+            "next_action_at",
+            "resolution_code",
+            "resolution_summary",
+            "acknowledged_at",
+            "first_responded_at",
+            "resolved_at",
+            "closed_at",
+            "reopened_at",
+            "assignee_detail",
+            "relationships",
+            "sla_clocks",
+            "attachments",
+            "messages",
+            "notes",
+            "links",
+            "capabilities",
             "available_transitions",
         )
 

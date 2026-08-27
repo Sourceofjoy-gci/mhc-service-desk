@@ -8,4 +8,5 @@ The active settings module is selected via ``DJANGO_SETTINGS_MODULE``:
 
 Each profile imports from ``base`` and overrides what it needs.
 """
+
 default_app_config = "config.apps.ConfigConfig"

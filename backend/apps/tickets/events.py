@@ -1,4 +1,5 @@
 """Canonical audit and transactional-outbox recording for ticket mutations."""
+
 from __future__ import annotations
 
 import hashlib
@@ -19,11 +20,7 @@ def _changed_values(
     before: dict[str, Any],
     after: dict[str, Any],
 ) -> tuple[dict[str, Any], dict[str, Any]]:
-    changed = {
-        key
-        for key in before.keys() | after.keys()
-        if before.get(key) != after.get(key)
-    }
+    changed = {key for key in before.keys() | after.keys() if before.get(key) != after.get(key)}
     return (
         {key: before.get(key) for key in changed if key in before},
         {key: after.get(key) for key in changed if key in after},

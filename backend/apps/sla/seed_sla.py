@@ -1,4 +1,5 @@
 """Seed default business calendars and SLA policies (P0 targets from PRD §17)."""
+
 from __future__ import annotations
 
 from apps.sla.models import BusinessCalendar, SlaPolicy
@@ -19,13 +20,18 @@ def seed_sla() -> None:
                 "7": [],
             },
             "holidays": [
-                "2026-01-01", "2026-01-02",
-                "2026-04-03", "2026-04-04", "2026-04-05", "2026-04-06",
+                "2026-01-01",
+                "2026-01-02",
+                "2026-04-03",
+                "2026-04-04",
+                "2026-04-05",
+                "2026-04-06",
                 "2026-04-25",
                 "2026-05-01",
                 "2026-07-22",
                 "2026-09-06",
-                "2026-12-25", "2026-12-26",
+                "2026-12-25",
+                "2026-12-26",
             ],
             "is_default": True,
         },

@@ -50,8 +50,7 @@ def test_walk_views_reports_function_wrapper_methods_and_permissions():
     assert attachment_methods == {"GET", "POST"}
     assert reporting
     assert all(
-        route.permission_classes == ("IsAuthenticated", "ScopePermission")
-        for route in reporting
+        route.permission_classes == ("IsAuthenticated", "ScopePermission") for route in reporting
     )
 
 
@@ -125,10 +124,7 @@ def test_main_reports_actions_and_authentication_deterministically(capsys):
 def test_main_deduplicates_repeated_normalized_router_actions(capsys):
     """Catch repeated DefaultRouter roots inflating the authoritative action count."""
     raw_routes = list(permission_audit._walk_views())
-    raw_identities = [
-        (route.path, route.method, route.action)
-        for route in raw_routes
-    ]
+    raw_identities = [(route.path, route.method, route.action) for route in raw_routes]
     unique_identities = set(raw_identities)
     assert raw_identities.count(("api/v1/", "GET", "api-root")) > 1
 

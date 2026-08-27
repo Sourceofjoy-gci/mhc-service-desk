@@ -1,4 +1,5 @@
 """Models for the Audit app."""
+
 from __future__ import annotations
 
 import uuid
@@ -22,4 +23,3 @@ class AuditEvent(models.Model):
 
     def __str__(self) -> str:
         return f"audit-event:{self.pk}"
-

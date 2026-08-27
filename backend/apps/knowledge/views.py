@@ -1,4 +1,5 @@
 """Knowledge API — public + agent views."""
+
 from __future__ import annotations
 
 from rest_framework import serializers, viewsets
@@ -25,12 +26,24 @@ class KnowledgeArticleViewSet(viewsets.ModelViewSet[KnowledgeArticle]):
             class Meta:
                 model = KnowledgeArticle
                 fields = (
-                    "id", "code", "title", "body", "audience", "status",
-                    "domain", "language", "version", "owner_subject",
-                    "approved_by_subject", "last_reviewed_at", "next_review_at",
-                    "created_at", "updated_at",
+                    "id",
+                    "code",
+                    "title",
+                    "body",
+                    "audience",
+                    "status",
+                    "domain",
+                    "language",
+                    "version",
+                    "owner_subject",
+                    "approved_by_subject",
+                    "last_reviewed_at",
+                    "next_review_at",
+                    "created_at",
+                    "updated_at",
                 )
                 read_only_fields = ("id", "version", "created_at", "updated_at")
+
         return _S
 
 
@@ -39,6 +52,7 @@ class KnowledgeArticleViewSet(viewsets.ModelViewSet[KnowledgeArticle]):
 def public_search(request: Request) -> Response:
     """Public knowledge search (FR-078). Returns published public articles only."""
     from django.db.models import Q
+
     term = request.query_params.get("q", "").strip()
     qs = KnowledgeArticle.objects.filter(audience="public", status="published")
     if term:

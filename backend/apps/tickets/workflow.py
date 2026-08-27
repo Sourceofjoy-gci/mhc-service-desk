@@ -1,4 +1,5 @@
 """Server-derived ticket workflow capabilities."""
+
 from __future__ import annotations
 
 from django.db.models import Q, QuerySet
@@ -58,6 +59,6 @@ def available_transitions(
         return transitions.none()
     if groups & {"admin", "admin-scope", "system-admins"}:
         return transitions.order_by("to_status__order", "to_status__code")
-    return transitions.filter(
-        Q(required_role="") | Q(required_role__in=groups)
-    ).order_by("to_status__order", "to_status__code")
+    return transitions.filter(Q(required_role="") | Q(required_role__in=groups)).order_by(
+        "to_status__order", "to_status__code"
+    )

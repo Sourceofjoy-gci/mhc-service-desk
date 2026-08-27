@@ -13,4 +13,5 @@ the parsed message to `/api/v1/integrations/email/events/`. We:
 Outbound: ticket replies can be queued via the email dispatcher. The
 delivered message and its `Message-ID` are recorded on the TicketMessage.
 """
+
 default_app_config = "apps.email_channel.apps.EmailChannelConfig"

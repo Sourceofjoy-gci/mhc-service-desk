@@ -136,9 +136,7 @@ def build_ticket_activity(
         ):
             represented_fields.add("queue")
     transitions = [
-        transition
-        for transition in transitions
-        if str(transition.id) not in custody_transition_ids
+        transition for transition in transitions if str(transition.id) not in custody_transition_ids
     ]
     supplied_relationship_ids = (
         {relationship.id for relationship in relationships} if relationships is not None else None
@@ -185,6 +183,7 @@ def build_ticket_activity(
         (event for event in audit_events if event.action == "ticket.transitioned"),
         key=lambda event: (event.occurred_at, str(event.id)),
     )
+
     def transition_payload(transition: TransitionHistory) -> dict[str, object]:
         payload: dict[str, object] = {
             "from": transition.from_status.code if transition.from_status else None,
@@ -437,15 +436,11 @@ def build_ticket_activity(
         }
         for relationship in relationships
     )
-    custody_sequences = {
-        f"custody:{event.id}": event.sequence for event in custody_events
-    }
+    custody_sequences = {f"custody:{event.id}": event.sequence for event in custody_events}
 
     def activity_sort_key(item: ActivityItem) -> tuple[datetime, str]:
         sequence = custody_sequences.get(item["id"])
-        stable_id = (
-            f"custody:{sequence:020d}" if sequence is not None else item["id"]
-        )
+        stable_id = f"custody:{sequence:020d}" if sequence is not None else item["id"]
         return item["occurred_at"], stable_id
 
     return sorted(items, key=activity_sort_key)

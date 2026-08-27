@@ -28,7 +28,10 @@ function FieldLegend({
       data-slot="field-legend"
       data-variant={variant}
       className={cn(
-        "mb-1.5 font-medium data-[variant=label]:text-sm data-[variant=legend]:text-base",
+        // A section legend previously sat at text-base/medium against labels at
+        // text-sm/medium — a 2px difference at the same weight, so groups of
+        // fields did not read as groups. The legend now takes a clear step up.
+        "mb-1.5 font-medium data-[variant=label]:text-sm data-[variant=legend]:text-lg data-[variant=legend]:font-semibold data-[variant=legend]:tracking-tight",
         className,
       )}
       {...props}

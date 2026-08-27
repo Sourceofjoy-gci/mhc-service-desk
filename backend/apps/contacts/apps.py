@@ -1,4 +1,5 @@
 """Contacts and Directory Django app."""
+
 from django.apps import AppConfig
 
 

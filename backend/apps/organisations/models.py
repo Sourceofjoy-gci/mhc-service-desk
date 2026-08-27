@@ -4,6 +4,7 @@ Models in this app establish the boundaries for authorisation, reporting and
 SLA calendars. The Office is the lowest level used in scope checks; a Queue
 hierarchy can be introduced later.
 """
+
 from __future__ import annotations
 
 import uuid

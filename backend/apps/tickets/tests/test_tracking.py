@@ -92,15 +92,11 @@ def test_tracking_progress_collapses_adjacent_internal_states_without_leaking_de
         {"status": "Submitted", "occurred_at": created.occurred_at},
         {
             "status": "Acknowledged",
-            "occurred_at": ticket.transition_history.get(
-                to_status__code="triage"
-            ).occurred_at,
+            "occurred_at": ticket.transition_history.get(to_status__code="triage").occurred_at,
         },
         {
             "status": "In Progress",
-            "occurred_at": ticket.transition_history.get(
-                to_status__code="in_progress"
-            ).occurred_at,
+            "occurred_at": ticket.transition_history.get(to_status__code="in_progress").occurred_at,
         },
     ]
     assert all(set(item) == {"status", "occurred_at"} for item in progress)
@@ -113,12 +109,8 @@ def test_tracking_projection_uses_latest_internal_transition_for_status_update(
     projection = build_tracking_projection(tracking_ticket)
 
     assert projection["progress"][-1]["occurred_at"] == (
-        tracking_ticket.transition_history.get(
-            to_status__code="in_progress"
-        ).occurred_at
+        tracking_ticket.transition_history.get(to_status__code="in_progress").occurred_at
     )
     assert projection["status_updated_at"] == (
-        tracking_ticket.transition_history.get(
-            to_status__code="quality_review"
-        ).occurred_at
+        tracking_ticket.transition_history.get(to_status__code="quality_review").occurred_at
     )

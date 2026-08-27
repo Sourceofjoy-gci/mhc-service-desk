@@ -912,7 +912,6 @@ describe("internal ticket assignment", () => {
         <QueryClientProvider client={queryClient}>
           <MemoryRouter
             initialEntries={["/"]}
-            future={{ v7_startTransition: true, v7_relativeSplatPath: true }}
           >
             <AssignmentControl
               ticket={ticket}

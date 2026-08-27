@@ -51,7 +51,7 @@ jobs:
       - run: python manage.py makemigrations --check --dry-run
 
   frontend:
-    name: Frontend (lint, type, build)
+    name: Frontend (lint, type, test, build)
     runs-on: ubuntu-latest
     defaults:
       run:
@@ -62,10 +62,13 @@ jobs:
         with:
           node-version: "22"
           cache: npm
-          cache-dependency-path: frontend/package.json
+          # Keyed on the lockfile, not package.json: a lockfile-only change
+          # must invalidate the cache or CI installs stale transitive deps.
+          cache-dependency-path: frontend/package-lock.json
       - run: npm ci
       - run: npm run lint
       - run: npm run typecheck
+      - run: npm test
       - run: npm run build
 
   security:

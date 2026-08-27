@@ -1,4 +1,5 @@
 """Service Catalogue and Request Types Django app."""
+
 from django.apps import AppConfig
 
 

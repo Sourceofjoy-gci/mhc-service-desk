@@ -1,4 +1,5 @@
 """Administration and Configuration Django app."""
+
 from django.apps import AppConfig
 
 

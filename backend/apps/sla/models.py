@@ -4,6 +4,7 @@ SLA state lives in PostgreSQL so queue restarts cannot lose timers
 (PRD §25.3, FR-054). A periodic worker reads these rows and dispatches
 notifications or escalations.
 """
+
 from __future__ import annotations
 
 import uuid
@@ -43,14 +44,10 @@ class BusinessCalendar(models.Model):
         try:
             ZoneInfo(self.timezone)
         except (ValueError, ZoneInfoNotFoundError) as exc:
-            raise ValidationError(
-                {"timezone": "Enter a valid IANA timezone name."}
-            ) from exc
+            raise ValidationError({"timezone": "Enter a valid IANA timezone name."}) from exc
 
         if not isinstance(self.weekday_hours, dict):
-            raise ValidationError(
-                {"weekday_hours": "Business hours must be keyed by ISO weekday."}
-            )
+            raise ValidationError({"weekday_hours": "Business hours must be keyed by ISO weekday."})
 
         errors: list[str] = []
         for day_key, raw_intervals in self.weekday_hours.items():
@@ -68,9 +65,7 @@ class BusinessCalendar(models.Model):
                     errors.append(f"Invalid interval for weekday {day_key}.")
                     continue
                 if end <= start:
-                    errors.append(
-                        f"Interval end must follow start for weekday {day_key}."
-                    )
+                    errors.append(f"Interval end must follow start for weekday {day_key}.")
                     continue
                 intervals.append((start, end))
             intervals.sort()
@@ -125,9 +120,7 @@ class SlaInstance(models.Model):
     ticket = models.ForeignKey(
         "tickets.Ticket", on_delete=models.CASCADE, related_name="sla_instances"
     )
-    policy = models.ForeignKey(
-        SlaPolicy, on_delete=models.PROTECT, related_name="instances"
-    )
+    policy = models.ForeignKey(SlaPolicy, on_delete=models.PROTECT, related_name="instances")
     kind = models.CharField(max_length=32)  # acknowledgement | first_response | update | resolution
     state = models.CharField(max_length=24, choices=State.choices, default=State.ACTIVE)
     started_at = models.DateTimeField(default=timezone.now)

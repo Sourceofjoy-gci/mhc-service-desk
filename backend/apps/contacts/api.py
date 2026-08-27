@@ -1,4 +1,5 @@
 """DRF serializers for contacts."""
+
 from __future__ import annotations
 
 from rest_framework import serializers
@@ -23,9 +24,16 @@ class ContactSerializer(serializers.ModelSerializer[Contact]):
     class Meta:
         model = Contact
         fields = (
-            "id", "full_name", "email", "phone_e164", "language",
-            "verified_at", "is_verified",
-            "opted_out_at", "methods", "created_at",
+            "id",
+            "full_name",
+            "email",
+            "phone_e164",
+            "language",
+            "verified_at",
+            "is_verified",
+            "opted_out_at",
+            "methods",
+            "created_at",
         )
         read_only_fields = ("id", "created_at", "is_verified")
 

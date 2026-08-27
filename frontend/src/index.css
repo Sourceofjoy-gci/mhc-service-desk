@@ -1,7 +1,5 @@
 @import "tailwindcss";
 @import "tw-animate-css";
-@import "@fontsource-variable/geist";
-
 /* MHC e-Ticketing design tokens.
    Light mode: cool neutrals + deep navy (authority) + warm gold accent (legal tradition).
    Dark mode:  same hue families, raised luminance. */
@@ -20,10 +18,19 @@
   --muted-foreground: oklch(0.5 0.02 250);
   --accent: oklch(0.95 0.02 240);
   --accent-foreground: oklch(0.22 0.02 250);
+  /* Error text sits on three surfaces (canvas, card, tinted). The surface is
+     an explicit colour rather than an alpha wash of --destructive, because
+     alpha over an unknown backdrop makes the contrast ratio unpredictable. */
   --destructive: oklch(0.55 0.22 25);
-  --destructive-foreground: oklch(0.98 0.01 240);
+  --destructive-foreground: oklch(0.99 0.01 240);
+  --destructive-surface: oklch(0.96 0.02 25);
+  --destructive-surface-hover: oklch(0.94 0.025 25);
   --border: oklch(0.91 0.01 240);
   --input: oklch(0.91 0.01 240);
+  /* Separators may be quiet; a control boundary may not. Fields are
+     background-transparent, so this border is the only thing that says
+     "you can type here" — it carries the WCAG 1.4.11 3:1 floor. */
+  --field-border: oklch(0.64 0.02 240);
   --ring: oklch(0.45 0.12 235);
   --radius: 0.625rem;
   --sidebar: oklch(0.98 0.005 240);
@@ -59,10 +66,15 @@
   --muted-foreground: oklch(0.7 0.015 240);
   --accent: oklch(0.28 0.025 240);
   --accent-foreground: oklch(0.96 0.005 240);
-  --destructive: oklch(0.45 0.2 25);
-  --destructive-foreground: oklch(0.96 0.005 240);
+  /* Lightness rises with the dark canvas here, as it does for every other
+     token in this theme. It previously fell, which put error text at 2.3:1. */
+  --destructive: oklch(0.72 0.15 25);
+  --destructive-foreground: oklch(0.16 0.02 240);
+  --destructive-surface: oklch(0.28 0.06 25);
+  --destructive-surface-hover: oklch(0.33 0.08 25);
   --border: oklch(1 0 0 / 12%);
   --input: oklch(1 0 0 / 18%);
+  --field-border: oklch(0.52 0.02 240);
   --ring: oklch(0.62 0.12 235);
   --sidebar: oklch(0.18 0.018 240);
   --sidebar-foreground: oklch(0.96 0.005 240);
@@ -99,8 +111,11 @@
   --color-accent-foreground: var(--accent-foreground);
   --color-destructive: var(--destructive);
   --color-destructive-foreground: var(--destructive-foreground);
+  --color-destructive-surface: var(--destructive-surface);
+  --color-destructive-surface-hover: var(--destructive-surface-hover);
   --color-border: var(--border);
   --color-input: var(--input);
+  --color-field-border: var(--field-border);
   --color-ring: var(--ring);
   --color-success: var(--success);
   --color-success-foreground: var(--success-foreground);
@@ -125,6 +140,21 @@
   --radius-xl: calc(var(--radius) + 4px);
 
   --font-sans: "Geist Variable", sans-serif;
+
+  /* The one authored moment: content settles as a route resolves. Previously
+     `animate-fade-in` was written at the call site but never defined, so no
+     transition has ever run. */
+  --animate-fade-in: fade-in 220ms cubic-bezier(0.16, 1, 0.3, 1) both;
+  @keyframes fade-in {
+    from {
+      opacity: 0;
+      transform: translate3d(0, 0.375rem, 0);
+    }
+    to {
+      opacity: 1;
+      transform: none;
+    }
+  }
 }
 
 @custom-variant dark (&:where(.dark, .dark *));
@@ -162,17 +192,86 @@
   }
 }
 
+/* Reduced motion removes travel, not feedback. A blanket 0.01ms kill also
+   destroys the colour transitions that confirm a nav item became active, the
+   drop-target highlight on the Kanban, and the fade that signals a dialog
+   opened — leaving motion-sensitive users with less state information than
+   everyone else, which is the opposite of the intent. */
 @media (prefers-reduced-motion: reduce) {
   *,
   *::before,
   *::after {
     scroll-behavior: auto !important;
-    animation-duration: 0.01ms !important;
+    /* Colour and opacity still resolve, fast enough to read as instant. */
+    transition-duration: 80ms !important;
+    animation-duration: 1ms !important;
     animation-iteration-count: 1 !important;
-    transition-duration: 0.01ms !important;
+  }
+
+  /* Enter/exit keyframes land in place instead of sliding, zooming or
+     spinning into position. */
+  *,
+  *::before,
+  *::after {
+    --tw-enter-translate-x: 0 !important;
+    --tw-enter-translate-y: 0 !important;
+    --tw-exit-translate-x: 0 !important;
+    --tw-exit-translate-y: 0 !important;
+    --tw-enter-scale: 1 !important;
+    --tw-exit-scale: 1 !important;
+    --tw-enter-rotate: 0 !important;
+    --tw-exit-rotate: 0 !important;
+    --tw-enter-blur: 0 !important;
+    --tw-exit-blur: 0 !important;
+  }
+
+  /* Two loops survive because they are the only evidence that work is still
+     in flight. Both are slowed rather than stopped. */
+  .animate-spin {
+    animation: spin 1.6s linear infinite !important;
+  }
+  .animate-pulse {
+    animation: pulse 3s cubic-bezier(0.4, 0, 0.6, 1) infinite !important;
   }
 }
 
 @utility grid-cols-tickets {
   grid-template-columns: repeat(auto-fill, minmax(320px, 1fr));
+}
+
+/* Controls are authored at desktop density (h-8 / 32px). Walk-in and
+   call-centre intake happen on phones and counter tablets, where 32px is a
+   mis-tap. Rather than retag every call site, the floor is applied once, here,
+   and only where the primary pointer is coarse — desktop density is untouched.
+   The mobile nav reached the same conclusion locally with min-h-11; this
+   generalises it. */
+@media (pointer: coarse) {
+  [data-slot="button"],
+  [data-slot="select-trigger"],
+  [data-slot="input"],
+  [data-slot="textarea"],
+  [data-slot="input-group"],
+  [data-slot="dropdown-menu-item"],
+  [data-slot="dropdown-menu-checkbox-item"],
+  [data-slot="dropdown-menu-radio-item"],
+  [data-slot="select-item"],
+  [data-slot="command-item"],
+  [data-slot="tabs-trigger"] {
+    min-height: 2.75rem;
+  }
+
+  /* Width too, or a square icon button stays 32px wide. This is unconditional
+     rather than scoped to icon-only buttons: `> :not(svg)` matches elements,
+     so it both caught text buttons (which are already wider, so no harm) and
+     missed the user-menu trigger, whose child is an Avatar div. Every button
+     wide enough already ignores the floor. */
+  [data-slot="button"] {
+    min-width: 2.75rem;
+  }
+
+  /* The checkbox already extends its hit area past its 16px box; this widens
+     that expander to the full target rather than resizing the visible mark. */
+  [data-slot="checkbox"]::after {
+    inset: -0.875rem -0.875rem;
+  }
 }

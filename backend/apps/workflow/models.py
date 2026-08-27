@@ -3,6 +3,7 @@
 The workflow engine reads these tables to decide whether a transition is
 allowed (FR-038, FR-040). Transitions are data, not code.
 """
+
 from __future__ import annotations
 
 import uuid
@@ -45,9 +46,7 @@ class Transition(models.Model):
     from_status = models.ForeignKey(
         Status, on_delete=models.CASCADE, related_name="transitions_from"
     )
-    to_status = models.ForeignKey(
-        Status, on_delete=models.CASCADE, related_name="transitions_to"
-    )
+    to_status = models.ForeignKey(Status, on_delete=models.CASCADE, related_name="transitions_to")
     name = models.CharField(max_length=128)
     required_role = models.CharField(max_length=64, blank=True)
     required_fields = models.JSONField(default=list, blank=True)
@@ -72,9 +71,7 @@ class TransitionHistory(models.Model):
     ticket = models.ForeignKey(
         "tickets.Ticket", on_delete=models.CASCADE, related_name="transition_history"
     )
-    from_status = models.ForeignKey(
-        Status, on_delete=models.PROTECT, null=True, related_name="+"
-    )
+    from_status = models.ForeignKey(Status, on_delete=models.PROTECT, null=True, related_name="+")
     to_status = models.ForeignKey(Status, on_delete=models.PROTECT, related_name="+")
     actor_subject = models.CharField(max_length=255, db_index=True)
     reason = models.TextField(blank=True)

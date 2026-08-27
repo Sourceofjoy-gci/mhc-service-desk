@@ -214,6 +214,87 @@ def test_service_desk_supervisor_still_answers_every_office(
     assert theirs in visible
 
 
+def _master_of_one_office(staff_user):
+    """The Master as the realm issues them: a national principal who is also
+    the supervisor of the office they sit in."""
+    return staff_user(groups=["master", "ops-supervisors"])
+
+
+def test_master_is_unconfined(staff_user):
+    scopes = get_user_scopes(staff_user(groups=["master", "ops-supervisors"], office=None))
+    assert Scope(domain="operational") in scopes
+
+
+def test_master_designation_alone_grants_no_authority(staff_user):
+    """Being national widens the authority a group or UserRole already gave; it
+    never creates it. Otherwise handing out the ``master`` realm role in
+    Keycloak would silently mint national access with no record in the app."""
+    assert get_user_scopes(staff_user(groups=["master"], office=None)) == []
+    assert get_user_scopes(staff_user(groups=["deputy-master"], office=None)) == []
+
+
+def test_deputy_master_is_unconfined_through_a_persisted_grant(basic_world, staff_user):
+    """Deputy Master authority arrives as a UserRole, not a group, so the
+    persisted path has to reach the same conclusion as the group path."""
+    user = staff_user(groups=[], office=None)
+    role = Role.objects.create(
+        keycloak_role="deputy-master",
+        name="Deputy Master",
+        scopes=[{"domain": "operational"}],
+    )
+    UserRole.objects.create(user=user, role=role)
+
+    assert Scope(domain="operational") in get_user_scopes(user)
+
+
+def test_master_answers_every_office(basic_world, other_office, staff_user, ticket_factory):
+    mine = ticket_factory(office=basic_world["office"])
+    theirs = ticket_factory(office=other_office)
+
+    visible = scope_ticket_queryset(_master_of_one_office(staff_user), Ticket.objects.all())
+
+    assert mine in visible
+    assert theirs in visible
+
+
+def test_master_sees_restricted_work_of_own_office_only(
+    basic_world,
+    other_office,
+    staff_user,
+    ticket_factory,
+):
+    """Being national widens reach, not clearance. The appended cross-office
+    scope carries no restricted visibility, so restricted work stays with the
+    office that owns it."""
+    mine = ticket_factory(office=basic_world["office"], confidentiality="restricted")
+    theirs = ticket_factory(office=other_office, confidentiality="restricted")
+
+    visible = scope_ticket_queryset(_master_of_one_office(staff_user), Ticket.objects.all())
+
+    assert mine in visible
+    assert theirs not in visible
+
+
+def test_assistant_master_stays_confined(basic_world, other_office, staff_user, ticket_factory):
+    """Only the Master and Deputy Master were made national. An Assistant
+    Master remains an officer of the office they are based at."""
+    user = staff_user(groups=[])
+    role = Role.objects.create(
+        keycloak_role="assistant-master",
+        name="Assistant Master",
+        scopes=[{"domain": "operational"}],
+    )
+    UserRole.objects.create(user=user, role=role)
+    mine = ticket_factory(office=basic_world["office"])
+    theirs = ticket_factory(office=other_office)
+
+    visible = scope_ticket_queryset(user, Ticket.objects.all())
+
+    assert mine in visible
+    assert theirs not in visible
+    assert Scope(domain="operational") not in get_user_scopes(user)
+
+
 def test_auditor_stays_unconfined_including_restricted_work(
     basic_world,
     other_office,

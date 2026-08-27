@@ -1,0 +1,19 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <title>Checking your session</title>
+  </head>
+  <body>
+    <!--
+      Keycloak's silent SSO probe. keycloak-js loads this page inside a hidden
+      iframe pointed at the realm; the realm redirects back here with the
+      authorization result on the URL. Handing that URL to the opener lets the
+      adapter read an existing session without navigating the whole
+      application away and back again.
+    -->
+    <script>
+      parent.postMessage(location.href, location.origin);
+    </script>
+  </body>
+</html>

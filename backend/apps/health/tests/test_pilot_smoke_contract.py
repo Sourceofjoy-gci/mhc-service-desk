@@ -1,4 +1,5 @@
 """Behavioral contract for the development pilot smoke client."""
+
 from __future__ import annotations
 
 from types import MappingProxyType
@@ -16,12 +17,10 @@ def _response(*, status: int = 200, payload: dict | None = None) -> Mock:
 
 
 def test_development_identities_are_distinct_and_immutable():
-    assert smoke.OPS_HEADERS == {
-        "Authorization": "Bearer dev:pilot-ops:ops-agents"
-    }
-    assert smoke.IT_HEADERS == {"Authorization": "Bearer dev:pilot-it:it-agents"}
+    assert smoke.OPS_HEADERS == {"Authorization": "Bearer dev:pilot-ops:ops-agents:MHC-MBA"}
+    assert smoke.IT_HEADERS == {"Authorization": "Bearer dev:pilot-it:it-agents:MHC-MBA"}
     assert smoke.OPS_LEAD_HEADERS == {
-        "Authorization": "Bearer dev:pilot-lead:ops-supervisors"
+        "Authorization": "Bearer dev:pilot-lead:ops-supervisors:MHC-MBA"
     }
     assert all(
         isinstance(headers, MappingProxyType)

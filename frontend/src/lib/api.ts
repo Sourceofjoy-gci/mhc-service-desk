@@ -25,12 +25,28 @@ export interface RequestOptions {
 }
 
 let authAdapter: ApiAuthAdapter | null = null;
+// A login is a full-page redirect, so at most one can ever be useful. Without
+// this latch a screen that fires several requests at once queues one redirect
+// per request.
+let reauthenticationStarted = false;
 
 export function configureApiAuth(adapter: ApiAuthAdapter): () => void {
   authAdapter = adapter;
+  reauthenticationStarted = false;
   return () => {
     if (authAdapter === adapter) authAdapter = null;
   };
+}
+
+async function startReauthentication(adapter: ApiAuthAdapter): Promise<void> {
+  if (reauthenticationStarted) return;
+  reauthenticationStarted = true;
+  try {
+    await adapter.login(window.location.pathname + window.location.search);
+  } catch {
+    // A redirect can interrupt the login promise; callers still receive
+    // the API failure that initiated reauthentication.
+  }
 }
 
 export type Domain = "operational" | "it";
@@ -378,33 +394,32 @@ export async function api<T>(path: string, opts: RequestOptions = {}): Promise<T
     let body: unknown = null;
     try { body = await r.json(); } catch { /* non-JSON */ }
     const error = new ApiError(r.status, body);
-    if (r.status === 401 && usesAuth && requestAuth) {
+    // `retry401: false` marks the retry that already carries a refreshed
+    // token. Refreshing or signing in again from here cannot produce a
+    // different token, so the caller one frame up decides what the 401 means.
+    if (r.status === 401 && usesAuth && requestAuth && opts.retry401 !== false) {
       let refreshed = false;
-      if (opts.retry401 !== false) {
-        try {
-          refreshed = await requestAuth.refresh();
-        } catch {
-          refreshed = false;
-        }
+      try {
+        refreshed = await requestAuth.refresh();
+      } catch {
+        refreshed = false;
       }
       if (refreshed) {
         try {
           return await api<T>(path, { ...opts, retry401: false });
         } catch (retryError) {
           if (retryError instanceof ApiError && retryError.status === 401) {
+            // The identity provider issued a valid token and the backend
+            // still refused it — the account, not the session, is the
+            // problem. Sending the user through Keycloak would return the
+            // same token and the same 401, forever.
             throw error;
           }
           throw retryError;
         }
       }
-      try {
-        await requestAuth.login(
-          window.location.pathname + window.location.search,
-        );
-      } catch {
-        // A redirect can interrupt the login promise; callers still receive
-        // the API failure that initiated reauthentication.
-      }
+      // No session left to refresh: this is the expiry a fresh sign-in fixes.
+      await startReauthentication(requestAuth);
     }
     throw error;
   }

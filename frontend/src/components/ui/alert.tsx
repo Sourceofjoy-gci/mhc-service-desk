@@ -9,8 +9,11 @@ const alertVariants = cva(
     variants: {
       variant: {
         default: "bg-card text-card-foreground",
+        // The description keeps the solid token rather than a 90% wash: the
+        // alpha put light-mode error detail at 3.77:1. Title and description
+        // are already separated by weight, so the tint bought nothing.
         destructive:
-          "bg-card text-destructive *:data-[slot=alert-description]:text-destructive/90 *:[svg]:text-current",
+          "bg-card text-destructive *:[svg]:text-current",
       },
     },
     defaultVariants: {

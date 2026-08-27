@@ -8,6 +8,7 @@ Lightweight middleware that:
 The full audit event stream is written from the application layer where
 the business context is known. This middleware is the safety net.
 """
+
 from __future__ import annotations
 
 import logging

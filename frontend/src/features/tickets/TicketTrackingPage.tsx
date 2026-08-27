@@ -123,9 +123,6 @@ export default function TicketTrackingPage() {
   return (
     <section className="mx-auto flex w-full max-w-5xl flex-col gap-6">
       <header className="page-heading mb-0">
-        <p className="text-xs font-semibold tracking-[0.18em] text-gold uppercase">
-          Helpdesk workspace
-        </p>
         <h1 className="text-2xl font-semibold tracking-tight">Track a ticket</h1>
         <p className="max-w-2xl text-sm text-muted-foreground">
           Enter the reference given to the requester to check progress within your
@@ -133,7 +130,7 @@ export default function TicketTrackingPage() {
         </p>
       </header>
 
-      <Card className="border-l-4 border-l-primary">
+      <Card>
         <CardHeader>
           <CardTitle>Ticket reference</CardTitle>
           <CardDescription>

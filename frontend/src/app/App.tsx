@@ -1,3 +1,4 @@
+import { lazy } from "react";
 import { Route, Routes } from "react-router-dom";
 import { AppShell } from "@/components/app-shell";
 import { PublicShell } from "@/components/public-shell";
@@ -6,14 +7,25 @@ import HealthPage from "@/features/health/HealthPage";
 import LoginPage from "@/features/auth/LoginPage";
 import PermissionPage from "@/features/auth/PermissionPage";
 import { ProtectedRoute } from "@/features/auth/ProtectedRoute";
-import QueuePage from "@/features/tickets/QueuePage";
-import KanbanPage from "@/features/tickets/KanbanPage";
-import TicketDetailPage from "@/features/tickets/TicketDetailPage";
-import TicketTrackingPage from "@/features/tickets/TicketTrackingPage";
-import DashboardPage from "@/features/reports/DashboardPage";
 import NotFoundPage from "@/features/public/NotFoundPage";
-import ChannelIntakePage from "@/features/tickets/ChannelIntakePage";
-import HomePage from "@/features/home/HomePage";
+
+// Entry, permission and diagnostic surfaces stay eager: they are small, and
+// they are what a user reaches when something is already wrong. Everything
+// behind the auth gate is split, so opening the queue no longer downloads the
+// Kanban drag engine and the dashboard tables first.
+const HomePage = lazy(() => import("@/features/home/HomePage"));
+const QueuePage = lazy(() => import("@/features/tickets/QueuePage"));
+const KanbanPage = lazy(() => import("@/features/tickets/KanbanPage"));
+const TicketDetailPage = lazy(
+  () => import("@/features/tickets/TicketDetailPage"),
+);
+const TicketTrackingPage = lazy(
+  () => import("@/features/tickets/TicketTrackingPage"),
+);
+const DashboardPage = lazy(() => import("@/features/reports/DashboardPage"));
+const ChannelIntakePage = lazy(
+  () => import("@/features/tickets/ChannelIntakePage"),
+);
 
 export default function App() {
   return (

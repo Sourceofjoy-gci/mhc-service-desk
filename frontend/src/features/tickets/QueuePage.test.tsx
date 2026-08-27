@@ -117,7 +117,6 @@ function renderQueue({
     <QueryClientProvider client={queryClient}>
       <MemoryRouter
         initialEntries={[route]}
-        future={{ v7_startTransition: true, v7_relativeSplatPath: true }}
       >
         <Routes>
           <Route
@@ -400,7 +399,6 @@ describe("queue URL state", () => {
       <QueryClientProvider client={queryClient}>
         <MemoryRouter
           initialEntries={["/tickets"]}
-          future={{ v7_startTransition: true, v7_relativeSplatPath: true }}
         >
           <Routes>
             <Route path="/tickets" element={<QueuePage />} />

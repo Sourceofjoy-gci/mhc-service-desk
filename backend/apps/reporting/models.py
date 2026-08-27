@@ -1,4 +1,5 @@
 """Models for the Reporting and Dashboards app."""
+
 from __future__ import annotations
 
 import uuid
@@ -17,4 +18,3 @@ class Dashboard(models.Model):
 
     def __str__(self) -> str:
         return self.title
-

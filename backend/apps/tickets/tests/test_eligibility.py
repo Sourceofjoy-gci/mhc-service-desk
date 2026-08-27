@@ -939,12 +939,15 @@ def test_escalation_supervisor_picker_excludes_officers_of_another_office(basic_
         name="Other escalation office",
     )
     ticket = _ticket(basic_world)
-    local = _user(display_name="Local Master")
-    remote = _user(display_name="Remote Master", office=other_office)
+    local = _user(display_name="Local Assistant Master")
+    remote = _user(display_name="Remote Assistant Master", office=other_office)
+    # An Assistant Master is an office appointment, so the boundary applies.
+    # The Master and Deputy Master are national and deliberately do not confine
+    # — see ``test_escalation_reaches_a_master_of_another_office``.
     _grant(
         local,
-        role_key="master",
-        role_name="Master",
+        role_key="assistant-master",
+        role_name="Assistant Master",
         scopes=[{"domain": "operational"}],
     )
     UserRole.objects.create(user=remote, role=local.user_roles.get().role)
@@ -956,3 +959,29 @@ def test_escalation_supervisor_picker_excludes_officers_of_another_office(basic_
 
     assert local.id in candidate_ids
     assert remote.id not in candidate_ids
+
+
+def test_escalation_reaches_a_master_of_another_office(basic_world):
+    """The Master heads the institution, so a ticket can escalate to them
+    wherever they sit. Confining escalation to the ticket's own office would
+    leave an office with no principal to escalate to."""
+    other_office = Office.objects.create(
+        region=basic_world["region"],
+        code="ELIG-ESC-NATIONAL",
+        name="National escalation office",
+    )
+    ticket = _ticket(basic_world)
+    remote = _user(display_name="Remote Master", office=other_office)
+    _grant(
+        remote,
+        role_key="master",
+        role_name="Master",
+        scopes=[{"domain": "operational"}],
+    )
+
+    candidate_ids = {
+        candidate.id
+        for candidate in ticket_eligibility.eligible_escalation_supervisors(ticket)
+    }
+
+    assert remote.id in candidate_ids

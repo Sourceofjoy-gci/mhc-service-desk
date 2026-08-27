@@ -4,6 +4,7 @@ The executor here is intentionally narrow — no code execution, no eval,
 no shell. The PRD requires that automation be data-driven, versioned and
 audited.
 """
+
 from __future__ import annotations
 
 import logging
@@ -25,9 +26,17 @@ class AutomationRuleSerializer(serializers.ModelSerializer[AutomationRule]):
     class Meta:
         model = AutomationRule
         fields = (
-            "id", "name", "description", "trigger", "conditions",
-            "action", "action_params", "priority", "is_active",
-            "created_at", "updated_at",
+            "id",
+            "name",
+            "description",
+            "trigger",
+            "conditions",
+            "action",
+            "action_params",
+            "priority",
+            "is_active",
+            "created_at",
+            "updated_at",
         )
         read_only_fields = ("id", "created_at", "updated_at")
 
@@ -84,6 +93,7 @@ def _apply_action(rule: AutomationRule, ticket: Ticket) -> bool:
         if not username:
             return False
         from apps.identity_access.models import User
+
         try:
             user = User.objects.get(username=username)
         except User.DoesNotExist:
@@ -92,11 +102,7 @@ def _apply_action(rule: AutomationRule, ticket: Ticket) -> bool:
         from apps.tickets.services import TicketValidationError
 
         configured_reason = rule.action_params.get("reason")
-        reason = (
-            configured_reason.strip()
-            if isinstance(configured_reason, str)
-            else ""
-        )
+        reason = configured_reason.strip() if isinstance(configured_reason, str) else ""
         if not reason:
             reason = f"Automation rule {rule.id} assigned ticket to {username}."
         try:
@@ -132,6 +138,7 @@ def _apply_action(rule: AutomationRule, ticket: Ticket) -> bool:
         if not body:
             return False
         from apps.tickets.services import add_internal_note
+
         add_internal_note(ticket=ticket, body=body, author_subject=f"automation:{rule.name}")
         return True
     if rule.action == AutomationRule.Action.NOTIFY:

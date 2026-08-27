@@ -4,6 +4,7 @@ import {
   fireEvent,
   render,
   screen,
+  within,
   waitFor,
 } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
@@ -269,7 +270,6 @@ function renderDetail({
             state,
           },
         ]}
-        future={{ v7_startTransition: true, v7_relativeSplatPath: true }}
       >
         <Routes>
           <Route path="/tickets/:number" element={<TicketDetailPage />} />
@@ -314,7 +314,7 @@ describe("ticket operator workspace", () => {
     expect(screen.getByText("Online submission received")).toBeVisible();
   });
 
-  it("renders the lifecycle workspace in action-first mobile order with preserved context", async () => {
+  it("renders ticket essentials above the activity and operations workspace", async () => {
     renderDetail();
 
     expect(
@@ -329,41 +329,84 @@ describe("ticket operator workspace", () => {
     expect(screen.getByText("P2")).toBeVisible();
     expect(screen.getAllByText("Web").length).toBeGreaterThan(0);
     expect(screen.getByText(TICKET.description)).toBeVisible();
+    expect(
+      screen.queryByRole("link", { name: "Jump to ticket context" }),
+    ).not.toBeInTheDocument();
 
     const action = screen.getByRole("button", { name: "Start work" });
     const activity = screen.getByRole("heading", { name: "Activity" });
     const operations = screen.getByRole("heading", { name: "Operations" });
+    const essentials = screen.getByRole("region", {
+      name: "Ticket essentials",
+    });
     expect(action).toBeVisible();
     expect(activity).toBeVisible();
+    expect(screen.getByTestId("ticket-header-actions")).toContainElement(
+      action,
+    );
     expect(
-      screen.getByRole("heading", { name: "Add to activity" }),
-    ).toBeVisible();
+      screen.queryByRole("heading", { name: "Add to activity" }),
+    ).not.toBeInTheDocument();
+    expect(
+      screen.getByRole("textbox", { name: "Reply message" }),
+    ).toHaveAttribute("placeholder", "Type your reply…");
     expect(operations).toBeVisible();
-    expect(
-      screen.getByRole("heading", { name: "Service targets" }),
-    ).toBeVisible();
+    expect(screen.getByRole("heading", { name: "SLA" })).toBeVisible();
     expect(
       screen.getByRole("heading", { name: "Relationships" }),
     ).toBeVisible();
-    expect(screen.getByRole("heading", { name: "Attachments" })).toBeVisible();
-    expect(screen.getByRole("heading", { name: "Requester" })).toBeVisible();
     expect(
-      screen.getByRole("heading", { name: "Classification" }),
+      within(essentials).getByRole("heading", { name: "Attachments" }),
     ).toBeVisible();
-    expect(screen.getByText("naledi@example.test")).toBeVisible();
+    expect(
+      within(essentials).getByRole("heading", { name: "Requester" }),
+    ).toBeVisible();
+    expect(
+      within(essentials).getByRole("heading", { name: "Classification" }),
+    ).toBeVisible();
+    expect(
+      within(essentials).getByRole("link", { name: "naledi@example.test" }),
+    ).toHaveAttribute("href", "mailto:naledi@example.test");
+    expect(
+      within(essentials).getByRole("link", { name: "+27115550123" }),
+    ).toHaveAttribute("href", "tel:+27115550123");
     expect(screen.getByText("EST-42")).toBeVisible();
 
     expect(
-      action.compareDocumentPosition(activity) &
+      action.compareDocumentPosition(essentials) &
+        Node.DOCUMENT_POSITION_FOLLOWING,
+    ).toBeTruthy();
+    expect(
+      essentials.compareDocumentPosition(activity) &
         Node.DOCUMENT_POSITION_FOLLOWING,
     ).toBeTruthy();
     expect(
       activity.compareDocumentPosition(operations) &
         Node.DOCUMENT_POSITION_FOLLOWING,
     ).toBeTruthy();
-    expect(screen.getByTestId("ticket-workspace-layout")).toHaveClass(
-      "lg:grid-cols-[minmax(0,2fr)_minmax(18rem,1fr)]",
+    expect(screen.getByTestId("ticket-essentials-grid")).toHaveClass(
+      "xl:grid-cols-3",
     );
+    expect(essentials).not.toHaveClass("w-screen");
+    const workspace = screen.getByTestId("ticket-workspace-layout");
+    expect(workspace).toHaveClass(
+      "xl:grid-cols-[minmax(0,1.9fr)_minmax(21rem,1fr)]",
+    );
+    expect(workspace).not.toHaveClass("py-5");
+    expect(screen.getByTestId("ticket-detail-page")).toHaveClass(
+      "xl:w-[calc(100vw-8rem)]",
+    );
+    const operationsRail = screen.getByTestId("ticket-operations-rail");
+    const activityCard = screen.getByTestId("ticket-activity-card");
+    const activityStream = screen.getByTestId("ticket-activity-scroll");
+
+    expect(operationsRail).not.toHaveClass(
+      "xl:sticky",
+      "xl:h-[calc(100vh-20rem)]",
+      "xl:overflow-y-auto",
+    );
+    expect(activityCard).not.toHaveClass("xl:h-[calc(100vh-20rem)]");
+    expect(activityStream).not.toHaveClass("xl:flex-1", "xl:overflow-y-auto");
   });
 
   it("replaces the exact ticket cache only after a transition succeeds", async () => {
@@ -738,10 +781,7 @@ describe("ticket detail route states", () => {
     const user = userEvent.setup();
     render(
       <QueryClientProvider client={queryClient}>
-        <MemoryRouter
-          initialEntries={["/tickets?status=triage&cursor=opaque"]}
-          future={{ v7_startTransition: true, v7_relativeSplatPath: true }}
-        >
+        <MemoryRouter initialEntries={["/tickets?status=triage&cursor=opaque"]}>
           <Routes>
             <Route path="/tickets" element={<TicketCard ticket={TICKET} />} />
             <Route path="/tickets/:number" element={<LocationProbe />} />

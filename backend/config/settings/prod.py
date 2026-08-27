@@ -5,6 +5,7 @@ provided via the environment; the module raises ``ImproperlyConfigured`` at
 import time if any are missing. The dev auth bypass is **never** available
 here because ``DEBUG`` is unconditionally False.
 """
+
 from __future__ import annotations
 
 import sys
@@ -39,6 +40,7 @@ if _missing:
         + ". Refusing to start."
     )
 
+
 # Reject insecure placeholder secrets
 def _is_weak(secret: str) -> bool:
     s = secret.lower()
@@ -48,9 +50,15 @@ def _is_weak(secret: str) -> bool:
 
 
 _weak = []
-for k in ("DJANGO_SECRET_KEY", "POSTGRES_PASSWORD", "REDIS_PASSWORD",
-          "RABBITMQ_PASSWORD", "MINIO_ROOT_PASSWORD", "KEYCLOAK_ADMIN_PASSWORD",
-          "BACKUP_ENCRYPTION_KEY"):
+for k in (
+    "DJANGO_SECRET_KEY",
+    "POSTGRES_PASSWORD",
+    "REDIS_PASSWORD",
+    "RABBITMQ_PASSWORD",
+    "MINIO_ROOT_PASSWORD",
+    "KEYCLOAK_ADMIN_PASSWORD",
+    "BACKUP_ENCRYPTION_KEY",
+):
     v = env.str(k, default="")
     if v and _is_weak(v):
         _weak.append(k)
@@ -94,6 +102,7 @@ DATABASES["default"].setdefault("CONN_MAX_AGE", 60)
 DATABASES["default"]["OPTIONS"].setdefault("connect_timeout", 5)
 
 # --- Logging hardening ---------------------------------------------------
+
 
 def _is_string_object_dict(value: object) -> TypeGuard[dict[str, object]]:
     return isinstance(value, dict) and all(isinstance(key, str) for key in value)

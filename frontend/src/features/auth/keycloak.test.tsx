@@ -1,7 +1,7 @@
 import { StrictMode } from "react";
 import { render, screen } from "@testing-library/react";
 import { MemoryRouter } from "react-router-dom";
-import { beforeEach, describe, expect, it, vi } from "vitest";
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
 const keycloakMock = vi.hoisted(() => {
   const instance = {
@@ -30,10 +30,7 @@ const LIFECYCLE_KEY = Symbol.for("mhc-ticketing.keycloak-lifecycle");
 
 function router(ui: React.ReactNode) {
   return (
-    <MemoryRouter
-      initialEntries={["/login"]}
-      future={{ v7_startTransition: true, v7_relativeSplatPath: true }}
-    >
+    <MemoryRouter initialEntries={["/login"]}>
       {ui}
     </MemoryRouter>
   );
@@ -46,6 +43,39 @@ describe("Keycloak initialization lifecycle", () => {
     keycloakMock.constructor.mockClear();
     keycloakMock.instance.init.mockReset();
     keycloakMock.instance.loadUserProfile.mockClear();
+  });
+
+  afterEach(() => {
+    vi.unstubAllEnvs();
+  });
+
+  it("resolves same-origin Keycloak configuration against the active app origin", async () => {
+    vi.stubEnv("VITE_KEYCLOAK_URL", "same-origin");
+    const { getKeycloak } = await import("./keycloak");
+
+    getKeycloak();
+
+    expect(keycloakMock.constructor).toHaveBeenCalledWith(
+      expect.objectContaining({ url: window.location.origin }),
+    );
+  });
+
+  it("checks the existing session in a hidden iframe, not by navigating away", async () => {
+    // Without a silent redirect URI, keycloak-js answers `check-sso` with a
+    // full-page redirect to the realm on every cold load: the homepage flashes
+    // and the address bar bounces before anything renders.
+    keycloakMock.instance.init.mockResolvedValue(false);
+    const { initKeycloak } = await import("./keycloak");
+
+    await initKeycloak();
+
+    expect(keycloakMock.instance.init).toHaveBeenCalledWith(
+      expect.objectContaining({
+        onLoad: "check-sso",
+        silentCheckSsoRedirectUri: `${window.location.origin}/silent-check-sso.html`,
+        silentCheckSsoFallback: false,
+      }),
+    );
   });
 
   it("coalesces repeated callers and caches a successful lifecycle", async () => {

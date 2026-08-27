@@ -1,4 +1,5 @@
 """Tests for canonical transactional ticket events."""
+
 from __future__ import annotations
 
 import hashlib
@@ -124,9 +125,7 @@ def test_record_ticket_event_rolls_back_audit_outbox_and_custody_together(ticket
                 before={},
                 after={"status": "new"},
                 custody_actor=CustodyActor.user("agent-1", "Agent One"),
-                custody_events=(
-                    CustodyEventInput.created(source_process="ticket.create"),
-                ),
+                custody_events=(CustodyEventInput.created(source_process="ticket.create"),),
             )
 
     assert AuditEvent.objects.filter(object_id=str(ticket.id)).count() == audit_count

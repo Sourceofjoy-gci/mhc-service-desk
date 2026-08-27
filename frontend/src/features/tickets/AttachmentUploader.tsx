@@ -1,5 +1,11 @@
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
-import { AlertCircle, Download, FileText, Upload } from "lucide-react";
+import {
+  AlertCircle,
+  Download,
+  FileText,
+  Paperclip,
+  Upload,
+} from "lucide-react";
 import { useRef, useState } from "react";
 import { toast } from "sonner";
 import { Alert, AlertDescription, AlertTitle } from "@/components/ui/alert";
@@ -188,9 +194,13 @@ function AttachmentRow({ attachment }: { attachment: AttachmentMetadata }) {
 export default function AttachmentUploader({
   ticketNumber,
   canUpload = true,
+  embedded = false,
+  compact = false,
 }: {
   ticketNumber: string;
   canUpload?: boolean;
+  embedded?: boolean;
+  compact?: boolean;
 }) {
   const queryClient = useQueryClient();
   const uploadLock = useRef(false);
@@ -230,120 +240,181 @@ export default function AttachmentUploader({
   }
 
   const attachmentResults = attachments.data?.results ?? [];
+  const existingAttachments = (
+    <section aria-label="Existing attachments">
+      {attachments.isLoading ? (
+        <div className="flex min-h-20 items-center justify-center">
+          <Spinner className="size-5" aria-label="Loading attachments" />
+        </div>
+      ) : attachments.isError ? (
+        <FailureAlert
+          error={attachments.error}
+          deniedTitle="Attachments unavailable"
+          errorTitle="Could not load attachments"
+          deniedFallback="You do not have permission to view attachments for this ticket."
+          errorFallback="The attachment list could not be loaded. Please try again."
+        />
+      ) : attachmentResults.length === 0 ? (
+        embedded ? (
+          <p className="rounded-lg border border-dashed p-3 text-sm text-muted-foreground">
+            No attachments yet.
+          </p>
+        ) : (
+          <Empty className="min-h-24 border">
+            <EmptyHeader>
+              <EmptyTitle>No attachments yet</EmptyTitle>
+              <EmptyDescription>
+                Uploaded files and their scan results will appear here.
+              </EmptyDescription>
+            </EmptyHeader>
+          </Empty>
+        )
+      ) : (
+        <ul className="divide-y divide-border" aria-label="Ticket attachments">
+          {attachmentResults.map((attachment) => (
+            <AttachmentRow key={attachment.id} attachment={attachment} />
+          ))}
+        </ul>
+      )}
+    </section>
+  );
+
+  const uploadForm = canUpload ? (
+    <form
+      className={embedded ? "" : "border-t pt-4"}
+      onSubmit={(event) => {
+        event.preventDefault();
+        submitFiles();
+      }}
+    >
+      <FieldGroup className="gap-3">
+        <Field>
+          <FieldLabel htmlFor="ticket-attachments">Choose files</FieldLabel>
+          <Input
+            key={inputKey}
+            id="ticket-attachments"
+            type="file"
+            multiple
+            disabled={upload.isPending}
+            onChange={(event) => {
+              setFiles(Array.from(event.target.files ?? []));
+              upload.reset();
+            }}
+          />
+          <FieldDescription>
+            Choose one or more files. Downloads remain unavailable until
+            scanning is complete.
+          </FieldDescription>
+        </Field>
+      </FieldGroup>
+
+      {files.length > 0 ? (
+        <ul
+          className="mt-3 flex flex-col gap-1 text-xs text-muted-foreground"
+          aria-label="Selected files"
+        >
+          {files.map((file) => (
+            <li key={`${file.name}:${file.size}:${file.lastModified}`}>
+              {file.name} · {formatSize(file.size)}
+            </li>
+          ))}
+        </ul>
+      ) : null}
+
+      <Button
+        type="submit"
+        className="mt-3"
+        disabled={files.length === 0 || upload.isPending}
+      >
+        {upload.isPending ? (
+          <Spinner data-icon="inline-start" aria-hidden />
+        ) : (
+          <Upload data-icon="inline-start" aria-hidden />
+        )}
+        Upload
+      </Button>
+    </form>
+  ) : null;
+
+  const uploadError =
+    canUpload && upload.isError ? (
+      <FailureAlert
+        error={upload.error}
+        deniedTitle="Upload unavailable"
+        errorTitle="Upload failed"
+        deniedFallback="You do not have permission to upload attachments to this ticket."
+        errorFallback="The files could not be uploaded. Please try again."
+      />
+    ) : null;
+
+  if (embedded) {
+    return (
+      <section
+        aria-labelledby="attachments-heading"
+        className={compact ? "flex flex-col gap-3" : "flex flex-col gap-4"}
+      >
+        <div className="flex items-start justify-between gap-3">
+          <div>
+            <div className="flex items-center gap-2">
+              {compact ? (
+                <Paperclip
+                  className="size-4 text-muted-foreground"
+                  aria-hidden
+                />
+              ) : null}
+              <h2 id="attachments-heading" className="text-base font-semibold">
+                Attachments
+              </h2>
+              {compact && !attachments.isLoading && !attachments.isError ? (
+                <span className="text-sm text-muted-foreground">
+                  ({attachmentResults.length})
+                </span>
+              ) : null}
+            </div>
+            {!compact ? (
+              <p className="text-sm text-muted-foreground">
+                Files become available after security scanning.
+              </p>
+            ) : null}
+          </div>
+          {!compact && !attachments.isLoading && !attachments.isError ? (
+            <Badge
+              variant="outline"
+              aria-label={`${attachmentResults.length} attachments`}
+            >
+              {attachmentResults.length}
+            </Badge>
+          ) : null}
+        </div>
+        {existingAttachments}
+        {uploadForm ? (
+          <details className="rounded-lg border border-border/80 bg-background/30">
+            <summary className="flex min-h-9 cursor-pointer list-none items-center gap-2 px-3 py-2 text-sm font-medium outline-none focus-visible:ring-3 focus-visible:ring-ring/50">
+              <Upload className="size-4 text-muted-foreground" aria-hidden />
+              Add files
+            </summary>
+            <div className="border-t border-border/80 p-3">{uploadForm}</div>
+          </details>
+        ) : null}
+        {uploadError}
+      </section>
+    );
+  }
 
   return (
     <Card className="rounded-lg!">
       <CardHeader>
         <CardTitle>
-          <h2>Attachments</h2>
+          <h2 id="attachments-heading">Attachments</h2>
         </CardTitle>
         <CardDescription>
           Files remain unavailable until their security scan is complete.
         </CardDescription>
       </CardHeader>
       <CardContent className="flex flex-col gap-4">
-        <section aria-label="Existing attachments">
-          {attachments.isLoading ? (
-            <div className="flex min-h-20 items-center justify-center">
-              <Spinner className="size-5" aria-label="Loading attachments" />
-            </div>
-          ) : attachments.isError ? (
-            <FailureAlert
-              error={attachments.error}
-              deniedTitle="Attachments unavailable"
-              errorTitle="Could not load attachments"
-              deniedFallback="You do not have permission to view attachments for this ticket."
-              errorFallback="The attachment list could not be loaded. Please try again."
-            />
-          ) : attachmentResults.length === 0 ? (
-            <Empty className="min-h-24 border">
-              <EmptyHeader>
-                <EmptyTitle>No attachments yet</EmptyTitle>
-                <EmptyDescription>
-                  Uploaded files and their scan results will appear here.
-                </EmptyDescription>
-              </EmptyHeader>
-            </Empty>
-          ) : (
-            <ul
-              className="divide-y divide-border"
-              aria-label="Ticket attachments"
-            >
-              {attachmentResults.map((attachment) => (
-                <AttachmentRow key={attachment.id} attachment={attachment} />
-              ))}
-            </ul>
-          )}
-        </section>
-
-        {canUpload ? (
-          <form
-            className="border-t pt-4"
-            onSubmit={(event) => {
-              event.preventDefault();
-              submitFiles();
-            }}
-          >
-            <FieldGroup className="gap-3">
-              <Field>
-                <FieldLabel htmlFor="ticket-attachments">
-                  Choose files
-                </FieldLabel>
-                <Input
-                  key={inputKey}
-                  id="ticket-attachments"
-                  type="file"
-                  multiple
-                  disabled={upload.isPending}
-                  onChange={(event) => {
-                    setFiles(Array.from(event.target.files ?? []));
-                    upload.reset();
-                  }}
-                />
-                <FieldDescription>
-                  Choose one or more files. Downloads remain unavailable until
-                  scanning is complete.
-                </FieldDescription>
-              </Field>
-            </FieldGroup>
-
-            {files.length > 0 ? (
-              <ul
-                className="mt-3 flex flex-col gap-1 text-xs text-muted-foreground"
-                aria-label="Selected files"
-              >
-                {files.map((file) => (
-                  <li key={`${file.name}:${file.size}:${file.lastModified}`}>
-                    {file.name} · {formatSize(file.size)}
-                  </li>
-                ))}
-              </ul>
-            ) : null}
-
-            <Button
-              type="submit"
-              className="mt-3"
-              disabled={files.length === 0 || upload.isPending}
-            >
-              {upload.isPending ? (
-                <Spinner data-icon="inline-start" aria-hidden />
-              ) : (
-                <Upload data-icon="inline-start" aria-hidden />
-              )}
-              Upload
-            </Button>
-          </form>
-        ) : null}
-
-        {canUpload && upload.isError ? (
-          <FailureAlert
-            error={upload.error}
-            deniedTitle="Upload unavailable"
-            errorTitle="Upload failed"
-            deniedFallback="You do not have permission to upload attachments to this ticket."
-            errorFallback="The files could not be uploaded. Please try again."
-          />
-        ) : null}
+        {existingAttachments}
+        {uploadForm}
+        {uploadError}
       </CardContent>
     </Card>
   );

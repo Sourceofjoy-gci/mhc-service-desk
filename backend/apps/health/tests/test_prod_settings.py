@@ -71,9 +71,7 @@ def _run_prod_probe(**overrides: str) -> tuple[int, str, str]:
             "DJANGO_ALLOWED_HOSTS": "pilot.internal",
             "DJANGO_CORS_ALLOWED_ORIGINS": "https://pilot.internal",
             "MINIO_ROOT_USER": "pilot-storage",
-            "DATABASE_URL": (
-                f"postgresql://mhc:{STRONG_VALUE}@localhost:5432/mhc"
-            ),
+            "DATABASE_URL": (f"postgresql://mhc:{STRONG_VALUE}@localhost:5432/mhc"),
             "DJANGO_SETTINGS_MODULE": "config.settings.prod",
         }
     )
@@ -103,7 +101,6 @@ def test_production_settings_fail_fast_when_required_value_is_missing():
     assert failure["error_type"] == "ImproperlyConfigured"
     assert "Missing required production environment variables" in failure["message"]
     assert "BACKUP_ENCRYPTION_KEY" in failure["message"]
-
 
 def test_production_settings_fail_fast_when_required_secret_is_weak():
     returncode, output, _ = _run_prod_probe(BACKUP_ENCRYPTION_KEY="too-short")

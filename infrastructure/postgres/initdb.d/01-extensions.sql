@@ -14,3 +14,6 @@ CREATE EXTENSION IF NOT EXISTS pgcrypto;
 
 -- UUID generation as a backup to client-side uuid generation
 CREATE EXTENSION IF NOT EXISTS "uuid-ossp";
+
+-- Keep Keycloak tables isolated while sharing the managed Postgres cluster.
+CREATE SCHEMA IF NOT EXISTS keycloak AUTHORIZATION CURRENT_USER;

@@ -1,15 +1,13 @@
 import { useRef, useState } from "react";
 import { useMutation } from "@tanstack/react-query";
-import { Link, useLocation } from "react-router-dom";
+import { Link } from "react-router-dom";
 import {
   AlertCircle,
   ArrowRight,
   CheckCircle2,
   Copy,
-  Phone,
   RotateCcw,
   SearchCheck,
-  User,
 } from "lucide-react";
 import { ticketsApi } from "@/lib/api";
 import { Alert, AlertDescription, AlertTitle } from "@/components/ui/alert";
@@ -48,6 +46,7 @@ import {
   hasContent,
   isOptionalEmailValid,
 } from "@/lib/form-validation";
+import { OFFICE_OPTIONS } from "./intake-options";
 
 interface ChannelIntakeProps {
   channel: "call" | "walk_in";
@@ -55,20 +54,11 @@ interface ChannelIntakeProps {
   description: string;
 }
 
-const CHANNEL_META: Record<
-  ChannelIntakeProps["channel"],
-  { label: string; icon: typeof Phone; tone: string }
-> = {
-  call: {
-    label: "Call centre",
-    icon: Phone,
-    tone: "info",
-  },
-  walk_in: {
-    label: "Walk-in",
-    icon: User,
-    tone: "gold",
-  },
+// Only the label survives: the icon and tone existed for the header chip and
+// badge, which duplicated the page heading and the active nav item.
+const CHANNEL_META: Record<ChannelIntakeProps["channel"], { label: string }> = {
+  call: { label: "Call centre" },
+  walk_in: { label: "Walk-in" },
 };
 
 interface FormState {
@@ -95,6 +85,29 @@ const EMPTY: FormState = {
   matter_reference: "",
 };
 
+/**
+ * A clerk works at one office all day. Remembering the last one they used
+ * turns a per-capture decision back into a default; Mbabane stays the fallback
+ * for a fresh browser.
+ */
+const OFFICE_STORAGE_KEY = "mhc.intake.office";
+
+function rememberedOffice(): string {
+  try {
+    const stored = localStorage.getItem(OFFICE_STORAGE_KEY);
+    if (stored && OFFICE_OPTIONS.some((option) => option.value === stored)) {
+      return stored;
+    }
+  } catch {
+    // Storage can be unavailable (private mode, blocked cookies); the default stands.
+  }
+  return EMPTY.office_code;
+}
+
+function blankCapture(): FormState {
+  return { ...EMPTY, office_code: rememberedOffice() };
+}
+
 const SERVICES = [
   { value: "GEN-INFO", label: "General information" },
   { value: "EST-REG", label: "Estate registration or reference" },
@@ -107,18 +120,12 @@ const REQUEST_TYPES = [
   { value: "STATUS", label: "Estate status check" },
   { value: "SEARCH", label: "Will search request" },
 ];
-const OFFICES = [
-  { value: "MHC-MBA", label: "Mbabane (Main)" },
-  { value: "MHC-MAN", label: "Manzini" },
-];
-
 export default function ChannelIntakePage({
   channel,
   title,
   description,
 }: ChannelIntakeProps) {
-  const location = useLocation();
-  const [form, setForm] = useState<FormState>(EMPTY);
+  const [form, setForm] = useState<FormState>(blankCapture);
   const [submitAttempted, setSubmitAttempted] = useState(false);
   const [submitted, setSubmitted] = useState<{
     number: string;
@@ -127,7 +134,6 @@ export default function ChannelIntakePage({
   const [copyError, setCopyError] = useState<string | null>(null);
   const submissionLock = useRef(false);
   const meta = CHANNEL_META[channel];
-  const Icon = meta.icon;
 
   const submit = useMutation({
     mutationFn: (data: FormState) =>
@@ -143,8 +149,16 @@ export default function ChannelIntakePage({
 
   const update =
     <K extends keyof FormState>(key: K) =>
-    (value: FormState[K]) =>
+    (value: FormState[K]) => {
+      if (key === "office_code" && typeof value === "string") {
+        try {
+          localStorage.setItem(OFFICE_STORAGE_KEY, value);
+        } catch {
+          // Not being able to remember the office is not worth failing a capture over.
+        }
+      }
       setForm((prev) => ({ ...prev, [key]: value }));
+    };
 
   const validation = {
     title: hasContent(form.title),
@@ -159,6 +173,19 @@ export default function ChannelIntakePage({
     { id: "intake-requester-email", valid: validation.requesterEmail },
   ]);
   const canSubmit = firstInvalidFieldId === null;
+
+  function attemptSubmit() {
+    setSubmitAttempted(true);
+    if (!canSubmit) {
+      if (firstInvalidFieldId) {
+        document.getElementById(firstInvalidFieldId)?.focus();
+      }
+      return;
+    }
+    if (submissionLock.current) return;
+    submissionLock.current = true;
+    submit.mutate(form);
+  }
 
   async function copyReference(reference: string) {
     try {
@@ -191,7 +218,7 @@ export default function ChannelIntakePage({
               The request has been added to the operational queue.
             </CardDescription>
           </CardHeader>
-          <CardContent className="space-y-3 text-center">
+          <CardContent role="status" className="space-y-3 text-center">
             <p className="text-xs font-semibold tracking-wide text-muted-foreground uppercase">
               Reference number
             </p>
@@ -208,6 +235,24 @@ export default function ChannelIntakePage({
             ) : null}
           </CardContent>
           <CardFooter className="flex-wrap justify-center gap-2">
+            {/* At a counter the next thing that happens is almost always the
+                next visitor, not tracking the ticket just created. This leads,
+                takes the primary weight, and holds focus so Enter starts the
+                next capture without a mouse. */}
+            <Button
+              type="button"
+              autoFocus
+              onClick={() => {
+                setSubmitted(null);
+                setForm(blankCapture());
+                setSubmitAttempted(false);
+                setCopyError(null);
+                submissionLock.current = false;
+              }}
+            >
+              <RotateCcw data-icon="inline-start" />
+              Start next capture
+            </Button>
             <Button
               type="button"
               variant="outline"
@@ -217,26 +262,12 @@ export default function ChannelIntakePage({
               Copy reference
             </Button>
             <Link
-              className={buttonVariants()}
+              className={buttonVariants({ variant: "outline" })}
               to={`/ticket-tracking?reference=${encodeURIComponent(submitted.number)}`}
             >
               <SearchCheck data-icon="inline-start" />
               Track this ticket
             </Link>
-            <Button
-              type="button"
-              variant="outline"
-              onClick={() => {
-                setSubmitted(null);
-                setForm(EMPTY);
-                setSubmitAttempted(false);
-                setCopyError(null);
-                submissionLock.current = false;
-              }}
-            >
-              <RotateCcw data-icon="inline-start" />
-              New capture
-            </Button>
           </CardFooter>
         </Card>
       </div>
@@ -247,19 +278,8 @@ export default function ChannelIntakePage({
     <div className="mx-auto max-w-2xl">
       <Card className="rounded-lg!">
         <CardHeader>
-          <div className="flex items-center gap-2">
-            <span
-              className="grid size-9 place-items-center rounded-lg bg-primary/10 text-primary ring-1 ring-inset ring-primary/20"
-              aria-hidden
-            >
-              <Icon className="size-4" />
-            </span>
-            <Badge variant="secondary" className="font-normal">
-              {meta.label} · {location.pathname}
-            </Badge>
-          </div>
           <CardTitle>
-            <h1 className="text-2xl">{title}</h1>
+            <h1 className="text-2xl font-semibold tracking-tight">{title}</h1>
           </CardTitle>
           <CardDescription>{description}</CardDescription>
         </CardHeader>
@@ -267,16 +287,16 @@ export default function ChannelIntakePage({
           noValidate
           onSubmit={(e) => {
             e.preventDefault();
-            setSubmitAttempted(true);
-            if (!canSubmit) {
-              if (firstInvalidFieldId) {
-                document.getElementById(firstInvalidFieldId)?.focus();
-              }
-              return;
+            attemptSubmit();
+          }}
+          // A capture happens with someone waiting at the counter. Ctrl+Enter
+          // submits from any field, including the textarea, so the clerk never
+          // has to leave the keyboard to reach the button.
+          onKeyDown={(e) => {
+            if (e.key === "Enter" && (e.ctrlKey || e.metaKey)) {
+              e.preventDefault();
+              attemptSubmit();
             }
-            if (submissionLock.current) return;
-            submissionLock.current = true;
-            submit.mutate(form);
           }}
         >
           <CardContent>
@@ -351,7 +371,7 @@ export default function ChannelIntakePage({
                   <Field>
                     <FieldLabel htmlFor="intake-office">Office</FieldLabel>
                     <Select
-                      items={OFFICES}
+                      items={OFFICE_OPTIONS}
                       value={form.office_code}
                       onValueChange={(v) => {
                         if (v == null) return;
@@ -363,7 +383,7 @@ export default function ChannelIntakePage({
                       </SelectTrigger>
                       <SelectContent>
                         <SelectGroup>
-                          {OFFICES.map((s) => (
+                          {OFFICE_OPTIONS.map((s) => (
                             <SelectItem key={s.value} value={s.value}>
                               {s.label}
                             </SelectItem>
@@ -391,12 +411,12 @@ export default function ChannelIntakePage({
                 </FieldGroup>
               </FieldSet>
 
-              <FieldSet>
+              <FieldSet className="border-t border-border/60 pt-6">
                 <FieldLegend>Request details</FieldLegend>
                 <FieldGroup>
                   <Field data-invalid={submitAttempted && !validation.title}>
                     <FieldLabel htmlFor="intake-title">
-                      Title (required)
+                      Title
                     </FieldLabel>
                     <Input
                       id="intake-title"
@@ -421,41 +441,47 @@ export default function ChannelIntakePage({
                     data-invalid={submitAttempted && !validation.description}
                   >
                     <FieldLabel htmlFor="intake-description">
-                      Notes (required)
+                      Description
                     </FieldLabel>
+                    <FieldDescription id="intake-description-hint">
+                      What the requester needs, in their own words.
+                    </FieldDescription>
                     <Textarea
                       id="intake-description"
+                      className="min-h-32"
                       value={form.description}
                       onChange={(e) => update("description")(e.target.value)}
-                      rows={4}
+                      rows={6}
                       required
                       aria-invalid={submitAttempted && !validation.description}
+                      // FieldDescription renders a plain <p>, so the hint is
+                      // only reachable if it is named here alongside the error.
                       aria-describedby={
                         submitAttempted && !validation.description
-                          ? "intake-description-error"
-                          : undefined
+                          ? "intake-description-hint intake-description-error"
+                          : "intake-description-hint"
                       }
                     />
                     {submitAttempted && !validation.description ? (
                       <FieldError id="intake-description-error">
-                        Add notes about the request.
+                        Describe what the requester needs.
                       </FieldError>
                     ) : null}
                   </Field>
                 </FieldGroup>
               </FieldSet>
 
-              <FieldSet>
+              <FieldSet className="border-t border-border/60 pt-6">
                 <FieldLegend>Requester details</FieldLegend>
                 <FieldDescription>
                   Record who contacted the office and how they can be reached.
                 </FieldDescription>
-                <FieldGroup className="grid grid-cols-1 gap-4 md:grid-cols-3">
+                <FieldGroup className="grid grid-cols-1 gap-4 md:grid-cols-2">
                   <Field
                     data-invalid={submitAttempted && !validation.requesterName}
                   >
                     <FieldLabel htmlFor="intake-requester-name">
-                      Requester name (required)
+                      Requester name
                     </FieldLabel>
                     <Input
                       id="intake-requester-name"
@@ -483,7 +509,7 @@ export default function ChannelIntakePage({
                     data-invalid={submitAttempted && !validation.requesterEmail}
                   >
                     <FieldLabel htmlFor="intake-requester-email">
-                      Email
+                      Email (optional)
                     </FieldLabel>
                     <Input
                       id="intake-requester-email"
@@ -510,7 +536,7 @@ export default function ChannelIntakePage({
                   </Field>
                   <Field>
                     <FieldLabel htmlFor="intake-requester-phone">
-                      Phone
+                      Phone (optional)
                     </FieldLabel>
                     <Input
                       id="intake-requester-phone"
@@ -527,7 +553,11 @@ export default function ChannelIntakePage({
               </FieldSet>
             </FieldGroup>
           </CardContent>
-          <CardFooter className="justify-end">
+          <CardFooter className="flex-wrap justify-between gap-3">
+            <p className="text-xs text-muted-foreground">
+              Press <kbd className="font-mono font-medium">Ctrl</kbd> +{" "}
+              <kbd className="font-mono font-medium">Enter</kbd> to capture.
+            </p>
             <Button type="submit" disabled={submit.isPending}>
               {submit.isPending ? (
                 <Spinner aria-hidden data-icon="inline-start" />

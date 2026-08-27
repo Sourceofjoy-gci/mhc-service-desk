@@ -1,4 +1,5 @@
 """Quick debug: run process_inbound_email and inspect the result."""
+
 import os
 import sys
 
@@ -24,16 +25,11 @@ def main() -> None:
         to_header="ops@mhc.local",
         subject="XSS test",
         body_text="Click here",
-        body_html=(
-            '<p>Hi</p><script>alert(1)</script>'
-            '<a href="javascript:doBad()">link</a>'
-        ),
+        body_html=("<p>Hi</p><script>alert(1)</script>" '<a href="javascript:doBad()">link</a>'),
         message_id="<xss-debug@example.com>",
     )
     print("result:", result)
-    messages = TicketMessage.objects.filter(
-        external_message_id="<xss-debug@example.com>"
-    )
+    messages = TicketMessage.objects.filter(external_message_id="<xss-debug@example.com>")
     for message in messages:
         print(
             "msg.body_html_sanitized:",

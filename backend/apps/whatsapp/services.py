@@ -6,6 +6,7 @@ Two providers are wired:
                   production use once the Meta account and templates are
                   approved (PRD §19.6).
 """
+
 from __future__ import annotations
 
 import hashlib
@@ -125,12 +126,20 @@ class MockProvider(BaseProvider):
         business_id: str = "",
     ) -> list[dict[str, object]]:
         return [
-            {"name": "ticket_ack_en", "language": "en", "category": "utility",
-             "status": "APPROVED",
-             "body": "Your request {{1}} has been received. Reference: {{2}}."},
-            {"name": "ticket_ack_ss", "language": "ss", "category": "utility",
-             "status": "APPROVED",
-             "body": "Inchaziso yakho {{1}} itholakele. Inombolo: {{2}}."},
+            {
+                "name": "ticket_ack_en",
+                "language": "en",
+                "category": "utility",
+                "status": "APPROVED",
+                "body": "Your request {{1}} has been received. Reference: {{2}}.",
+            },
+            {
+                "name": "ticket_ack_ss",
+                "language": "ss",
+                "category": "utility",
+                "status": "APPROVED",
+                "body": "Inchaziso yakho {{1}} itholakele. Inombolo: {{2}}.",
+            },
         ]
 
 
@@ -192,10 +201,7 @@ class CloudProvider(BaseProvider):
             components.append(
                 {
                     "type": "body",
-                    "parameters": [
-                        {"type": "text", "text": parameter}
-                        for parameter in parameters
-                    ],
+                    "parameters": [{"type": "text", "text": parameter} for parameter in parameters],
                 }
             )
         try:

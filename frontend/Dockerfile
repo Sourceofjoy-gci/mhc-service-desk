@@ -11,7 +11,7 @@ FROM node:22.14.0-alpine AS dev
 WORKDIR /app
 COPY package.json package-lock.json ./
 ARG NPM_CONFIG_STRICT_SSL=true
-RUN npm_config_strict_ssl=$NPM_CONFIG_STRICT_SSL npm install --no-audit --no-fund --legacy-peer-deps
+RUN npm_config_strict_ssl=$NPM_CONFIG_STRICT_SSL npm ci --include=dev --no-audit --no-fund --legacy-peer-deps
 RUN sha256sum package-lock.json | cut -d ' ' -f 1 > node_modules/.mhc-package-lock-hash
 COPY . .
 EXPOSE 5173
@@ -24,7 +24,7 @@ ENV NODE_ENV=production
 
 COPY package.json package-lock.json ./
 ARG NPM_CONFIG_STRICT_SSL=true
-RUN npm_config_strict_ssl=$NPM_CONFIG_STRICT_SSL npm install --no-audit --no-fund --legacy-peer-deps
+RUN npm_config_strict_ssl=$NPM_CONFIG_STRICT_SSL npm ci --include=dev --no-audit --no-fund --legacy-peer-deps
 
 COPY . .
 
@@ -43,4 +43,4 @@ RUN npm run build
 
 # The output goes into the `frontend-static` named volume, which the
 # Nginx service mounts at /usr/share/nginx/html. No app server runs.
-CMD ["sh", "-c", "cp -r dist/* /output/ && echo 'frontend bundle copied to /output'"]
+CMD ["sh", "-c", "rm -rf /output/* && cp -r dist/. /output/ && echo 'frontend bundle copied to /output'"]

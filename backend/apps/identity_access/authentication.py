@@ -182,9 +182,18 @@ class KeycloakJWTAuthentication(authentication.BaseAuthentication):
             audience: object = settings.KEYCLOAK["AUDIENCE"]
             if not isinstance(audience, str):
                 raise TypeError("KEYCLOAK audience must be a string")
-            issuer: object = settings.KEYCLOAK["ISSUER"]
-            if not isinstance(issuer, str):
-                raise TypeError("KEYCLOAK issuer must be a string")
+            issuer: object = settings.KEYCLOAK.get(
+                "ISSUERS", (settings.KEYCLOAK["ISSUER"],)
+            )
+            if not (
+                isinstance(issuer, str | tuple | list)
+                and issuer
+                and (
+                    isinstance(issuer, str)
+                    or all(isinstance(value, str) and value for value in issuer)
+                )
+            ):
+                raise TypeError("KEYCLOAK issuers must be one or more non-empty strings")
             payload = _verify_jwt(token, public_key, audience=audience, issuer=issuer)
         except Exception as exc:
             raise exceptions.AuthenticationFailed(f"Token verification failed: {exc}") from exc
@@ -381,7 +390,7 @@ def _verify_jwt(
     token: str,
     public_key: RSAPublicKey,
     audience: str,
-    issuer: str,
+    issuer: str | tuple[str, ...] | list[str],
 ) -> JSONObject:
     import jwt
 

@@ -1,4 +1,5 @@
 """Meta webhook signature and delivery-age verification."""
+
 from __future__ import annotations
 
 import hashlib
@@ -24,11 +25,14 @@ def authenticate_meta_request(
     if not secret:
         return MetaWebhookAuthentication(authenticated=False, configured=False)
     supplied = request.META.get("HTTP_X_HUB_SIGNATURE_256", "")
-    expected = "sha256=" + hmac.new(
-        secret.encode(),
-        raw_body,
-        hashlib.sha256,
-    ).hexdigest()
+    expected = (
+        "sha256="
+        + hmac.new(
+            secret.encode(),
+            raw_body,
+            hashlib.sha256,
+        ).hexdigest()
+    )
     return MetaWebhookAuthentication(
         authenticated=hmac.compare_digest(expected, supplied),
         configured=True,

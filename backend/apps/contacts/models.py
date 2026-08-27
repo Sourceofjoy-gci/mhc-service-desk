@@ -4,6 +4,7 @@ Stores identity data captured from any intake channel. Sensitive identifiers
 are masked at the API boundary; raw values are restricted to authorised roles
 (PRD §23.1).
 """
+
 from __future__ import annotations
 
 import uuid

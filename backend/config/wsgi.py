@@ -1,4 +1,5 @@
 """WSGI entrypoint for the MHC e-Ticketing backend."""
+
 import os
 
 from django.core.wsgi import get_wsgi_application

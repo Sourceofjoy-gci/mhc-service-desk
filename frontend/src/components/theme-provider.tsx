@@ -33,7 +33,11 @@ function applyTheme(resolved: "light" | "dark") {
 export function ThemeProvider({ children }: { children: React.ReactNode }) {
   const [theme, setThemeState] = useState<Theme>(() => {
     if (typeof window === "undefined") return "light";
-    return (localStorage.getItem(STORAGE_KEY) as Theme) ?? "light";
+    // "system" — not "light" — is the no-preference default, because that is
+    // what main.tsx already paints before React mounts. Defaulting to "light"
+    // here made the provider strip the pre-painted .dark class on every load,
+    // flashing the page from dark to light.
+    return (localStorage.getItem(STORAGE_KEY) as Theme) ?? "system";
   });
   const [systemTheme, setSystemTheme] = useState<"light" | "dark">(getSystemTheme);
 

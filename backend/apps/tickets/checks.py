@@ -24,9 +24,7 @@ def check_ticket_reference_prefixes(
     valid_prefixes: list[str] = []
     for setting_key, error_id in configured_prefixes:
         try:
-            valid_prefixes.append(
-                validate_ticket_prefix(settings.APP_CONFIG.get(setting_key))
-            )
+            valid_prefixes.append(validate_ticket_prefix(settings.APP_CONFIG.get(setting_key)))
         except ValueError:
             errors.append(
                 checks.Error(

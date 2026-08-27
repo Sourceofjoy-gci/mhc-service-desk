@@ -5,6 +5,7 @@ Exposes two endpoints:
 * ``/api/v1/health`` — public liveness + readiness with dependency checks
 * ``/api/v1/health/live`` — minimal liveness for k8s-style probes
 """
+
 from __future__ import annotations
 
 import socket
@@ -45,6 +46,7 @@ def _check_redis() -> tuple[bool, str | None]:
 def _check_minio() -> tuple[bool, str | None]:
     """Best-effort TCP check to MinIO. Auth is exercised separately when needed."""
     from urllib.parse import urlparse
+
     try:
         url = urlparse(settings.AWS_S3_ENDPOINT_URL)
         host = url.hostname or "minio"
@@ -63,6 +65,7 @@ def _check_keycloak() -> tuple[bool, str | None]:
     running and returns 200 with the realm metadata.
     """
     import requests
+
     try:
         r = requests.get(
             f"{settings.KEYCLOAK['BASE_URL']}/realms/{settings.KEYCLOAK['REALM']}",

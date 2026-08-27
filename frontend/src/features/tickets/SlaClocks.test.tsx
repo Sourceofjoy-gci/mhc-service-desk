@@ -7,6 +7,35 @@ import { SlaClocks } from "./SlaClocks";
 type Clocks = TicketDetail["sla_clocks"];
 
 describe("server-provided SLA clocks", () => {
+  it("renders a compact resolution target for the operations rail", () => {
+    const clocks: Clocks = {
+      first_response: {
+        state: "met",
+        due_at: "2026-07-28T10:30:00Z",
+        remaining_seconds: 0,
+        overdue_seconds: 0,
+      },
+      resolution: {
+        state: "running",
+        due_at: "2026-08-26T15:00:00Z",
+        remaining_seconds: 115200,
+        overdue_seconds: 0,
+      },
+    };
+
+    renderWithProviders(<SlaClocks clocks={clocks} compact />);
+
+    expect(screen.getByRole("heading", { name: "SLA" })).toBeVisible();
+    expect(screen.getByText("Resolution target")).toBeVisible();
+    expect(screen.getByRole("list")).toHaveClass("divide-y-0");
+    expect(
+      screen.queryByRole("listitem", { name: "First response SLA: met" }),
+    ).not.toBeInTheDocument();
+    expect(
+      screen.getByRole("listitem", { name: "Resolution SLA: running" }),
+    ).toBeVisible();
+  });
+
   it("renders labels, semantic states, due timestamps, and server durations", () => {
     const clocks: Clocks = {
       first_response: {

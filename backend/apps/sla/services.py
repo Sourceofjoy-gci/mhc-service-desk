@@ -3,6 +3,7 @@
 Why: SLA deadlines must survive queue restarts (PRD §25.3). Storing them
 in PostgreSQL and evaluating periodically keeps the system honest.
 """
+
 from __future__ import annotations
 
 import logging
@@ -24,6 +25,7 @@ logger = logging.getLogger(__name__)
 # -----------------------------------------------------------------------------
 # Business calendar math
 # -----------------------------------------------------------------------------
+
 
 def _normalized_weekday_intervals(
     calendar: BusinessCalendar,
@@ -55,6 +57,7 @@ def _normalized_weekday_intervals(
         previous_start, previous_end = merged[-1]
         merged[-1] = (previous_start, max(previous_end, end))
     return merged
+
 
 def _timedelta_microseconds(value: timedelta) -> int:
     return (value.days * 24 * 60 * 60 + value.seconds) * 1_000_000 + value.microseconds
@@ -108,9 +111,7 @@ def _add_business_microseconds(
             if available <= 0:
                 continue
             consume = min(available, remaining)
-            cursor = (cursor_utc + timedelta(microseconds=consume)).astimezone(
-                calendar_timezone
-            )
+            cursor = (cursor_utc + timedelta(microseconds=consume)).astimezone(calendar_timezone)
             remaining -= consume
             if remaining <= 0:
                 return cursor.astimezone(output_timezone)
@@ -193,6 +194,7 @@ def business_seconds_between(
 # Instance creation
 # -----------------------------------------------------------------------------
 
+
 def instantiate_slas(*, ticket: Ticket, policy: SlaPolicy) -> list[SlaInstance]:
     """Create one SlaInstance per target for a freshly created ticket."""
     calendar = policy.calendar
@@ -209,9 +211,7 @@ def instantiate_slas(*, ticket: Ticket, policy: SlaPolicy) -> list[SlaInstance]:
     for kind, minutes in targets:
         due = add_business_seconds(start, minutes * 60, calendar)
         instances.append(
-            SlaInstance.objects.create(
-                ticket=ticket, policy=policy, kind=kind, due_at=due
-            )
+            SlaInstance.objects.create(ticket=ticket, policy=policy, kind=kind, due_at=due)
         )
     return instances
 
@@ -272,11 +272,7 @@ def _recover_legacy_remaining_business_seconds(instance: SlaInstance) -> int:
         return 0
     return max(
         0,
-        int(
-            (
-                instance.due_at.astimezone(UTC) - paused_at.astimezone(UTC)
-            ).total_seconds()
-        ),
+        int((instance.due_at.astimezone(UTC) - paused_at.astimezone(UTC)).total_seconds()),
     )
 
 
@@ -313,9 +309,7 @@ def pause_sla(
         instance.remaining_business_microseconds = remaining_microseconds
         instance.remaining_business_seconds = remaining_microseconds // 1_000_000
     elif instance.remaining_business_seconds is None:
-        instance.remaining_business_seconds = (
-            _recover_legacy_remaining_business_seconds(instance)
-        )
+        instance.remaining_business_seconds = _recover_legacy_remaining_business_seconds(instance)
     instance.state = reason
     instance.save(
         update_fields=[
@@ -354,12 +348,8 @@ def resume_sla(*, instance: SlaInstance, reason: str, actor_subject: str = "") -
             instance.policy.calendar,
         )
     instance.state = "active"
-    instance.remaining_business_seconds = (
-        0 if remaining_microseconds == 0 else None
-    )
-    instance.remaining_business_microseconds = (
-        0 if remaining_microseconds == 0 else None
-    )
+    instance.remaining_business_seconds = 0 if remaining_microseconds == 0 else None
+    instance.remaining_business_microseconds = 0 if remaining_microseconds == 0 else None
     instance.save(
         update_fields=[
             "state",
@@ -398,14 +388,8 @@ def complete_sla(*, ticket: Ticket, kind: str, at: datetime) -> SlaInstance | No
         return instance
     overdue = (
         instance.state == SlaInstance.State.ACTIVE
-        and (
-            at >= instance.due_at
-            or instance.remaining_business_seconds == 0
-        )
-    ) or (
-        instance.state in PAUSED_SLA_STATES
-        and instance.remaining_business_seconds in {None, 0}
-    )
+        and (at >= instance.due_at or instance.remaining_business_seconds == 0)
+    ) or (instance.state in PAUSED_SLA_STATES and instance.remaining_business_seconds in {None, 0})
     instance.state = SlaInstance.State.BREACHED if overdue else SlaInstance.State.MET
     instance.completed_at = at
     update_fields = ["state", "completed_at", "updated_at"]
@@ -427,11 +411,15 @@ def restart_resolution_sla(*, ticket: Ticket, at: datetime) -> SlaInstance | Non
         .first()
     )
     if instance is None:
-        policy = SlaPolicy.objects.select_related("calendar").filter(
-            domain=ticket.domain,
-            priority=ticket.priority,
-            is_active=True,
-        ).first()
+        policy = (
+            SlaPolicy.objects.select_related("calendar")
+            .filter(
+                domain=ticket.domain,
+                priority=ticket.priority,
+                is_active=True,
+            )
+            .first()
+        )
         if policy is None:
             return None
         instance = SlaInstance(ticket=ticket, policy=policy, kind="resolution")
@@ -500,14 +488,18 @@ def sync_slas_for_transition(
                 reason=target_pause_state,
                 actor_subject=actor_subject,
             )
-        for instance in SlaInstance.objects.select_for_update().filter(
-            ticket=ticket,
-            state__in=(
-                SlaInstance.State.PAUSED_REQUESTER,
-                SlaInstance.State.PAUSED_INTERNAL,
-                SlaInstance.State.PAUSED_IT,
-            ),
-        ).exclude(state=target_pause_state):
+        for instance in (
+            SlaInstance.objects.select_for_update()
+            .filter(
+                ticket=ticket,
+                state__in=(
+                    SlaInstance.State.PAUSED_REQUESTER,
+                    SlaInstance.State.PAUSED_INTERNAL,
+                    SlaInstance.State.PAUSED_IT,
+                ),
+            )
+            .exclude(state=target_pause_state)
+        ):
             pause_sla(
                 instance=instance,
                 reason=target_pause_state,

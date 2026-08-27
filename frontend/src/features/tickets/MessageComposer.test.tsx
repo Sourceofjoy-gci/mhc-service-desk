@@ -38,12 +38,35 @@ beforeEach(() => {
 });
 
 describe("reply and internal-note composition", () => {
+  it("renders the compact activity-card composer without a duplicate heading", () => {
+    renderWithProviders(
+      <MessageComposer
+        ticketNumber="MHC-2026-000001"
+        onCreated={vi.fn()}
+        compact
+      />,
+    );
+
+    expect(
+      screen.getByRole("region", { name: "Add to activity" }),
+    ).toBeVisible();
+    expect(
+      screen.queryByRole("heading", { name: "Add to activity" }),
+    ).not.toBeInTheDocument();
+    expect(
+      screen.getByRole("textbox", { name: "Reply message" }),
+    ).toHaveAttribute("placeholder", "Type your reply…");
+  });
+
   it("keeps distinct drafts and prevents either empty body from submitting", async () => {
     const user = userEvent.setup();
     renderWithProviders(
       <MessageComposer ticketNumber="MHC-2026-000001" onCreated={vi.fn()} />,
     );
 
+    expect(
+      screen.getByRole("tablist", { name: "Message type" }).parentElement,
+    ).toHaveClass("flex-col");
     expect(screen.getByRole("button", { name: "Send reply" })).toBeDisabled();
     expect(
       screen.getByRole("textbox", { name: "Reply message" }),

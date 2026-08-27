@@ -1,4 +1,5 @@
 """Models for the Administration and Configuration app."""
+
 from __future__ import annotations
 
 import uuid
@@ -44,4 +45,3 @@ class DisposalEvent(models.Model):
 
     def __str__(self) -> str:
         return f"disposal-event:{self.pk}"
-

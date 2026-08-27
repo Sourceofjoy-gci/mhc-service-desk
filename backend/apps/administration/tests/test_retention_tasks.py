@@ -36,9 +36,7 @@ def test_retention_side_effect_worker_has_stable_default_queue_registration():
 
 
 @pytest.mark.django_db(transaction=True)
-def test_cleanup_worker_deletes_exact_version_and_publishes_after_completion(
-    monkeypatch, tmp_path
-):
+def test_cleanup_worker_deletes_exact_version_and_publishes_after_completion(monkeypatch, tmp_path):
     from apps.administration.tasks import process_retention_side_effects
     from apps.files.models import ObjectDeleteJob
 
@@ -110,9 +108,7 @@ def test_cleanup_worker_keeps_transient_failure_retriable(monkeypatch, tmp_path)
 
 
 @pytest.mark.django_db(transaction=True)
-def test_cleanup_worker_treats_missing_exact_version_as_idempotent_success(
-    monkeypatch, tmp_path
-):
+def test_cleanup_worker_treats_missing_exact_version_as_idempotent_success(monkeypatch, tmp_path):
     from apps.administration.tasks import process_retention_side_effects
     from apps.files.models import ObjectDeleteJob
 

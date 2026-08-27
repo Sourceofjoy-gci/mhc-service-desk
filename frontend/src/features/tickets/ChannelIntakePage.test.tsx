@@ -24,6 +24,59 @@ beforeEach(() => {
 });
 
 describe("staff-assisted intake form", () => {
+  it("offers every supported Master's Office location and submits its code", async () => {
+    const user = userEvent.setup();
+    harness.publicIntake.mockResolvedValue({
+      ticket_number: "O00123",
+      domain: "operational",
+      title: "Hours",
+      priority: "P3",
+      message: "Your request has been received.",
+    });
+    renderWithProviders(
+      <ChannelIntakePage
+        channel="call"
+        title="Call-centre capture"
+        description="Capture a call-centre enquiry on behalf of a requester."
+      />,
+      { route: "/intake/call" },
+    );
+
+    await user.click(screen.getByLabelText("Office"));
+
+    expect(
+      screen.getAllByRole("option").map((option) => option.textContent),
+    ).toEqual([
+      "Mbabane (Main)",
+      "Manzini",
+      "Lobamba",
+      "Hlathikhulu",
+      "Nhlangano",
+      "Siteki",
+      "Siphofaneni",
+      "Simunye",
+      "Pigg's Peak",
+    ]);
+
+    await user.click(screen.getByRole("option", { name: "Pigg's Peak" }));
+    await user.type(screen.getByRole("textbox", { name: /title/i }), "Hours");
+    await user.type(
+      screen.getByRole("textbox", { name: /description/i }),
+      "Confirm office hours",
+    );
+    await user.type(
+      screen.getByRole("textbox", { name: /requester name/i }),
+      "Lindiwe Dlamini",
+    );
+    await user.click(screen.getByRole("button", { name: "Capture ticket" }));
+
+    await waitFor(() =>
+      expect(harness.publicIntake).toHaveBeenCalledWith(
+        expect.objectContaining({ office_code: "MHC-PIG" }),
+      ),
+    );
+  });
+
   it("shows, copies, and links the immutable reference after capture", async () => {
     const user = userEvent.setup();
     const writeText = vi.fn().mockResolvedValue(undefined);
@@ -49,7 +102,7 @@ describe("staff-assisted intake form", () => {
 
     await user.type(screen.getByRole("textbox", { name: /title/i }), "Hours");
     await user.type(
-      screen.getByRole("textbox", { name: /notes/i }),
+      screen.getByRole("textbox", { name: /description/i }),
       "Confirm office hours",
     );
     await user.type(
@@ -94,7 +147,7 @@ describe("staff-assisted intake form", () => {
     await user.click(screen.getByRole("button", { name: "Capture ticket" }));
 
     expect(screen.getByText("Enter a short title.")).toBeVisible();
-    expect(screen.getByText("Add notes about the request.")).toBeVisible();
+    expect(screen.getByText("Describe what the requester needs.")).toBeVisible();
     expect(screen.getByText("Enter the requester name.")).toBeVisible();
     expect(screen.getByRole("textbox", { name: /title/i })).toHaveAttribute(
       "aria-invalid",
@@ -116,7 +169,7 @@ describe("staff-assisted intake form", () => {
     );
 
     const title = screen.getByRole("textbox", { name: /title/i });
-    const notes = screen.getByRole("textbox", { name: /notes/i });
+    const description = screen.getByRole("textbox", { name: /description/i });
     const requesterName = screen.getByRole("textbox", {
       name: /requester name/i,
     });
@@ -128,13 +181,13 @@ describe("staff-assisted intake form", () => {
     expect(submitButton.closest("form")).toHaveAttribute("novalidate");
 
     await user.type(title, "   ");
-    await user.type(notes, "   ");
+    await user.type(description, "   ");
     await user.type(requesterName, "   ");
     await user.type(email, "not-an-email");
     await user.click(submitButton);
 
     expect(screen.getByText("Enter a short title.")).toBeVisible();
-    expect(screen.getByText("Add notes about the request.")).toBeVisible();
+    expect(screen.getByText("Describe what the requester needs.")).toBeVisible();
     expect(screen.getByText("Enter the requester name.")).toBeVisible();
     expect(screen.getByText("Enter a valid email address.")).toBeVisible();
     expect(email).toHaveAttribute(
@@ -164,7 +217,7 @@ describe("staff-assisted intake form", () => {
 
     await user.type(screen.getByRole("textbox", { name: /title/i }), "Hours");
     await user.type(
-      screen.getByRole("textbox", { name: /notes/i }),
+      screen.getByRole("textbox", { name: /description/i }),
       "Confirm office hours",
     );
     await user.type(

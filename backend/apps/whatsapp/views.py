@@ -1,4 +1,5 @@
 """WhatsApp channel HTTP endpoints."""
+
 from __future__ import annotations
 
 import hmac
@@ -172,10 +173,7 @@ def _meta_events(parsed: dict[str, object]) -> tuple[list[_MetaEvent], str | Non
         if not isinstance(changes, list) or not changes:
             return [], "invalid_payload"
         for change in changes:
-            if (
-                not isinstance(change, dict)
-                or change.get("field") != "messages"
-            ):
+            if not isinstance(change, dict) or change.get("field") != "messages":
                 return [], "invalid_payload"
             value = change.get("value")
             if not isinstance(value, dict):
@@ -276,9 +274,7 @@ def _record_meta_delivery_status(event: _MetaDeliveryStatus) -> dict[str, str]:
                 "external_message_id": event.external_message_id,
             }
         raw_payload = (
-            channel_message.raw_payload
-            if isinstance(channel_message.raw_payload, dict)
-            else {}
+            channel_message.raw_payload if isinstance(channel_message.raw_payload, dict) else {}
         )
         prior_timestamp = raw_payload.get("status_timestamp", 0)
         try:
@@ -387,9 +383,7 @@ def _mark_discovery_attempt(
     with transaction.atomic():
         locked_attempt = WhatsappMessage.objects.select_for_update().get(pk=attempt.pk)
         raw_payload = (
-            locked_attempt.raw_payload
-            if isinstance(locked_attempt.raw_payload, dict)
-            else {}
+            locked_attempt.raw_payload if isinstance(locked_attempt.raw_payload, dict) else {}
         )
         locked_attempt.delivery_status = "pending" if retryable else "failed"
         locked_attempt.raw_payload = {
@@ -433,9 +427,7 @@ def _persist_pending_outbound(
             actor=actor,
             request=request,
         )
-        channel_message = WhatsappMessage.objects.select_for_update().get(
-            pk=channel_message.pk
-        )
+        channel_message = WhatsappMessage.objects.select_for_update().get(pk=channel_message.pk)
         channel_message.body = rendered
         channel_message.raw_payload = {
             "phase": "ready_to_send",
@@ -465,26 +457,16 @@ def _finalize_outbound(
         external_message_id = ""
 
     with transaction.atomic():
-        locked_channel = WhatsappMessage.objects.select_for_update().get(
-            pk=channel_message.pk
-        )
-        locked_ticket_message = TicketMessage.objects.select_for_update().get(
-            pk=ticket_message.pk
-        )
-        locked_ticket = Ticket.objects.select_for_update().get(
-            pk=locked_ticket_message.ticket_id
-        )
+        locked_channel = WhatsappMessage.objects.select_for_update().get(pk=channel_message.pk)
+        locked_ticket_message = TicketMessage.objects.select_for_update().get(pk=ticket_message.pk)
+        locked_ticket = Ticket.objects.select_for_update().get(pk=locked_ticket_message.ticket_id)
         previous_status = locked_channel.delivery_status
         locked_channel.delivery_status = delivery_status
         locked_channel.external_message_id = external_message_id
-        locked_channel.save(
-            update_fields=["delivery_status", "external_message_id"]
-        )
+        locked_channel.save(update_fields=["delivery_status", "external_message_id"])
         locked_ticket_message.delivery_status = delivery_status
         locked_ticket_message.external_message_id = external_message_id
-        locked_ticket_message.save(
-            update_fields=["delivery_status", "external_message_id"]
-        )
+        locked_ticket_message.save(update_fields=["delivery_status", "external_message_id"])
         record_ticket_event(
             ticket=locked_ticket,
             actor_subject="whatsapp:provider",
@@ -522,9 +504,8 @@ def inbound_webhook(request: Request) -> Response | HttpResponse:
                 {"status": "unavailable"},
                 status=status.HTTP_503_SERVICE_UNAVAILABLE,
             )
-        if (
-            request.query_params.get("hub.mode") != "subscribe"
-            or not hmac.compare_digest(expected, supplied)
+        if request.query_params.get("hub.mode") != "subscribe" or not hmac.compare_digest(
+            expected, supplied
         ):
             return Response(
                 {"status": "forbidden"},
@@ -601,9 +582,7 @@ def inbound_webhook(request: Request) -> Response | HttpResponse:
         response_body = {"status": "processed", "results": results}
     return Response(
         response_body,
-        status=(
-            status.HTTP_201_CREATED if any_created else status.HTTP_200_OK
-        ),
+        status=(status.HTTP_201_CREATED if any_created else status.HTTP_200_OK),
     )
 
 
@@ -643,9 +622,7 @@ def list_templates(request: Request) -> Response:
                 else status.HTTP_502_BAD_GATEWAY
             ),
         )
-    return Response(
-        {"templates": templates}
-    )
+    return Response({"templates": templates})
 
 
 @api_view(["POST"])
@@ -777,9 +754,7 @@ def send_text(request: Request) -> Response:
             status=status.HTTP_409_CONFLICT,
         )
     response_status = (
-        status.HTTP_200_OK
-        if delivery_status == "sent"
-        else status.HTTP_502_BAD_GATEWAY
+        status.HTTP_200_OK if delivery_status == "sent" else status.HTTP_502_BAD_GATEWAY
     )
     return Response(
         {

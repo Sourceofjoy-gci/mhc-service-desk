@@ -45,15 +45,19 @@ export default function () {
   // 1. List tickets (the most common agent action)
   const listRes = http.get(`${BASE_URL}/api/v1/tickets/`, { headers });
   listLatency.add(listRes.timings.duration);
+  const listBody = listRes.json();
+  const tickets = Array.isArray(listBody)
+    ? listBody
+    : (listBody && Array.isArray(listBody.results) ? listBody.results : null);
   const ok = check(listRes, {
     'list 200': r => r.status === 200,
-    'list shape': r => Array.isArray(r.json()),
+    'list shape': () => tickets !== null,
   });
   if (!ok) errorRate.add(1);
 
   // 2. Pull a single ticket (if any)
-  if (Array.isArray(listRes.json()) && listRes.json().length > 0) {
-    const id = listRes.json()[0].number;
+  if (tickets && tickets.length > 0) {
+    const id = tickets[0].number;
     const t0 = Date.now();
     const detailRes = http.get(`${BASE_URL}/api/v1/tickets/${id}/`, { headers });
     detailLatency.add(detailRes.timings.duration);

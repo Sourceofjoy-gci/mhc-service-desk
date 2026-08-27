@@ -57,6 +57,23 @@ def test_service_desk_group_and_realm_role_exist():
     assert "agent-servicedesk" in {r["name"] for r in realm["roles"]["realm"]}
 
 
+def test_frontend_client_allows_local_lan_and_public_origins():
+    """Every supported entry point must survive the OIDC redirect round trip."""
+    realm = _realm()
+    frontend_client = next(c for c in realm["clients"] if c["clientId"] == "mhc-frontend")
+
+    assert set(frontend_client["redirectUris"]) == {
+        "${LOCAL_BASE_URL}/*",
+        "${LAN_BASE_URL}/*",
+        "${PUBLIC_BASE_URL}/*",
+    }
+    assert set(frontend_client["webOrigins"]) == {
+        "${LOCAL_BASE_URL}",
+        "${LAN_BASE_URL}",
+        "${PUBLIC_BASE_URL}",
+    }
+
+
 def _user_profile() -> dict:
     """Parse the declarative User Profile out of the realm's components block.
 

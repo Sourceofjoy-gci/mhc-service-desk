@@ -1,4 +1,5 @@
 """Models for the Integrations app."""
+
 from __future__ import annotations
 
 import uuid
@@ -18,4 +19,3 @@ class IntegrationEvent(models.Model):
 
     def __str__(self) -> str:
         return f"integration-event:{self.pk}"
-

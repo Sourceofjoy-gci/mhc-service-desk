@@ -1,4 +1,5 @@
 """Security regressions for inbound email HTML sanitisation."""
+
 from __future__ import annotations
 
 import pytest

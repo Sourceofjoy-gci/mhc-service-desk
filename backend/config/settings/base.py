@@ -139,6 +139,22 @@ KEYCLOAK = {
         default=f"{env('KEYCLOAK_PUBLIC_URL', default='http://localhost:8080').rstrip('/')}"
         f"/realms/{env('KEYCLOAK_REALM', default='mhc')}",
     ),
+    # Development can expose the same realm through a finite set of trusted
+    # frontend origins (localhost, LAN, and an explicitly configured public
+    # origin). Signature and audience checks still apply; arbitrary issuers are
+    # never accepted.
+    "ISSUERS": tuple(
+        dict.fromkeys(
+            [
+                env(
+                    "KEYCLOAK_ISSUER",
+                    default=f"{env('KEYCLOAK_PUBLIC_URL', default='http://localhost:8080').rstrip('/')}"
+                    f"/realms/{env('KEYCLOAK_REALM', default='mhc')}",
+                ),
+                *env.list("KEYCLOAK_ALLOWED_ISSUERS", default=[]),
+            ]
+        )
+    ),
     "CLIENT_ID": env("KEYCLOAK_CLIENT_ID", default="mhc-frontend"),
     "CLIENT_SECRET": env("KEYCLOAK_CLIENT_SECRET", default=""),
     "AUDIENCE": env("KEYCLOAK_CLIENT_ID_BACKEND", default="mhc-backend"),

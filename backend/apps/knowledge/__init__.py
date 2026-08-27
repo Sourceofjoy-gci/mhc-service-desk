@@ -3,4 +3,5 @@
 Articles are versioned, owned, and reviewed. They can be public (on the
 requester portal), internal-operational, internal-IT, or restricted.
 """
+
 default_app_config = "apps.knowledge.apps.KnowledgeConfig"

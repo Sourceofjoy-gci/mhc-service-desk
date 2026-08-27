@@ -10,6 +10,7 @@ in-process stub that:
 The shape of the response mirrors what the real adapter will return so
 the call site doesn't have to change when production goes live.
 """
+
 from __future__ import annotations
 
 from rest_framework.decorators import api_view, permission_classes
@@ -54,11 +55,15 @@ def validate_matter(request: Request, ticket_number: str) -> Response:
             detail="Authentication credentials were not provided.",
             code="not_authenticated",
         )
-    ticket = scope_ticket_queryset(
-        request.user,
-        Ticket.objects.all(),
-        request=request,
-    ).filter(number=ticket_number).first()
+    ticket = (
+        scope_ticket_queryset(
+            request.user,
+            Ticket.objects.all(),
+            request=request,
+        )
+        .filter(number=ticket_number)
+        .first()
+    )
     if ticket is None:
         return Response({"detail": "ticket not found"}, status=404)
     ref = ticket.matter_reference
@@ -66,27 +71,31 @@ def validate_matter(request: Request, ticket_number: str) -> Response:
         return Response({"status": "no_matter_reference", "ticket": ticket_number})
     summary = _FAKE_ESTATES.get(ref)
     if not summary:
-        return Response({
-            "status": "not_found",
-            "reference": ref,
-            "ticket": ticket_number,
-        })
+        return Response(
+            {
+                "status": "not_found",
+                "reference": ref,
+                "ticket": ticket_number,
+            }
+        )
     OutboxEvent.objects.create(
         aggregate="ticket",
         aggregate_id=str(ticket.id),
         event_type="eestate.validated",
         payload={"matter_number": ref, "by": request.user.keycloak_subject},
     )
-    return Response({
-        "status": "found",
-        "ticket": ticket_number,
-        "reference": ref,
-        "summary": {
-            "matter_number": summary["matter_number"],
-            "deceased_initial": " ".join(p[0] + "." for p in summary["deceased"].split()[1:]),
-            "estate_type": summary["estate_type"],
-            "status": summary["status"],
-            "office": summary["office"],
-            "updated_at": summary["updated_at"],
-        },
-    })
+    return Response(
+        {
+            "status": "found",
+            "ticket": ticket_number,
+            "reference": ref,
+            "summary": {
+                "matter_number": summary["matter_number"],
+                "deceased_initial": " ".join(p[0] + "." for p in summary["deceased"].split()[1:]),
+                "estate_type": summary["estate_type"],
+                "status": summary["status"],
+                "office": summary["office"],
+                "updated_at": summary["updated_at"],
+            },
+        }
+    )

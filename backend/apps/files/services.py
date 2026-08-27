@@ -1,4 +1,5 @@
 """File service — ClamAV scan + MinIO upload + signed URL."""
+
 from __future__ import annotations
 
 import logging
@@ -69,9 +70,9 @@ class StoredObject:
     version_id: str
 
 
-def _s3_client() -> _S3Client:
-    """Build a fresh S3 client. The endpoint is the internal MinIO URL."""
-    endpoint = settings.AWS_S3_ENDPOINT_URL
+def _s3_client(*, endpoint_url: str | None = None) -> _S3Client:
+    """Build a fresh S3 client for an internal or browser-reachable endpoint."""
+    endpoint = endpoint_url or settings.AWS_S3_ENDPOINT_URL
     client: _S3Client = boto3.client(
         "s3",
         endpoint_url=endpoint,
@@ -176,7 +177,7 @@ def delete_from_minio(*, stored_object: StoredObject) -> None:
 
 def generate_signed_url(*, key: str, expires: int = 60) -> str:
     bucket = settings.AWS_STORAGE_BUCKET_NAME
-    client = _s3_client()
+    client = _s3_client(endpoint_url=settings.AWS_S3_PUBLIC_URL)
     return client.generate_presigned_url(
         "get_object",
         Params={"Bucket": bucket, "Key": key},

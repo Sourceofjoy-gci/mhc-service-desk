@@ -1,4 +1,5 @@
 """Attachment upload, download (signed URL) and scan."""
+
 from __future__ import annotations
 
 import logging
@@ -84,9 +85,7 @@ def _reload_actor_authority(actor: User) -> User:
     """Reload durable authority so the locked write does not trust stale claims."""
     fresh_actor = User.objects.get(pk=actor.pk)
     durable_groups = [
-        group
-        for group in (fresh_actor.keycloak_groups or [])
-        if isinstance(group, str)
+        group for group in (fresh_actor.keycloak_groups or []) if isinstance(group, str)
     ]
     durable_groups.extend(fresh_actor.groups.values_list("name", flat=True))
     vars(fresh_actor)["_groups"] = durable_groups
@@ -145,8 +144,7 @@ def upload(request: Request, ticket_number: str) -> Response:
         return Response(
             {
                 "results": [
-                    attachment_metadata(attachment)
-                    for attachment in ticket.attachments.all()
+                    attachment_metadata(attachment) for attachment in ticket.attachments.all()
                 ]
             }
         )
@@ -267,21 +265,15 @@ def upload(request: Request, ticket_number: str) -> Response:
             for filename, content_type, data in validated_content:
                 scan_status, signature = scan_with_clamav(data)
                 if scan_status == "infected":
-                    object_key = (
-                        f"quarantine/{locked_ticket.number}/{uuid.uuid4().hex}"
-                    )
+                    object_key = f"quarantine/{locked_ticket.number}/{uuid.uuid4().hex}"
                 else:
-                    object_key = (
-                        f"attachments/{locked_ticket.number}/{uuid.uuid4().hex}"
-                    )
+                    object_key = f"attachments/{locked_ticket.number}/{uuid.uuid4().hex}"
                 prepared.append(
                     _PreparedAttachment(
                         filename=filename,
                         content_type=content_type,
                         data=data,
-                        checksum_sha256=__import__("hashlib")
-                        .sha256(data)
-                        .hexdigest(),
+                        checksum_sha256=__import__("hashlib").sha256(data).hexdigest(),
                         scan_status=scan_status,
                         scan_signature=signature or "",
                         object_key=object_key,
@@ -372,10 +364,12 @@ def download(request: Request, attachment_id: UUID) -> Response:
         user_agent=request.META.get("HTTP_USER_AGENT", ""),
     )
     url = generate_signed_url(key=att.object_key)
-    return Response({
-        "url": url,
-        "filename": att.filename,
-        "size_bytes": att.size_bytes,
-        "content_type": att.content_type,
-        "expires_in": 60,
-    })
+    return Response(
+        {
+            "url": url,
+            "filename": att.filename,
+            "size_bytes": att.size_bytes,
+            "content_type": att.content_type,
+            "expires_in": 60,
+        }
+    )

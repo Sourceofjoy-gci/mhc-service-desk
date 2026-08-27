@@ -1,4 +1,5 @@
 """Durable retention side effects: exact object deletion and certificate export."""
+
 from __future__ import annotations
 
 import logging
@@ -96,9 +97,7 @@ def _process_retention_side_effects() -> dict[str, int]:
     return {"completed": completed, "failed": failed, "published": published}
 
 
-_register_process_retention: Callable[[Callable[[], dict[str, int]]], Task] = (
-    shared_task(name="apps.administration.tasks.process_retention_side_effects")
+_register_process_retention: Callable[[Callable[[], dict[str, int]]], Task] = shared_task(
+    name="apps.administration.tasks.process_retention_side_effects"
 )
-process_retention_side_effects = _register_process_retention(
-    _process_retention_side_effects
-)
+process_retention_side_effects = _register_process_retention(_process_retention_side_effects)

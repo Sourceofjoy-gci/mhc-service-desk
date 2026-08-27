@@ -2,9 +2,9 @@
 # Versions chosen to align with PRD §24.1 and the July 2026 security baseline.
 
 # Web framework + API
-Django==5.2.4
+Django==5.2.17
 djangorestframework==3.15.2
-djangorestframework-simplejwt==5.3.1
+djangorestframework-simplejwt==5.5.1
 django-cors-headers==4.6.0
 django-environ==0.11.2
 
@@ -12,10 +12,9 @@ django-environ==0.11.2
 psycopg[binary]==3.2.3
 
 # Auth (OIDC) + JWT verification
-PyJWT[crypto]==2.9.0
-cryptography==43.0.3
-python-jose[cryptography]==3.3.0
-requests==2.32.3
+PyJWT[crypto]==2.13.0
+cryptography==50.0.0
+requests==2.34.2
 
 # Background jobs
 celery==5.4.0
@@ -38,17 +37,17 @@ python-slugify==8.0.4
 phonenumberslite==8.13.52
 email-validator==2.2.0
 bleach==6.4.0
-markdown==3.7
+markdown==3.10.2
 python-magic==0.4.27
 
 # Observability
 structlog==24.4.0
 prometheus-client==0.21.0
 django-prometheus==2.3.1
-opentelemetry-api==1.27.0
-opentelemetry-sdk==1.27.0
-opentelemetry-instrumentation-django==0.48b0
-opentelemetry-instrumentation-psycopg==0.48b0
-opentelemetry-instrumentation-celery==0.48b0
-opentelemetry-instrumentation-redis==0.48b0
-opentelemetry-exporter-otlp==1.27.0
+opentelemetry-api==1.43.0
+opentelemetry-sdk==1.43.0
+opentelemetry-instrumentation-django==0.64b0
+opentelemetry-instrumentation-psycopg==0.64b0
+opentelemetry-instrumentation-celery==0.64b0
+opentelemetry-instrumentation-redis==0.64b0
+opentelemetry-exporter-otlp==1.43.0

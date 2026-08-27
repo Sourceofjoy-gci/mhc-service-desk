@@ -1,4 +1,5 @@
 """URL configuration for the sla app."""
+
 from django.urls import path
 
 from . import views

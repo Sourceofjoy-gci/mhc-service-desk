@@ -3,6 +3,7 @@
 All ticket state changes go through these service functions so that
 invariants are enforced inside a single transaction (PRD §25.3).
 """
+
 from __future__ import annotations
 
 import logging
@@ -62,15 +63,14 @@ from .workflow import available_transitions
 
 logger = logging.getLogger(__name__)
 
-type JSONValue = (
-    None | bool | int | float | str | list[JSONValue] | dict[str, JSONValue]
-)
+type JSONValue = None | bool | int | float | str | list[JSONValue] | dict[str, JSONValue]
 type WorkStateValue = str | datetime | UUID | None
 
 
 # -----------------------------------------------------------------------------
 # Creation
 # -----------------------------------------------------------------------------
+
 
 @transaction.atomic
 def create_ticket(
@@ -170,6 +170,7 @@ def create_ticket(
 # -----------------------------------------------------------------------------
 # Transitions
 # -----------------------------------------------------------------------------
+
 
 class TransitionError(Exception):
     """Raised when a requested transition is invalid."""
@@ -412,16 +413,13 @@ def transition_ticket(
     """Atomically validate and apply an optimistic workflow transition."""
     authority = snapshot or get_authority_snapshot(actor, request=request)
     locked = (
-        Ticket.objects.select_for_update(of=("self",))
-        .select_related("status")
-        .get(id=ticket_id)
+        Ticket.objects.select_for_update(of=("self",)).select_related("status").get(id=ticket_id)
     )
     if expected_updated_at != locked.updated_at:
         raise TicketConflictError(locked.updated_at)
 
     is_operational_escalation = (
-        locked.domain == Ticket.Domain.OPERATIONAL
-        and to_status_code == "escalated"
+        locked.domain == Ticket.Domain.OPERATIONAL and to_status_code == "escalated"
     )
     additional_user_ids: set[UUID] = set()
     if is_operational_escalation:
@@ -429,35 +427,39 @@ def transition_ticket(
             additional_user_ids.add(locked.assignee_id)
         if supervisor_id is not None:
             additional_user_ids.add(supervisor_id)
-    locked_authority, locked_authorities = (
-        _lock_and_revalidate_mutation_authorities(
-            ticket=locked,
-            actor=actor,
-            request=request,
-            initial_snapshot=authority,
-            additional_user_ids=additional_user_ids,
-            scope_failure_is_permission=True,
-        )
+    locked_authority, locked_authorities = _lock_and_revalidate_mutation_authorities(
+        ticket=locked,
+        actor=actor,
+        request=request,
+        initial_snapshot=authority,
+        additional_user_ids=additional_user_ids,
+        scope_failure_is_permission=True,
     )
     locked_actor = locked_authority.actor
     locked_snapshot = locked_authority.snapshot
 
-    workflow_transition = Transition.objects.select_related("to_status").filter(
-        domain=locked.domain,
-        from_status=locked.status,
-        to_status__code=to_status_code,
-        is_active=True,
-    ).first()
+    workflow_transition = (
+        Transition.objects.select_related("to_status")
+        .filter(
+            domain=locked.domain,
+            from_status=locked.status,
+            to_status__code=to_status_code,
+            is_active=True,
+        )
+        .first()
+    )
     if workflow_transition is None:
         raise TransitionError
-    if not available_transitions(
-        locked,
-        locked_actor,
-        request=request,
-        snapshot=locked_snapshot,
-    ).filter(
-        id=workflow_transition.id
-    ).exists():
+    if (
+        not available_transitions(
+            locked,
+            locked_actor,
+            request=request,
+            snapshot=locked_snapshot,
+        )
+        .filter(id=workflow_transition.id)
+        .exists()
+    ):
         raise TicketPermissionError
 
     supplied_fields = {
@@ -477,9 +479,7 @@ def transition_ticket(
         if supervisor_id is None:
             missing["supervisor_id"] = ["Select an escalation supervisor."]
     elif supervisor_id is not None:
-        missing["supervisor_id"] = [
-            "This field is only valid when escalating."
-        ]
+        missing["supervisor_id"] = ["This field is only valid when escalating."]
     if missing:
         raise TransitionError(missing)
 
@@ -527,9 +527,7 @@ def transition_ticket(
                 "resolved_at": locked.resolved_at,
             }
         )
-        update_fields.extend(
-            ["resolution_code", "resolution_summary", "resolved_at"]
-        )
+        update_fields.extend(["resolution_code", "resolution_summary", "resolved_at"])
 
     if target.code == "reopened":
         before.update(
@@ -592,9 +590,7 @@ def transition_ticket(
             action="ticket.assignment.changed",
             before={
                 "assignee": (
-                    str(previous_assignee_id)
-                    if previous_assignee_id is not None
-                    else None
+                    str(previous_assignee_id) if previous_assignee_id is not None else None
                 )
             },
             after={"assignee": str(escalation_plan.supervisor.id)},
@@ -616,9 +612,7 @@ def transition_ticket(
         )
     transition_metadata = {"reason": reason}
     if escalation_plan is not None:
-        transition_metadata["supervisor_id"] = str(
-            escalation_plan.supervisor.id
-        )
+        transition_metadata["supervisor_id"] = str(escalation_plan.supervisor.id)
     record_ticket_event(
         ticket=locked,
         actor_subject=locked_actor.keycloak_subject,
@@ -636,11 +630,7 @@ def transition_ticket(
                 previous_status=status_snapshot(previous),
                 new_status=status_snapshot(target),
                 reason=reason,
-                occurred_at=(
-                    now
-                    if escalation_plan is not None
-                    else history.occurred_at
-                ),
+                occurred_at=(now if escalation_plan is not None else history.occurred_at),
             ),
         ),
     )
@@ -722,9 +712,7 @@ def add_message(
         request=request,
         snapshot=snapshot,
     )
-    event_actor = (
-        locked_actor.keycloak_subject if locked_actor is not None else actor_subject
-    )
+    event_actor = locked_actor.keycloak_subject if locked_actor is not None else actor_subject
     message = TicketMessage.objects.create(
         ticket=locked_ticket,
         direction=direction,
@@ -783,9 +771,7 @@ def add_internal_note(
         request=request,
         snapshot=snapshot,
     )
-    event_actor = (
-        locked_actor.keycloak_subject if locked_actor is not None else author_subject
-    )
+    event_actor = locked_actor.keycloak_subject if locked_actor is not None else author_subject
     note = TicketNote.objects.create(
         ticket=locked_ticket,
         body=body,
@@ -839,6 +825,7 @@ def link_tickets(
 # Requester access
 # -----------------------------------------------------------------------------
 
+
 def issue_requester_token(
     *,
     ticket: Ticket,
@@ -848,6 +835,7 @@ def issue_requester_token(
     and never stored — only its SHA-256 hash lives in the DB."""
     raw = secrets.token_urlsafe(32)
     import hashlib
+
     token_hash = hashlib.sha256(raw.encode()).hexdigest()
     expires_at = timezone.now() + timedelta(minutes=ttl_minutes)
     token = VerificationToken.objects.create(

@@ -52,26 +52,29 @@ mitigations, the key-rotation schedule, and the access-review cadence.
    * `EMAIL_WEBHOOK_SECRET`, `WHATSAPP_APP_SECRET`, and
      `WHATSAPP_VERIFY_TOKEN` — generate independently and store only in the
      secret manager. Never reuse provider access tokens as webhook secrets.
-5. Mount the TLS certificates into `infrastructure/nginx/ssl/`.
+5. Set `DOMAIN` and the separate `FILES_DOMAIN`, then mount a TLS certificate
+   covering both names as `infrastructure/nginx/ssl/fullchain.pem` and
+   `infrastructure/nginx/ssl/privkey.pem`.
 6. Bring the stack up:
    ```bash
    docker compose -f docker-compose.yml -f docker-compose.prod.yml up -d
    ```
-7. Apply migrations and seed:
+7. Apply migrations. Do **not** run development seed commands in production:
    ```bash
-   docker compose exec -T backend python manage.py migrate
-   docker compose exec -T backend python manage.py migrate --check
-   docker compose exec -T backend python /app/scripts/seed_dev.py
-   python scripts/seed_keycloak_user.py   # creates 'alice' in the mhc realm
+   docker compose -f docker-compose.yml -f docker-compose.prod.yml run --rm backend python manage.py migrate
+   docker compose -f docker-compose.yml -f docker-compose.prod.yml run --rm backend python manage.py migrate --check
    ```
    If this environment previously applied an earlier revision of the unshipped
    `sla.0004_backfill_paused_remaining_business_seconds` migration, migration
    history will not rerun the revised data operation. Manually reconcile its
    affected paused SLA rows before use. Fresh deployments and the current live
    pilot rows use the corrected semantics.
-8. Configure Keycloak:
-   * Sign in to <https://mhc-ticketing.local/admin> with `KEYCLOAK_ADMIN`.
-   * Import `infrastructure/keycloak/realm-mhc.json` if not done automatically.
+8. Configure Keycloak through an operator-only administration path. The public
+   Nginx edge deliberately does not expose the master/admin realm.
+   * Import `infrastructure/keycloak/realm-mhc.json` if a new database did not
+     import it automatically. Existing realms are never overwritten by import.
+   * Verify the frontend root/base URL, redirect URI, and web origin match
+     `https://${DOMAIN}`.
    * Under Realm Settings → Login, enable "User registration" OFF,
      "Remember Me" OFF, "Verify email" ON, "Login with email" ON.
    * Under Authentication → Flows, copy the "browser" flow and require

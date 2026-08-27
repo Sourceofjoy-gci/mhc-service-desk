@@ -229,6 +229,45 @@ beforeEach(() => {
 });
 
 describe("server-driven ticket operations", () => {
+  it("keeps the compact rail dense until an operation is edited", async () => {
+    const compactTicket = {
+      ...TICKET,
+      capabilities: {
+        ...TICKET.capabilities,
+        can_assign: true,
+      },
+    };
+    const user = userEvent.setup();
+    renderWithProviders(
+      <OperationsPanel
+        ticket={compactTicket}
+        onUpdated={vi.fn()}
+        onReload={vi.fn()}
+        compact
+      />,
+    );
+
+    const assignment = screen
+      .getByRole("heading", { name: "Assignment" })
+      .closest("section");
+    expect(assignment).toHaveClass(
+      "gap-2",
+      "pb-3",
+      "[&_[data-slot=field-label]]:sr-only",
+    );
+    expect(
+      screen.queryByRole("button", { name: "Save" }),
+    ).not.toBeInTheDocument();
+
+    await user.clear(screen.getByRole("textbox", { name: "Team" }));
+    await user.type(
+      screen.getByRole("textbox", { name: "Team" }),
+      "Registry review",
+    );
+
+    expect(screen.getByRole("button", { name: "Save" })).toBeEnabled();
+  });
+
   it("renders assignment above non-ownership operations without a legacy candidate request", () => {
     const legacyReassignCapability = {
       ...TICKET,
@@ -705,10 +744,7 @@ describe("server-driven ticket operations", () => {
     const renderTicket = (ticket: TicketDetail, resolve?: () => void) => (
       <StrictMode>
         <QueryClientProvider client={queryClient}>
-          <MemoryRouter
-            initialEntries={["/"]}
-            future={{ v7_startTransition: true, v7_relativeSplatPath: true }}
-          >
+          <MemoryRouter initialEntries={["/"]}>
             <OperationsPanel
               ticket={ticket}
               onUpdated={onUpdated}

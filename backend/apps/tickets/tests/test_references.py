@@ -72,9 +72,12 @@ def test_ticket_reference_is_one_letter_and_five_digits_with_a_global_sequence(
     assert len(ticket.number) == 6
     assert ticket.number[0].isalpha()
     assert ticket.number[1:].isdigit()
-    assert TicketReferenceCounter.objects.get(
-        domain="operational", prefix="O", period="GLOBAL"
-    ).last_value == 42
+    assert (
+        TicketReferenceCounter.objects.get(
+            domain="operational", prefix="O", period="GLOBAL"
+        ).last_value
+        == 42
+    )
 
 
 @pytest.mark.parametrize(
@@ -121,9 +124,12 @@ def test_exhausted_global_sequence_fails_without_changing_the_counter():
     with pytest.raises(OverflowError, match="sequence exhausted"):
         allocate_ticket_reference(domain="operational")
 
-    assert TicketReferenceCounter.objects.get(
-        domain="operational", prefix="O", period="GLOBAL"
-    ).last_value == 99_999
+    assert (
+        TicketReferenceCounter.objects.get(
+            domain="operational", prefix="O", period="GLOBAL"
+        ).last_value
+        == 99_999
+    )
 
 
 @pytest.mark.django_db
@@ -140,9 +146,7 @@ def test_ticket_creation_recovers_from_a_stale_counter_collision(
         "request_type": request_type,
         "office": basic_world["office"],
     }
-    Ticket.objects.create(
-        number="O00001", title="Existing collision", **base
-    )
+    Ticket.objects.create(number="O00001", title="Existing collision", **base)
     TicketReferenceCounter.objects.create(
         domain="operational", prefix="O", period="GLOBAL", last_value=0
     )
@@ -177,9 +181,7 @@ def test_failed_ticket_creation_rolls_back_its_reference(basic_world):
             services.create_ticket(**create)
 
     assert TicketReferenceCounter.objects.count() == 0
-    assert services.create_ticket(
-        **{**create, "title": "Committed"}
-    ).number == "O00001"
+    assert services.create_ticket(**{**create, "title": "Committed"}).number == "O00001"
 
 
 @pytest.mark.django_db(transaction=True)
@@ -195,9 +197,7 @@ def test_concurrent_ticket_creation_allocates_two_distinct_references(basic_worl
     }
 
     with ThreadPoolExecutor(max_workers=2) as pool:
-        numbers = list(
-            pool.map(lambda title: _create_from_ids(ids, title), ("One", "Two"))
-        )
+        numbers = list(pool.map(lambda title: _create_from_ids(ids, title), ("One", "Two")))
 
     assert len(numbers) == len(set(numbers)) == 2
     assert sorted(numbers) == ["O00001", "O00002"]

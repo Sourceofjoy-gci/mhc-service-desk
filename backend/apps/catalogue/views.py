@@ -1,4 +1,5 @@
 """Catalogue API views — services and request types are read-mostly."""
+
 from __future__ import annotations
 
 from rest_framework import viewsets

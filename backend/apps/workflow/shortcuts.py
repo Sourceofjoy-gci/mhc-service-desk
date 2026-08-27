@@ -3,6 +3,7 @@
 Kept separate so the test suite doesn't need Django settings configured for
 ``apps.tickets.seed_workflow``.
 """
+
 from __future__ import annotations
 
 from .models import Status, Transition
